@@ -6,6 +6,7 @@ import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -14,6 +15,7 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.security.GeneralSecurityException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
@@ -35,6 +37,12 @@ import lol.trq.alts.spi.VaultDirectoryProvider;
  * Writes are serialized, and each carries the order its snapshot was taken in, so a late writer cannot
  * put an older state over a newer one. The file a write replaces is kept as a single rolling backup.
  *
+ * <p>Three rules keep a store from being lost or weakened. A file that could not be read is copied aside
+ * under a name of its own before anything replaces it. While the last load failed because the host's key
+ * was unavailable, nothing is written at all, since the file on disk is intact and merely unread. And a
+ * host key, once installed, is never dropped: a file that does not open under it is unreadable, except
+ * on the one launch a host asks for files from before the key to be migrated.
+ *
  * <p>Nothing here throws at a caller. A failed read is reported on {@link #loadError()} and a failed
  * write on {@link #saveError()}, and both are built from the file's name and a fixed phrase — the JDK's
  * own I/O messages are the absolute path, and these strings travel into a host's UI and its log.
@@ -53,8 +61,14 @@ final class StoreFile {
     /** Suffix of the rolling copy of the last good file a write replaced. */
     static final String BACKUP_SUFFIX = ".bak";
 
-    /** Suffix given to a store file that could not be read, so a failed load never costs the data. */
+    /**
+     * Start of the suffix given to a copy of a store file that could not be read, so a failed load never
+     * costs the data. Each copy's name continues with the time it was made.
+     */
     static final String UNREADABLE_SUFFIX = ".unreadable";
+
+    /** How many unreadable copies are kept; the oldest go once there are more. */
+    static final int MAX_UNREADABLE_KEPT = 5;
 
     /** Every store file in the process, for the shutdown flush. */
     private static final List<StoreFile> ALL = new CopyOnWriteArrayList<>();
@@ -69,6 +83,7 @@ final class StoreFile {
     private volatile String keyBinding;
     private volatile VaultDirectoryProvider directoryProvider;
     private volatile StoreKeyProvider keyProvider;
+    private volatile boolean migrateFromMachineKey;
     private volatile long writeDelayMillis;
     private volatile String loadError;
     private volatile String saveError;
@@ -80,6 +95,9 @@ final class StoreFile {
 
     private long written;
     private boolean knownGood;
+    private boolean unreadableOnDisk;
+    private boolean awaitingKey;
+    private boolean resealing;
     private String hostSecret;
     private String sealedUnder;
     private EncryptionUtil.DerivedKey sealingKey;
@@ -97,23 +115,33 @@ final class StoreFile {
     }
 
     /**
-     * Points the file at a host directory and returns the host options to their defaults: writes are
-     * synchronous and the key is machine-derived until {@link #writeDelay} and {@link #keyProvider} say
-     * otherwise. A snapshot still waiting to be written goes to the previous directory first.
+     * Points the file at a host directory and installs the host's key in the same step, so there is no
+     * moment at which the new directory is bound and a write could still be sealed under the machine
+     * key. Writes go back to synchronous until {@link #writeDelay} says otherwise. A snapshot still
+     * waiting to be written goes to the previous directory first.
+     *
+     * <p>A null {@code key} leaves an installed provider in place: the provider is process-wide, and a
+     * second binding that names none must not downgrade the store to the machine-derived key.
      *
      * @param provider the host-supplied vault directory provider
+     * @param key the host key provider, or null to keep the one in place
+     * @param migrate whether a file that opens only under the machine-derived key may be loaded and
+     *     resealed under the host's; applies only while a key provider is installed
      */
-    void bind(VaultDirectoryProvider provider) {
+    void bind(VaultDirectoryProvider provider, StoreKeyProvider key, boolean migrate) {
         Objects.requireNonNull(provider, "VaultDirectoryProvider");
         if (directoryProvider != null) {
             flush();
         }
         synchronized (ioLock) {
             directoryProvider = provider;
-            keyProvider = null;
+            if (key != null && key != keyProvider) {
+                keyProvider = key;
+                forgetKeys();
+            }
+            migrateFromMachineKey = migrate;
             writeDelayMillis = 0L;
             knownGood = false;
-            forgetKeys();
         }
     }
 
@@ -134,14 +162,40 @@ final class StoreFile {
     }
 
     /**
-     * Installs the host's key provider, or removes it.
+     * Installs the host's key provider. A null argument is ignored: an installed provider is never
+     * removed this way, because removing it would send the next write out under the machine-derived key.
      *
-     * @param provider the host key provider, or null for the machine-derived default
+     * @param provider the host key provider, or null to keep the one in place
      */
     void keyProvider(StoreKeyProvider provider) {
+        if (provider == null) {
+            return;
+        }
         synchronized (ioLock) {
             keyProvider = provider;
             forgetKeys();
+        }
+    }
+
+    /**
+     * Returns the file to the state of a process that never installed a key provider and never loaded:
+     * no host key, no migration, no recorded failure, and nothing waiting to be written. For tests only,
+     * which is why it is not reachable from outside this package.
+     */
+    void resetForTests() {
+        synchronized (ioLock) {
+            synchronized (pendingLock) {
+                pending = null;
+            }
+            keyProvider = null;
+            migrateFromMachineKey = false;
+            forgetKeys();
+            knownGood = false;
+            unreadableOnDisk = false;
+            awaitingKey = false;
+            resealing = false;
+            loadError = null;
+            saveError = null;
         }
     }
 
@@ -166,7 +220,8 @@ final class StoreFile {
     /**
      * Returns why the last load could not read an existing file.
      *
-     * @return the failure description, or null when the last load succeeded or found no file
+     * @return the failure description, or null when the last load succeeded or found no file, or when
+     *     the store has been written successfully since
      */
     String loadError() {
         return loadError;
@@ -218,11 +273,24 @@ final class StoreFile {
             if (next == null || next.order() <= written) {
                 return;
             }
+            if (awaitingKey) {
+                // The file on disk is intact; it simply has not been read. Writing what is in memory
+                // now would replace every account in it with whatever was added since.
+                saveError = fileName + ": not written, because the store key was unavailable when the store"
+                        + " was loaded; load it again first";
+                retain(next);
+                return;
+            }
             try {
                 write(next.plaintext().get());
                 written = next.order();
                 knownGood = true;
+                unreadableOnDisk = false;
+                resealing = false;
                 saveError = null;
+                // The file on disk is now the one just written, so an earlier failure to read what it
+                // replaced no longer describes it.
+                loadError = null;
             } catch (WriteFailure failure) {
                 saveError = fileName + ": " + failure.getMessage();
                 retain(next);
@@ -254,6 +322,12 @@ final class StoreFile {
             if (!Files.exists(file)) {
                 loadError = null;
                 knownGood = false;
+                unreadableOnDisk = false;
+                if (awaitingKey) {
+                    // There is no store left to protect, so what was held back can be written.
+                    awaitingKey = false;
+                    flush();
+                }
                 return LoadOutcome.ABSENT;
             }
 
@@ -270,15 +344,20 @@ final class StoreFile {
             try {
                 password = password();
             } catch (WriteFailure keyUnavailable) {
+                awaitingKey = true;
                 return unreadable(name, keyUnavailable.getMessage());
             }
+            boolean heldBack = awaitingKey;
+            awaitingKey = false;
 
             String plaintext;
             boolean migrated = false;
             try {
                 plaintext = EncryptionUtil.decrypt(sealed, password);
             } catch (Exception wrongKeyOrDamaged) {
-                plaintext = keyProvider == null ? null : openUnderMachineKey(sealed);
+                // Only on the host's explicit say-so. Trying the machine key every time would let anyone
+                // who can write the directory plant a file sealed under it, and have it load.
+                plaintext = keyProvider != null && migrateFromMachineKey ? openUnderMachineKey(sealed) : null;
                 if (plaintext == null) {
                     return unreadable(name, "could not be decrypted (wrong key or damaged file)");
                 }
@@ -290,8 +369,17 @@ final class StoreFile {
             } catch (Exception malformed) {
                 return unreadable(name, "contents are not a valid store");
             }
+            if (heldBack) {
+                // What was held back is a snapshot of memory from before this load replaced it.
+                synchronized (pendingLock) {
+                    pending = null;
+                }
+                saveError = null;
+            }
             loadError = null;
             knownGood = true;
+            unreadableOnDisk = false;
+            resealing = migrated;
             return migrated ? LoadOutcome.MIGRATED : LoadOutcome.LOADED;
         }
     }
@@ -319,6 +407,74 @@ final class StoreFile {
     }
 
     /**
+     * Reseals every kept copy of the store that still opens under the machine-derived key — the rolling
+     * backup and any unreadable copy — under the host's key. A host installs a key so that a copied
+     * directory does not open offline, and one such copy left behind would undo that for the whole
+     * store. A copy that cannot be resealed is deleted; one that can be neither fails the write.
+     *
+     * @param directory the store directory
+     * @param name the store file's name
+     * @throws WriteFailure when a machine-keyed copy could be neither resealed nor removed
+     */
+    private void resealMachineKeyedCopies(Path directory, String name) throws WriteFailure {
+        List<Path> copies = new ArrayList<>(unreadableCopies(directory, name));
+        Path backup = directory.resolve(name + BACKUP_SUFFIX);
+        if (Files.exists(backup)) {
+            copies.add(backup);
+        }
+        for (Path copy : copies) {
+            String plaintext;
+            try {
+                plaintext =
+                        openUnderMachineKey(new String(Files.readAllBytes(copy), StandardCharsets.ISO_8859_1).strip());
+            } catch (IOException unread) {
+                plaintext = null;
+            }
+            if (plaintext == null) {
+                continue;
+            }
+            Path staged = copy.resolveSibling(copy.getFileName() + TEMP_SUFFIX);
+            try {
+                writeDurably(
+                        staged, EncryptionUtil.encrypt(plaintext, sealingKey()).getBytes(StandardCharsets.US_ASCII));
+                moveIntoPlace(staged, copy);
+            } catch (IOException | GeneralSecurityException notResealed) {
+                discard(staged);
+                try {
+                    Files.deleteIfExists(copy);
+                } catch (IOException stillThere) {
+                    throw new WriteFailure("a copy sealed under the machine key could not be resealed or removed");
+                }
+            }
+        }
+    }
+
+    /**
+     * Lists the unreadable copies kept beside the store, oldest first.
+     *
+     * @param directory the store directory
+     * @param name the store file's name
+     * @return the copies, sorted by name, which sorts them by the time each was made
+     */
+    private static List<Path> unreadableCopies(Path directory, String name) {
+        String prefix = name + UNREADABLE_SUFFIX;
+        List<Path> copies = new ArrayList<>();
+        try (DirectoryStream<Path> entries = Files.newDirectoryStream(directory)) {
+            for (Path entry : entries) {
+                String entryName = entry.getFileName().toString();
+                if (entryName.startsWith(prefix) && !entryName.endsWith(TEMP_SUFFIX)) {
+                    copies.add(entry);
+                }
+            }
+        } catch (IOException | RuntimeException unlistable) {
+            return List.of();
+        }
+        copies.sort((left, right) ->
+                left.getFileName().toString().compareTo(right.getFileName().toString()));
+        return copies;
+    }
+
+    /**
      * Records a failed load.
      *
      * @param name the file's name
@@ -328,6 +484,7 @@ final class StoreFile {
     private LoadOutcome unreadable(String name, String reason) {
         loadError = name + ": " + reason;
         knownGood = false;
+        unreadableOnDisk = true;
         return LoadOutcome.FAILED;
     }
 
@@ -411,20 +568,31 @@ final class StoreFile {
 
         try {
             writeDurably(temp, sealed);
-            if (knownGood && Files.exists(target)) {
+            if (resealing) {
+                // The file being replaced is sealed under the machine key, so it is not kept as the
+                // backup, and no older copy is left under that key either. Done before the move: a
+                // crash in between leaves the store itself still to migrate, never a migrated store
+                // beside a machine-keyed copy of it.
+                resealMachineKeyedCopies(directory, name);
+            } else if (knownGood && Files.exists(target)) {
                 keepBackup(target, directory.resolve(name + BACKUP_SUFFIX));
             }
             moveIntoPlace(temp, target);
         } catch (IOException failure) {
             discard(temp);
             throw new WriteFailure(reason(failure, "could not be written"));
+        } catch (WriteFailure failure) {
+            discard(temp);
+            throw failure;
         }
         syncDirectory(directory);
     }
 
     /**
-     * Copies an unreadable store aside so a write cannot destroy it. The copy is made once — a second
-     * failure must not overwrite the first, older copy, which is the one holding the data.
+     * Copies an unreadable store aside so a write cannot destroy it. Every such file gets a copy under a
+     * name of its own, so a second incident never costs the copy made for the first; only a file whose
+     * exact bytes are already kept is not copied again. Once more than {@link #MAX_UNREADABLE_KEPT}
+     * copies exist the oldest are removed.
      *
      * @param directory the store directory
      * @param target the store file
@@ -432,17 +600,27 @@ final class StoreFile {
      * @throws WriteFailure when the unreadable file could not be preserved, so the write must not happen
      */
     private void preserveUnreadable(Path directory, Path target, String name) throws WriteFailure {
-        if (loadError == null || !Files.exists(target)) {
+        if (!unreadableOnDisk || !Files.exists(target)) {
             return;
         }
-        Path aside = directory.resolve(name + UNREADABLE_SUFFIX);
-        if (Files.exists(aside)) {
-            return;
-        }
+        List<Path> kept = unreadableCopies(directory, name);
         try {
+            for (Path copy : kept) {
+                if (Files.mismatch(target, copy) < 0) {
+                    return;
+                }
+            }
+            String stem = name + UNREADABLE_SUFFIX + "." + System.currentTimeMillis();
+            Path aside = directory.resolve(stem);
+            for (int attempt = 1; Files.exists(aside); attempt++) {
+                aside = directory.resolve(stem + "-" + attempt);
+            }
             Files.copy(target, aside, StandardCopyOption.COPY_ATTRIBUTES);
-        } catch (IOException failure) {
+        } catch (IOException | RuntimeException failure) {
             throw new WriteFailure("unreadable store could not be preserved, so it was not overwritten");
+        }
+        for (int index = 0; index <= kept.size() - MAX_UNREADABLE_KEPT; index++) {
+            discard(kept.get(index));
         }
     }
 

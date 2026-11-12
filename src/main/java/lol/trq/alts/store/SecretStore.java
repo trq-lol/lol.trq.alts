@@ -50,13 +50,29 @@ public final class SecretStore {
 
     /**
      * Binds the host directory provider. Called once by {@code AltsRuntime.Builder#build()} before any
-     * load or save. As with {@link AltStore#bind}, binding starts from synchronous writes and the
-     * machine-derived key.
+     * load or save. As with {@link AltStore#bind(VaultDirectoryProvider)}, binding returns writes to
+     * synchronous and leaves an installed key provider in place.
      *
      * @param provider the host-supplied vault directory provider
      */
     public static void bind(VaultDirectoryProvider provider) {
-        FILE.bind(provider);
+        FILE.bind(provider, null, false);
+    }
+
+    /**
+     * Binds the host directory provider and installs the host's key provider in one step. See
+     * {@link AltStore#bind(VaultDirectoryProvider, StoreKeyProvider, boolean)}, whose rules apply here
+     * unchanged: a null key provider keeps the one in place, and the migration from the machine-derived
+     * key is an explicit opt-in meant for the upgrade launch only.
+     *
+     * @param provider the host-supplied vault directory provider
+     * @param keyProvider the host key provider, or null to keep the one in place
+     * @param migrateFromMachineKey whether to accept and reseal a file from before the key provider
+     * @since 0.12.0
+     */
+    public static void bind(
+            VaultDirectoryProvider provider, StoreKeyProvider keyProvider, boolean migrateFromMachineKey) {
+        FILE.bind(provider, keyProvider, migrateFromMachineKey);
     }
 
     /**
@@ -72,13 +88,25 @@ public final class SecretStore {
 
     /**
      * Installs a host key provider, so the file is sealed under the host's secret instead of the
-     * machine-derived default. See {@link AltStore#keyProvider(StoreKeyProvider)}.
+     * machine-derived default. See {@link AltStore#keyProvider(StoreKeyProvider)}; as there, a null
+     * argument is ignored and an installed provider is never removed.
      *
-     * @param provider the host key provider, or null for the machine-derived default
+     * @param provider the host key provider, or null to keep the one in place
      * @since 0.12.0
      */
     public static void keyProvider(StoreKeyProvider provider) {
         FILE.keyProvider(provider);
+    }
+
+    /**
+     * Returns the store to the state of a process that never bound a key provider or loaded a file. For
+     * tests, which share this static state; deliberately not reachable from outside the package.
+     */
+    static void resetForTests() {
+        synchronized (LOCK) {
+            FILE.resetForTests();
+            SECRETS.clear();
+        }
     }
 
     /**
@@ -145,10 +173,13 @@ public final class SecretStore {
 
     /**
      * Returns why the last {@link #load()} could not read an existing secret file, if it could not. As
-     * with the account store, an unreadable file is not an empty one: while this is set, {@link #save()}
-     * preserves the file rather than overwriting it. The description carries no filesystem path.
+     * with the account store, an unreadable file is not an empty one: a write copies it aside under a
+     * name of its own before replacing it, and while the store key was unavailable to the load, writes
+     * are refused until a later load succeeds — see {@link AltStore#loadError()}. The description
+     * carries no filesystem path.
      *
-     * @return the failure description, or empty when the last load succeeded or found no file
+     * @return the failure description, or empty when the last load succeeded or found no file, or the
+     *     store has been written successfully since
      * @since 0.7.0
      */
     public static Optional<String> loadError() {

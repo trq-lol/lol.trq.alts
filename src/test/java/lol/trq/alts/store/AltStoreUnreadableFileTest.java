@@ -2,13 +2,16 @@ package lol.trq.alts.store;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -29,17 +32,29 @@ class AltStoreUnreadableFileTest {
 
     @BeforeEach
     void bindStore() {
+        StoreTestHooks.reset();
         AltStore.bind(() -> storeDir);
-        AltStore.accounts().clear();
-        AltStore.useAccount(null);
+    }
+
+    @AfterEach
+    void forgetTheFailure() {
+        StoreTestHooks.reset();
     }
 
     private Path storeFile() {
         return storeDir.resolve(FILE_NAME);
     }
 
-    private Path backupFile() {
-        return storeDir.resolve(FILE_NAME + ".unreadable");
+    private List<byte[]> keptCopies() throws Exception {
+        return StoreTestHooks.unreadableCopies(storeDir, FILE_NAME);
+    }
+
+    private boolean kept(byte[] content) throws Exception {
+        return keptCopies().stream().anyMatch(copy -> java.util.Arrays.equals(copy, content));
+    }
+
+    private static AltAccount alex() {
+        return AltAccount.of(UUID, "Alex", "access", AccountType.MICROSOFT);
     }
 
     @Test
@@ -79,28 +94,61 @@ class AltStoreUnreadableFileTest {
         Files.write(storeFile(), original);
         AltStore.load();
 
-        AltStore.addAccount(AltAccount.of(UUID, "Alex", "access", AccountType.MICROSOFT));
+        AltStore.addAccount(alex());
 
-        assertTrue(Files.exists(backupFile()), "the unreadable file must survive the save that replaced it");
-        assertArrayEquals(original, Files.readAllBytes(backupFile()), "the copy must be the original bytes");
+        assertEquals(1, keptCopies().size(), "the unreadable file must survive the save that replaced it");
+        assertArrayEquals(original, keptCopies().get(0), "the copy must be the original bytes");
         assertTrue(Files.size(storeFile()) > 0, "the store itself is rewritten with the current list");
     }
 
     @Test
-    void aSecondFailureDoesNotOverwriteTheFirstBackup() throws Exception {
-        byte[] original = "the file that held the accounts".getBytes(StandardCharsets.UTF_8);
-        Files.write(storeFile(), original);
+    void noUnreadableFileIsLostWhenItIsReplaced() throws Exception {
+        byte[] first = "the file that held the accounts".getBytes(StandardCharsets.UTF_8);
+        Files.write(storeFile(), first);
         AltStore.load();
-        AltStore.addAccount(AltAccount.of(UUID, "Alex", "access", AccountType.MICROSOFT));
+        AltStore.addAccount(alex());
 
-        // A later run finds the freshly written store unreadable too, and saves again.
-        Files.writeString(storeFile(), "unreadable again");
+        // A later run finds the store unreadable again, with different content, and saves again.
+        byte[] second = "another file that held accounts".getBytes(StandardCharsets.UTF_8);
+        Files.write(storeFile(), second);
         AltStore.load();
         AltStore.save();
 
-        assertArrayEquals(
-                original,
-                Files.readAllBytes(backupFile()),
-                "the oldest backup is the one holding the accounts and must not be replaced");
+        assertTrue(kept(first), "the copy from the first incident must still be there");
+        assertTrue(kept(second), "and the second unreadable file must have been kept too, not skipped");
+    }
+
+    @Test
+    void aFailureIsNoLongerReportedOnceTheStoreHasBeenRewritten() throws Exception {
+        Files.writeString(storeFile(), "not an encrypted store");
+        AltStore.load();
+        assertTrue(AltStore.loadError().isPresent());
+
+        AltStore.addAccount(alex());
+
+        assertTrue(
+                AltStore.loadError().isEmpty(),
+                "the file on disk is now a good one; reporting it unreadable for the rest of the run is wrong");
+
+        AltStore.save();
+        AltStore.save();
+
+        assertEquals(1, keptCopies().size(), "and the good file must not be copied aside as though unreadable");
+    }
+
+    @Test
+    void onlyTheNewestUnreadableCopiesAreKept() throws Exception {
+        int incidents = StoreFile.MAX_UNREADABLE_KEPT + 3;
+        for (int incident = 0; incident < incidents; incident++) {
+            Files.writeString(storeFile(), "unreadable store number " + incident);
+            AltStore.load();
+            AltStore.save();
+        }
+
+        assertEquals(StoreFile.MAX_UNREADABLE_KEPT, keptCopies().size(), "the copies must not pile up without bound");
+        assertTrue(kept(("unreadable store number " + (incidents - 1)).getBytes(StandardCharsets.UTF_8)));
+        assertFalse(
+                kept("unreadable store number 0".getBytes(StandardCharsets.UTF_8)),
+                "it is the oldest copies that make room");
     }
 }

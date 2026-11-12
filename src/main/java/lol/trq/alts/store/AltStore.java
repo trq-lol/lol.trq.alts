@@ -76,15 +76,44 @@ public final class AltStore {
      * Binds the host directory provider. Called once by {@code AltsRuntime.Builder#build()} before any
      * load or save.
      *
-     * <p>Binding starts from the defaults: writes are synchronous and the key is machine-derived until
-     * {@link #writeDelay(Duration)} and {@link #keyProvider(StoreKeyProvider)} are called after it, which
-     * the runtime builder does. Code that binds the store directly — a test, mostly — therefore gets a
-     * file that is on disk the moment a mutator returns.
+     * <p>Binding returns writes to synchronous until {@link #writeDelay(Duration)} is called after it,
+     * which the runtime builder does. Code that binds the store directly — a test, mostly — therefore
+     * gets a file that is on disk the moment a mutator returns. A key provider installed earlier stays
+     * installed: binding never returns the store to the machine-derived key.
      *
      * @param provider the host-supplied vault directory provider
      */
     public static void bind(VaultDirectoryProvider provider) {
-        FILE.bind(provider);
+        FILE.bind(provider, null, false);
+    }
+
+    /**
+     * Binds the host directory provider and installs the host's key provider in one step, so nothing
+     * can be written to the directory under the machine-derived key in between. This is what
+     * {@code AltsRuntime.Builder#build()} calls.
+     *
+     * <p>The key provider is process-wide and is never removed by a later binding: passing null keeps
+     * the one already installed, so a second runtime built without a provider reads and writes the store
+     * under the first one's key rather than rewriting it under the weaker default.
+     *
+     * <p>{@code migrateFromMachineKey} is the explicit, one-time opt-in for a host adopting a key
+     * provider over a store written before it had one. While it is on, a file that does not open under
+     * the host's key is tried under the machine-derived key and, when that works, loaded and rewritten
+     * under the host's key, together with every kept copy of it — the rolling backup included — so no
+     * file is left that opens under the machine key. Pass true for the upgrade launch only. Left on, it
+     * lets anyone who can write the directory, without knowing the host's secret, plant a store sealed
+     * under the guessable machine key and have it load. While it is off, which is the default, a file
+     * that does not open under the host's key is reported on {@link #loadError()} and left as it is.
+     *
+     * @param provider the host-supplied vault directory provider
+     * @param keyProvider the host key provider, or null to keep the one in place (the machine-derived
+     *     default when none was ever installed)
+     * @param migrateFromMachineKey whether to accept and reseal a file from before the key provider
+     * @since 0.12.0
+     */
+    public static void bind(
+            VaultDirectoryProvider provider, StoreKeyProvider keyProvider, boolean migrateFromMachineKey) {
+        FILE.bind(provider, keyProvider, migrateFromMachineKey);
     }
 
     /**
@@ -101,15 +130,33 @@ public final class AltStore {
 
     /**
      * Installs a host key provider, so the file is sealed under the host's secret instead of the
-     * machine-derived default. Call after {@link #bind} and before {@link #load()}; the runtime builder
-     * does both. A file written before the provider was installed still loads, and is rewritten under
-     * the host's key; a file written under a host key does not open without it.
+     * machine-derived default. Call before {@link #load()}; the runtime builder installs it together
+     * with the directory through {@link #bind(VaultDirectoryProvider, StoreKeyProvider, boolean)}. A
+     * file written under a host key does not open without it, and a file written before the provider
+     * was installed does not open under it unless the host opted into the migration on that bind.
      *
-     * @param provider the host key provider, or null for the machine-derived default
+     * <p>A null argument is ignored. An installed provider is replaced only by another provider and is
+     * never removed, because removing it would send the next write out under the machine-derived key.
+     *
+     * @param provider the host key provider, or null to keep the one in place
      * @since 0.12.0
      */
     public static void keyProvider(StoreKeyProvider provider) {
         FILE.keyProvider(provider);
+    }
+
+    /**
+     * Returns the store to the state of a process that never bound a key provider or loaded a file: no
+     * accounts, no current account, no host key, and no recorded failure. For tests, which share this
+     * static state; deliberately not reachable from outside the package.
+     */
+    static void resetForTests() {
+        synchronized (LOCK) {
+            FILE.resetForTests();
+            ACCOUNTS.clear();
+            currentAccount = null;
+            loadWarning = null;
+        }
     }
 
     /**
@@ -164,14 +211,22 @@ public final class AltStore {
      *
      * <p>A store that fails to decrypt is not an empty store, and the two must not be confused: the key
      * is derived from machine properties, so a renamed OS user or a moved home directory turns a
-     * perfectly good file into an unreadable one. While this is set, {@link #save()} preserves the
-     * unreadable file rather than overwriting it, and a host should tell the user their accounts did not
-     * load instead of showing an empty list.
+     * perfectly good file into an unreadable one. While this is set, a host should tell the user their
+     * accounts did not load instead of showing an empty list.
+     *
+     * <p>What a write does next depends on why the load failed. When the store key was unavailable — a
+     * {@link StoreKeyProvider} that threw or returned too little, such as a locked keychain — the file
+     * itself is intact, so every write is refused and reported on {@link #saveError()} until a later
+     * {@link #load()} succeeds; accounts added in between live in memory only and are replaced by that
+     * load. For any other unreadable file, a write goes ahead only after copying the file aside as
+     * {@code <name>.unreadable.<time>}: each incident gets a copy of its own, and the newest five are
+     * kept. That successful write also clears this, since the file on disk is then the one just written.
      *
      * <p>The description is the file's name and a fixed phrase. It never carries a filesystem path, so
      * it is safe to show and to log.
      *
-     * @return the failure description, or empty when the last load succeeded or found no file
+     * @return the failure description, or empty when the last load succeeded or found no file, or the
+     *     store has been written successfully since
      * @since 0.7.0
      */
     public static Optional<String> loadError() {
@@ -198,6 +253,10 @@ public final class AltStore {
      * memory are ahead of it; the write is retried by the next mutation, {@link #save()}, or
      * {@link #flush()}, and a success clears this. Like {@link #loadError()}, the description carries no
      * filesystem path.
+     *
+     * <p>One failure is not retried by writing: while the last {@link #load()} failed because the store
+     * key was unavailable, writes are refused on purpose, and only a {@code load()} that succeeds lifts
+     * that. See {@link #loadError()}.
      *
      * @return the failure description, or empty when the last write succeeded
      * @since 0.12.0
@@ -333,8 +392,9 @@ public final class AltStore {
      * failure is reported on {@link #saveError()} rather than thrown.
      *
      * <p>Does not overwrite a file the last {@link #load()} could not read unless that file was first
-     * copied aside — see {@link #loadError()}. Persisting there would write an empty store over accounts
-     * that are merely unreadable, which is worse than not persisting at all.
+     * copied aside, and does not write at all while the store key was unavailable to that load — see
+     * {@link #loadError()}. Persisting there would write an empty store over accounts that are merely
+     * unreadable, which is worse than not persisting at all.
      */
     public static void save() {
         synchronized (LOCK) {

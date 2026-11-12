@@ -6,16 +6,29 @@ package lol.trq.alts.spi;
  * hardware-backed key, a passphrase the user typed — installs one of these so the files at rest are
  * protected by that secret rather than by values any local process can read.
  *
- * <p>Entirely optional. Without a provider the stores behave exactly as they always have, and files
- * written before one was installed still load: a store that does not open under the host's key is
- * tried once under the machine-derived default and, when that works, rewritten under the host's key.
- * The reverse is deliberately not true — a file sealed under a host key does not open without it, and
- * is reported unreadable and left untouched instead.
+ * <p>Entirely optional. Without a provider the stores behave exactly as they always have. With one, a
+ * file opens under the host's key or not at all: a store that does not open under it is reported
+ * unreadable and left untouched, whatever key did seal it.
+ *
+ * <p>Files written before the provider was installed are the one exception, and only when the host
+ * asks: {@code AltsRuntime.Builder#migrateFromMachineKey(boolean)} lets a store that opens under the
+ * machine-derived default load once and be rewritten under the host's key, along with every kept copy
+ * of it, so that nothing sealed under the old key is left in the directory. Turn it on for the launch
+ * that adopts the provider and off afterwards. It is off by default because the machine-derived key can
+ * be reconstructed by anyone who can read the machine's properties: accepting it indefinitely would let
+ * whoever can write the store directory plant a file, or put back a copy from before the migration, and
+ * have it load as though the host had sealed it.
  *
  * <p>Resolution fails closed. A provider that throws, or returns {@code null} or fewer than
- * {@link #MIN_LENGTH} bytes, leaves the store unreadable and unwritable until it answers; the library
- * never falls back to the machine-derived key for a write, because that would silently store
- * credentials under the weaker key at the moment the host believed otherwise.
+ * {@link #MIN_LENGTH} bytes, leaves the store unreadable and unwritable; the library never falls back to
+ * the machine-derived key for a write, because that would silently store credentials under the weaker
+ * key at the moment the host believed otherwise. A load that fails this way also holds every later
+ * write back, even once the provider answers, until the store has been loaded successfully — the file
+ * on disk is intact, and writing what is in memory would replace it. Call the store's {@code load()}
+ * again when the secret becomes available.
+ *
+ * <p>The provider is process-wide and is never removed once installed. A second runtime built without
+ * one keeps using it.
  *
  * @author trq
  * @since 0.12.0

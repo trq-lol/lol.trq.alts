@@ -70,16 +70,17 @@ public final class AltsRuntime<H> {
         HttpUtil.bind(builder.proxyProvider);
         IoExecutor.bind(builder.executor);
 
-        AltStore.bind(builder.vaultDirectory);
+        // The host key goes in with the directory, in one step: bound separately, a write landing in
+        // between would be sealed under the machine-derived key. A null provider keeps the one an
+        // earlier runtime installed, so this runtime cannot rewrite that store under the weaker key.
+        AltStore.bind(builder.vaultDirectory, builder.storeKeyProvider, builder.migrateFromMachineKey);
         AltStore.configure(builder.storeFileName, builder.storeKeyBinding);
-        SecretStore.bind(builder.vaultDirectory);
+        SecretStore.bind(builder.vaultDirectory, builder.storeKeyProvider, builder.migrateFromMachineKey);
         SecretStore.configure(builder.secretsFileName, builder.secretsKeyBinding);
 
-        // After the bind, which resets both: a host key (when there is one) must be in place before the
-        // load below, and coalesced writes keep a burst of logins from writing the file once each.
-        AltStore.keyProvider(builder.storeKeyProvider);
+        // After the bind, which returns both to synchronous writes: coalescing keeps a burst of logins
+        // from writing the file once each.
         AltStore.writeDelay(AltStore.DEFAULT_WRITE_DELAY);
-        SecretStore.keyProvider(builder.storeKeyProvider);
         SecretStore.writeDelay(AltStore.DEFAULT_WRITE_DELAY);
         AltsToasts.bind(builder.toastSink);
 
@@ -286,6 +287,7 @@ public final class AltsRuntime<H> {
         private String secretsFileName;
         private String secretsKeyBinding;
         private StoreKeyProvider storeKeyProvider;
+        private boolean migrateFromMachineKey;
 
         /** Creates an empty builder; populate it with the host seams, then call {@link #build()}. */
         public Builder() {}
@@ -495,12 +497,15 @@ public final class AltsRuntime<H> {
          * Sets the store key provider (optional; without one both encrypted stores are sealed under a
          * key derived from machine properties, as in every release before this seam existed). A host
          * that can reach a real secret, such as an operating-system keystore entry, supplies it here.
-         * Files written before the provider was installed still load and are rewritten under the
-         * host's key; a file written under a host key does not open without it.
+         * A file written under a host key does not open without it, and a file written before the
+         * provider was installed does not open under it either unless
+         * {@link #migrateFromMachineKey(boolean)} is on for that launch.
          *
          * <p>Note that resolution fails closed once a provider is installed: see {@link StoreKeyProvider}.
+         * The provider is process-wide, and leaving this unset never removes one: a second runtime built
+         * without a provider keeps sealing the stores under the one an earlier runtime installed.
          *
-         * @param value the host store key provider
+         * @param value the host store key provider, or null to leave the current one in place
          * @return this builder
          * @since 0.12.0
          */
@@ -510,10 +515,35 @@ public final class AltsRuntime<H> {
         }
 
         /**
+         * Sets whether stores written before a {@link #storeKeyProvider} was installed are migrated to
+         * it (optional; off by default). While on, a store that does not open under the host's key but
+         * does under the machine-derived default is loaded and rewritten under the host's key, and
+         * every kept copy of it, the rolling backup included, is resealed or removed, so that no file
+         * left in the directory opens under the old key.
+         *
+         * <p>Enable it for the upgrade launch only — the one that first installs the key provider over
+         * existing files — and leave it off from then on. While it is on, the machine-derived key is
+         * still accepted, so anyone able to write the store directory can plant a store sealed under
+         * that guessable key, or restore a copy from before the migration, and have it load. While it
+         * is off, a file that does not open under the host's key is reported on
+         * {@link AltStore#loadError()} and left as it is. Has no effect without a key provider.
+         *
+         * @param value true to accept and reseal stores sealed under the machine-derived key
+         * @return this builder
+         * @since 0.12.0
+         */
+        public Builder<H> migrateFromMachineKey(boolean value) {
+            this.migrateFromMachineKey = value;
+            return this;
+        }
+
+        /**
          * Validates the required seams, constructs the runtime, binds the static helpers, and loads any
          * store already on disk — so {@link AltStore#accounts()} is populated as soon as this returns.
          * A file that exists but cannot be read leaves the list alone and is reported on
-         * {@link AltStore#loadError()}.
+         * {@link AltStore#loadError()}. When that is because the {@link #storeKeyProvider} could not
+         * supply its key, nothing is written to the store until {@link AltStore#load()} (and
+         * {@link SecretStore#load()}) is called again and succeeds.
          *
          * @return the constructed runtime
          * @throws NullPointerException if a required seam is missing

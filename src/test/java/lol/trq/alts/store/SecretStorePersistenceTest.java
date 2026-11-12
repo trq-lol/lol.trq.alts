@@ -40,6 +40,7 @@ class SecretStorePersistenceTest {
     void settle() {
         SecretStore.flush();
         SecretStore.writeDelay(null);
+        StoreTestHooks.reset();
     }
 
     private Path storeFile() {
@@ -109,7 +110,8 @@ class SecretStorePersistenceTest {
         assertFalse(error.contains(storeDir.toString()), "the failure must not carry a filesystem path: " + error);
 
         SecretStore.put("feature.api-key", "value");
-        assertArrayEquals(original, Files.readAllBytes(storeDir.resolve(FILE_NAME + ".unreadable")));
+        assertArrayEquals(
+                original, StoreTestHooks.unreadableCopies(storeDir, FILE_NAME).get(0));
     }
 
     @Test
