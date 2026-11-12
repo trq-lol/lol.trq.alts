@@ -3,15 +3,20 @@ package lol.trq.alts.skin;
 import java.io.ByteArrayInputStream;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Semaphore;
+import lol.trq.alts.net.IoExecutor;
 import lol.trq.alts.spi.AvatarSource;
 import lol.trq.alts.spi.MainThreadExecutor;
 import lol.trq.alts.spi.TextureUploader;
 
 /**
  * In-memory cache of player face avatars, keyed by UUID. The bytes come from a host-supplied
- * {@link AvatarSource} (default {@link MojangAvatarSource}); downloads happen on a background thread, and
+ * {@link AvatarSource} (default {@link MojangAvatarSource}); downloads happen on
+ * {@link IoExecutor#executor()}, a few at a time, and
  * GPU uploads are marshalled onto the host's main/render thread via {@link MainThreadExecutor} and
  * produced by the host's {@link TextureUploader}.
  *
@@ -46,7 +51,12 @@ public final class SkinAvatarCache<H> {
     /** Longest a failed avatar waits before it is tried again. */
     private static final long RETRY_MAX_MILLIS = 5 * 60_000L;
 
+    /** How many avatar downloads may be in flight at once; the rest wait their turn. */
+    static final int MAX_CONCURRENT_FETCHES = 6;
+
     private final Map<String, Object> cache = new ConcurrentHashMap<>();
+    private final Semaphore slots = new Semaphore(MAX_CONCURRENT_FETCHES);
+    private final Queue<Runnable> waiting = new ConcurrentLinkedQueue<>();
     private final AvatarSource source;
     private final TextureUploader<H> uploader;
     private final MainThreadExecutor mainThread;
@@ -137,19 +147,68 @@ public final class SkinAvatarCache<H> {
     }
 
     /**
-     * Fetches an avatar off-thread and hands it to the main thread for upload.
+     * Queues an avatar fetch and starts it as soon as a slot is free.
      *
-     * <p>Every way this can go wrong ends with the entry marked failed. A pending marker that nothing
-     * resolves is never retried, so the head would stay missing for the life of the process — and the
-     * failures that used to slip through were exactly the ones not shaped like an {@link Exception}: an
-     * {@link Error} out of an image decode, a pool or a main-thread executor refusing the task.
+     * <p>At most {@link #MAX_CONCURRENT_FETCHES} downloads are in flight at once. A screen listing
+     * hundreds of accounts asks for every head in one frame, and unbounded that is hundreds of
+     * simultaneous connections competing with a login for sockets and for the host's executor. The
+     * waiting fetches sit in a queue rather than on blocked threads, so the bound costs a host-supplied
+     * executor nothing.
      *
      * @param key the cache key being fetched
      * @param pending the marker this fetch owns
      */
     private void fetchAsync(String key, Pending pending) {
+        waiting.add(() -> startFetch(key, pending));
+        drain();
+    }
+
+    /** Starts queued fetches until the slots or the queue run out. */
+    private void drain() {
+        while (slots.tryAcquire()) {
+            Runnable next = waiting.poll();
+            if (next == null) {
+                slots.release();
+                // A fetch queued between the poll and the release would otherwise wait for a slot nobody
+                // is going to hand it.
+                if (waiting.isEmpty()) {
+                    return;
+                }
+                continue;
+            }
+            next.run();
+        }
+    }
+
+    /**
+     * Fetches an avatar off-thread and hands it to the main thread for upload. Called holding a slot,
+     * which is given back when the download ends, however it ends.
+     *
+     * <p>Every way this can go wrong ends with the entry marked failed. A pending marker that nothing
+     * resolves is never retried, so the head would stay missing for the life of the process — and the
+     * failures that used to slip through were exactly the ones not shaped like an {@link Exception}: an
+     * {@link Error} out of an image decode, an executor or a main-thread executor refusing the task.
+     *
+     * @param key the cache key being fetched
+     * @param pending the marker this fetch owns
+     */
+    private void startFetch(String key, Pending pending) {
+        // Invalidated while it sat in the queue: nobody is waiting for this one any more.
+        if (cache.get(key) != pending) {
+            slots.release();
+            return;
+        }
+        CompletableFuture<byte[]> download;
         try {
-            CompletableFuture.supplyAsync(() -> downloadBytes(key)).whenComplete((bytes, failure) -> {
+            download = CompletableFuture.supplyAsync(() -> downloadBytes(key), IoExecutor.executor());
+        } catch (Throwable refused) {
+            slots.release();
+            markFailed(key, pending);
+            return;
+        }
+        download.whenComplete((bytes, failure) -> {
+            slots.release();
+            try {
                 if (failure != null || bytes == null) {
                     markFailed(key, pending);
                     return;
@@ -159,10 +218,10 @@ public final class SkinAvatarCache<H> {
                 } catch (Throwable refused) {
                     markFailed(key, pending);
                 }
-            });
-        } catch (Throwable refused) {
-            markFailed(key, pending);
-        }
+            } finally {
+                drain();
+            }
+        });
     }
 
     private byte[] downloadBytes(String key) {

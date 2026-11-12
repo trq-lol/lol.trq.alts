@@ -1,11 +1,13 @@
 package lol.trq.alts.skin;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import lol.trq.alts.spi.AvatarSource;
@@ -248,5 +250,61 @@ class SkinAvatarCacheTest {
 
         now.addAndGet(10_000);
         assertEquals("handle", await(cache, "uuid-1"));
+    }
+
+    /**
+     * A screen of hundreds of heads asks for all of them in one frame. Unbounded, that is hundreds of
+     * connections at once, competing with a login for sockets; the rest must wait their turn and still
+     * all arrive.
+     */
+    @Test
+    void onlyAFewDownloadsAreInFlightAtOnce() throws Exception {
+        AtomicInteger inFlight = new AtomicInteger();
+        AtomicInteger peak = new AtomicInteger();
+        AvatarSource source = (uuid, size) -> {
+            peak.accumulateAndGet(inFlight.incrementAndGet(), Math::max);
+            try {
+                Thread.sleep(10);
+            } finally {
+                inFlight.decrementAndGet();
+            }
+            return PNG;
+        };
+        SkinAvatarCache<String> cache = new SkinAvatarCache<>(source, bytes -> "handle", Runnable::run);
+
+        for (int i = 0; i < 40; i++) {
+            cache.get("uuid-" + i);
+        }
+        for (int i = 0; i < 40; i++) {
+            assertEquals("handle", await(cache, "uuid-" + i), "a queued avatar must still arrive");
+        }
+
+        assertTrue(peak.get() <= SkinAvatarCache.MAX_CONCURRENT_FETCHES, "downloads in flight at once: " + peak.get());
+        assertTrue(peak.get() > 1, "the bound must not serialise the downloads");
+    }
+
+    @Test
+    void anAvatarInvalidatedWhileQueuedIsNeverFetched() throws Exception {
+        CountDownLatch release = new CountDownLatch(1);
+        ConcurrentLinkedQueue<String> fetched = new ConcurrentLinkedQueue<>();
+        AvatarSource source = (uuid, size) -> {
+            fetched.add(uuid);
+            release.await();
+            return PNG;
+        };
+        SkinAvatarCache<String> cache = new SkinAvatarCache<>(source, bytes -> "handle", Runnable::run);
+
+        for (int i = 0; i < SkinAvatarCache.MAX_CONCURRENT_FETCHES; i++) {
+            cache.get("busy-" + i);
+        }
+        cache.get("queued");
+        cache.invalidate("queued");
+        release.countDown();
+        for (int i = 0; i < SkinAvatarCache.MAX_CONCURRENT_FETCHES; i++) {
+            await(cache, "busy-" + i);
+        }
+        Thread.sleep(30);
+
+        assertFalse(fetched.contains("queued"), "an abandoned fetch must not spend a request");
     }
 }
