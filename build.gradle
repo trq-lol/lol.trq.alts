@@ -11,9 +11,11 @@ base { archivesName = 'lol.trq.alts' }
 repositories { mavenCentral() }
 
 dependencies {
-    // Gson is provided by the host (vanilla Minecraft ships it) when consumed via srcDir, so it is
-    // compileOnly here to keep the standalone jar dependency-light and avoid double-bundling.
-    compileOnly 'com.google.code.gson:gson:2.14.0'
+    // Gson appears in public signatures (JsonObject on HttpUtil, @SerializedName on the public records),
+    // so a consumer needs it to compile against this library: compileOnlyApi puts it on their compile
+    // classpath and declares it in the published metadata. It stays off the runtime classpath, because
+    // the host provides it (vanilla Minecraft ships it) and bundling a second copy would clash.
+    compileOnlyApi 'com.google.code.gson:gson:2.14.0'
 
     testImplementation 'com.google.code.gson:gson:2.14.0'
     testImplementation platform('org.junit:junit-bom:6.1.2')
