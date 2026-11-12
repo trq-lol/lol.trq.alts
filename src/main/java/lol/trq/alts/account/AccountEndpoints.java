@@ -74,6 +74,14 @@ public record AccountEndpoints(String base) {
         return base + "/privacy/blocklist";
     }
 
+    String lookupByName(String name) {
+        return base + "/minecraft/profile/lookup/name/" + segment(name);
+    }
+
+    String lookupByUuid(String undashedUuid) {
+        return base + "/minecraft/profile/lookup/" + segment(undashedUuid);
+    }
+
     /**
      * Encodes a caller-supplied value as one path segment. Concatenated raw, a name carrying a slash, a
      * question mark, or a fragment marker would address a different endpoint than the one the caller

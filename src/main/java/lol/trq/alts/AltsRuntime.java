@@ -6,6 +6,7 @@ import java.util.Objects;
 import java.util.concurrent.Executor;
 import lol.trq.alts.account.AccountEndpoints;
 import lol.trq.alts.account.AccountServices;
+import lol.trq.alts.account.ProfileLookupService;
 import lol.trq.alts.auth.AltAccountService;
 import lol.trq.alts.auth.AltLoginService;
 import lol.trq.alts.auth.AltLoginServiceImpl;
@@ -52,6 +53,7 @@ public final class AltsRuntime<H> {
     private final AltLoginServiceImpl loginService;
     private final BulkOperations bulk;
     private final AccountEndpoints accountEndpoints;
+    private final ProfileLookupService profileLookup;
     private final SkinAvatarCache<H> skinCache;
     private final Map<String, AsyncCache<String, GameStats>> gameStatsCaches;
     private final AsyncCache<String, GameStats> emptyStatsCache;
@@ -90,15 +92,16 @@ public final class AltsRuntime<H> {
         this.vaultResolver = builder.vaultTransportResolver;
         this.loginService = new AltLoginServiceImpl(builder.sessionInjector, builder.microsoftAuth);
 
-        // The import runs resolve and store through a login service whose injector does nothing, which
-        // is what keeps importing fifty credentials from switching session fifty times.
-        this.bulk = new BulkOperationsImpl(
-                new AltLoginServiceImpl(session -> {}, builder.microsoftAuth), loginService.accountService());
-
         // The account services talk to the same host the auth chain validates against, so a host that
         // fronts Minecraft services with a proxy — overriding the profile URL — reaches them through the
         // same origin rather than needing a second override.
         this.accountEndpoints = accountEndpointsFrom(builder.microsoftAuth);
+        this.profileLookup = ProfileLookupService.create(accountEndpoints);
+
+        // The import runs resolve and store through a login service whose injector does nothing, which
+        // is what keeps importing fifty credentials from switching session fifty times.
+        this.bulk = new BulkOperationsImpl(
+                new AltLoginServiceImpl(session -> {}, builder.microsoftAuth), loginService.accountService());
         this.skinCache = new SkinAvatarCache<>(builder.avatarSource, builder.textureUploader, builder.mainThread);
 
         // Game stats are optional and per-server: one cache per registered source. A request for a
@@ -186,6 +189,17 @@ public final class AltsRuntime<H> {
      */
     public AccountServices accountServices(String accessToken, String accountUuid) {
         return AccountServices.of(accessToken, accountUuid, accountEndpoints);
+    }
+
+    /**
+     * Returns the public profile lookup — a player's name and UUID, by either — which needs no account
+     * and sends no token.
+     *
+     * @return the profile lookup service
+     * @since 0.12.0
+     */
+    public ProfileLookupService profileLookup() {
+        return profileLookup;
     }
 
     /**
