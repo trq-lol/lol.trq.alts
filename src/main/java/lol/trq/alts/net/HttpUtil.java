@@ -40,14 +40,32 @@ public final class HttpUtil {
     private HttpUtil() {}
 
     /**
-     * Binds the host's proxy provider, or clears it with {@code null}. Called once by
-     * {@code AltsRuntime.Builder#build()}; without one every request is direct.
+     * Binds the host's proxy provider. Called by {@code AltsRuntime.Builder#build()}; until one is bound
+     * every request is direct.
      *
-     * @param provider the host-supplied proxy provider, or null for direct connections
+     * <p>A {@code null} never removes a provider that is already installed. The provider is static, so a
+     * second runtime built without one would otherwise turn every request direct behind the back of the
+     * host that installed the first — the same silent disclosure that failing closed exists to prevent.
+     * A later non-null provider replaces the earlier one.
+     *
+     * @param provider the host-supplied proxy provider, or null to leave the current one in place
      * @since 0.8.0
      */
     public static void bind(ProxyProvider provider) {
-        proxyProvider = provider;
+        if (provider != null) {
+            proxyProvider = provider;
+        }
+    }
+
+    /**
+     * Removes the installed proxy provider, returning every request to direct. The one deliberate way
+     * to do that: {@link #bind(ProxyProvider)} ignores {@code null}. For tests, which share this static
+     * across classes and must not leave a provider pointing at a closed socket.
+     *
+     * @since 0.12.0
+     */
+    public static void resetForTests() {
+        proxyProvider = null;
     }
 
     /**

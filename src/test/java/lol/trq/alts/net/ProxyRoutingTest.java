@@ -56,7 +56,7 @@ class ProxyRoutingTest {
     @AfterEach
     void tearDown() throws IOException {
         // Static, so leaving it installed would route every later test through a closed socket.
-        HttpUtil.bind(null);
+        HttpUtil.resetForTests();
         if (origin != null) {
             origin.stop(0);
         }
@@ -147,6 +147,33 @@ class ProxyRoutingTest {
 
     @Test
     void withoutAProviderEverythingIsDirect() throws Exception {
+        HttpUtil.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE));
+
+        assertEquals(1, originHits.get());
+        assertEquals(0, proxy.requestLines().size());
+    }
+
+    /**
+     * The provider is static, so a second runtime built without one reaches {@code bind(null)}. Were that
+     * to clear the first runtime's provider, every later request would leave from the machine's own
+     * address with nothing having failed.
+     */
+    @Test
+    void bindingNothingDoesNotRemoveAnInstalledProvider() throws Exception {
+        HttpUtil.bind(scope -> throughProxy());
+
+        HttpUtil.bind(null);
+        HttpUtil.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE));
+
+        assertEquals(1, proxy.requestLines().size(), "the request must still leave through the proxy");
+        assertEquals(0, originHits.get(), "and must not have gone direct");
+    }
+
+    @Test
+    void aLaterProviderReplacesAnEarlierOne() throws Exception {
+        HttpUtil.bind(scope -> throughProxy());
+
+        HttpUtil.bind(scope -> ProxyRoute.direct());
         HttpUtil.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE));
 
         assertEquals(1, originHits.get());
