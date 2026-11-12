@@ -37,7 +37,7 @@ public record NameEligibility(
      *
      * @param nameChangeAllowed whether a name change is permitted now
      * @param createdAt when the account was created, or {@code null}
-     * @since 1.0.0
+     * @since 0.12.0
      */
     public NameEligibility(boolean nameChangeAllowed, Instant createdAt) {
         this(nameChangeAllowed, createdAt, null);

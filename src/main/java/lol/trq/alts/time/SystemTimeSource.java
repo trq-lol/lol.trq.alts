@@ -11,6 +11,9 @@ import java.time.Instant;
  */
 public final class SystemTimeSource implements TimeSource {
 
+    /** Creates a source reading the OS clock. */
+    public SystemTimeSource() {}
+
     @Override
     public Instant now() {
         return Instant.now();

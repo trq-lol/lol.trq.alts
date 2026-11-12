@@ -413,8 +413,10 @@ public final class AltsRuntime<H> {
          * implementation.
          *
          * <p>Note that resolution fails closed once a provider is installed: see {@link ProxyProvider}.
+         * The provider is process-wide, and leaving this unset never removes one: a second runtime built
+         * without a provider keeps routing through the one an earlier runtime installed.
          *
-         * @param value the host proxy provider
+         * @param value the host proxy provider, or null to leave the current one in place
          * @return this builder
          * @since 0.8.0
          */
@@ -429,7 +431,8 @@ public final class AltsRuntime<H> {
          * to bound concurrency or to propagate the host's own context. It is reachable afterwards as
          * {@link IoExecutor#executor()}.
          *
-         * @param value the host executor, or null to keep the default
+         * @param value the host executor, or null to keep the one in place: the default, or the one an
+         *     earlier runtime installed
          * @return this builder
          * @since 0.12.0
          */

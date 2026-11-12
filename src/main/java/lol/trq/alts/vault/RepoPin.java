@@ -22,7 +22,11 @@ public record RepoPin(
         @SerializedName("minimumKeyEpoch") long minimumKeyEpoch,
         @SerializedName("minimumPayloadVersion") long minimumPayloadVersion) {
 
-    /** Validates that neither floor is negative. */
+    /**
+     * Validates that neither floor is negative.
+     *
+     * @since 0.12.0
+     */
     public RepoPin {
         if (minimumKeyEpoch < 0) {
             throw new IllegalArgumentException("minimumKeyEpoch is negative");
@@ -36,6 +40,7 @@ public record RepoPin(
      * Returns the pin for a repository the host has never opened: it accepts any epoch and version.
      *
      * @return a pin with no floor
+     * @since 0.12.0
      */
     public static RepoPin none() {
         return new RepoPin(0L, 0L);
@@ -46,6 +51,7 @@ public record RepoPin(
      *
      * @param other the pin to merge with
      * @return a pin holding the higher epoch and the higher version of the two
+     * @since 0.12.0
      */
     public RepoPin advancedTo(RepoPin other) {
         return new RepoPin(

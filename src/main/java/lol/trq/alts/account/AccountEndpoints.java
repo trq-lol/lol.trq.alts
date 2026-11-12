@@ -25,7 +25,11 @@ public record AccountEndpoints(String base) {
         }
     }
 
-    /** Returns the endpoints for the public Minecraft services. */
+    /**
+     * Returns the endpoints for the public Minecraft services.
+     *
+     * @return the default endpoints
+     */
     public static AccountEndpoints defaults() {
         return new AccountEndpoints(DEFAULT_BASE);
     }

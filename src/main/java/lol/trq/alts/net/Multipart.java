@@ -7,8 +7,8 @@ import java.nio.charset.StandardCharsets;
  * Builds a {@code multipart/form-data} body — the one request shape the skin upload needs and the
  * form/JSON helpers do not cover.
  *
- * <p>Deliberately tiny: the two field kinds the upload uses (a text field and one file part), a fixed
- * boundary chosen at construction, and the content type to pair with it. Not a general multipart
+ * <p>Deliberately tiny: the two field kinds the upload uses (a text field and one file part), a
+ * boundary given at construction, and the content type to pair with it. Not a general multipart
  * library, and not trying to be.
  *
  * @author trq
@@ -20,11 +20,12 @@ public final class Multipart {
     private final ByteArrayOutputStream body = new ByteArrayOutputStream();
 
     /**
-     * Creates a builder with a fixed boundary. The boundary must not occur in any part's bytes; for the
-     * skin upload — a text token and a PNG — a long constant is safe, so a caller passes one rather than
-     * the library reaching for randomness it cannot get deterministically.
+     * Creates a builder over the given boundary. The boundary must not occur in any part's bytes, and
+     * nothing here checks that it does not, so pass a fresh random one per body — a long run of random
+     * characters — rather than a constant. A constant can be placed inside a part by whoever chose that
+     * part's bytes, which ends the part early and lets the rest of it be read as fields of its own.
      *
-     * @param boundary the multipart boundary
+     * @param boundary the multipart boundary, unique to this body
      * @since 1.0.0
      */
     public Multipart(String boundary) {

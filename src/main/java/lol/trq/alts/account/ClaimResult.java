@@ -62,7 +62,7 @@ public record ClaimResult(boolean claimed, int attempts, NameChangeResult finalR
      * @param claimed whether the name was taken
      * @param attempts how many change attempts were made
      * @param finalResult the deciding or last change result
-     * @since 1.0.0
+     * @since 0.12.0
      */
     public ClaimResult(boolean claimed, int attempts, NameChangeResult finalResult) {
         this(claimed, attempts, finalResult, null);

@@ -58,6 +58,13 @@ public final class MojangAvatarSource implements AvatarSource {
     private static final String TEXTURE_HOST = "textures.minecraft.net";
 
     /**
+     * Creates the source. It holds no state; one instance serves every lookup.
+     *
+     * @since 0.10.0
+     */
+    public MojangAvatarSource() {}
+
+    /**
      * The largest canvas accepted, per side. A skin is 64x64 (64x32 for the legacy layout); this leaves
      * room for a double-resolution one and nothing more.
      */

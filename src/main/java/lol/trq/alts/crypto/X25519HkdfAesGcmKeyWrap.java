@@ -32,6 +32,9 @@ public final class X25519HkdfAesGcmKeyWrap implements KeyWrapScheme {
 
     private static final int KEK_BYTES = 32;
 
+    /** Creates the scheme. It holds no state; one instance serves every wrap and unwrap. */
+    public X25519HkdfAesGcmKeyWrap() {}
+
     @Override
     public String schemeId() {
         return SCHEME_ID;
