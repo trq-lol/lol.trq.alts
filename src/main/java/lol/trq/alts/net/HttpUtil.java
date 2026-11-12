@@ -13,6 +13,9 @@ import java.net.URI;
 import java.net.URLConnection;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -436,8 +439,27 @@ public final class HttpUtil {
      */
     public static HttpResponse postJsonForStatus(String urlString, Map<String, String> headers, String jsonBody)
             throws Exception {
+        return postJsonForStatus(urlString, headers, jsonBody, null);
+    }
+
+    /**
+     * Sends a POST request with a JSON body over the route the scope resolves to, returning the status
+     * alongside the parsed body. The status-carrying counterpart of
+     * {@link #postJson(String, Map, String, NetworkScope)}, for a caller that must tell a rate limit or a
+     * stated refusal from an outage rather than receive {@code null} for all three.
+     *
+     * @param urlString the target URL
+     * @param headers optional HTTP headers to include in the request
+     * @param jsonBody the JSON payload as a string
+     * @param scope what is being fetched, and on whose behalf
+     * @return the status and parsed body; the body is null when absent or not JSON
+     * @throws Exception if a network or protocol error occurs
+     * @since 0.12.0
+     */
+    public static HttpResponse postJsonForStatus(
+            String urlString, Map<String, String> headers, String jsonBody, NetworkScope scope) throws Exception {
         return executeForStatus(
-                urlString, "POST", "application/json", headers, jsonBody.getBytes(StandardCharsets.UTF_8), null);
+                urlString, "POST", "application/json", headers, jsonBody.getBytes(StandardCharsets.UTF_8), scope);
     }
 
     /**
@@ -516,7 +538,19 @@ public final class HttpUtil {
      * @author trq
      * @since 0.8.0
      */
-    public record HeaderResponse(int status, String value) {}
+    public record HeaderResponse(int status, String value) {
+
+        /**
+         * Returns whether the service is asking the caller to slow down, so a throttled step in a chain
+         * is not mistaken for a step that simply carried no header.
+         *
+         * @return true if the status is 429
+         * @since 0.12.0
+         */
+        public boolean rateLimited() {
+            return status == 429;
+        }
+    }
 
     /**
      * Sends a GET request and reads one response header, discarding the body. For following a redirect
@@ -562,18 +596,72 @@ public final class HttpUtil {
      */
     public static byte[] getBytes(String urlString, Map<String, String> headers, long maxBytes, NetworkScope scope)
             throws Exception {
+        return getBytesForStatus(urlString, headers, maxBytes, scope).body();
+    }
+
+    /**
+     * A raw response carrying its status alongside the body, for a caller that must tell a missing
+     * resource from a throttled one.
+     *
+     * @param status the HTTP status code
+     * @param body the body bytes, or {@code null} on a non-2xx status or a body past the cap
+     * @param retryAfter how long the service asked the caller to wait, or {@code null} when it did not
+     * @author trq
+     * @since 0.12.0
+     */
+    public record BytesResponse(int status, byte[] body, Duration retryAfter) {
+
+        /**
+         * Returns whether the status is in the 2xx success range.
+         *
+         * @return true if the request succeeded
+         * @since 0.12.0
+         */
+        public boolean successful() {
+            return status >= 200 && status < 300;
+        }
+
+        /**
+         * Returns whether the service is asking the caller to slow down. True for any 429, whether or
+         * not it came with a {@code Retry-After}.
+         *
+         * @return true if the status is 429
+         * @since 0.12.0
+         */
+        public boolean rateLimited() {
+            return status == 429;
+        }
+    }
+
+    /**
+     * Sends a GET request and returns the raw response body alongside the status. The same request as
+     * {@link #getBytes(String, Map, long, NetworkScope)}, which collapses every failure to {@code null}
+     * and so cannot tell a throttled fetch, which should be retried later, from a missing resource,
+     * which should not.
+     *
+     * @param urlString the target URL
+     * @param headers optional HTTP headers to include in the request
+     * @param maxBytes the largest body to accept
+     * @param scope what is being fetched, and on whose behalf
+     * @return the status, and the body when the status is 2xx and the body fits the cap
+     * @throws Exception if a network or protocol error occurs
+     * @since 0.12.0
+     */
+    public static BytesResponse getBytesForStatus(
+            String urlString, Map<String, String> headers, long maxBytes, NetworkScope scope) throws Exception {
         HttpURLConnection conn = open(urlString, scope);
         conn.setRequestMethod("GET");
         conn.setInstanceFollowRedirects(!carriesCredential(headers));
         applyHeaders(conn, null, headers);
 
         int status = conn.getResponseCode();
+        Duration retryAfter = retryAfter(conn);
         if (status < 200 || status >= 300) {
             discardBody(conn, status);
-            return null;
+            return new BytesResponse(status, null, retryAfter);
         }
         try (InputStream in = conn.getInputStream()) {
-            return readCapped(in, maxBytes);
+            return new BytesResponse(status, readCapped(in, maxBytes), retryAfter);
         }
     }
 
@@ -769,22 +857,63 @@ public final class HttpUtil {
     }
 
     /**
-     * Reads a {@code Retry-After} delay. Only the delta-seconds form is read; the HTTP-date form is legal
-     * but is not what these services send, and guessing at a clock skew to interpret one would be worse
-     * than reporting that no delay was given.
+     * Reads a response's {@code Retry-After} delay.
      *
      * @param conn the connection to read from
      * @return the delay the service asked for, or null when it asked for none
      */
     private static Duration retryAfter(HttpURLConnection conn) {
-        String header = conn.getHeaderField("Retry-After");
-        if (header == null || header.isBlank()) {
+        return parseRetryAfter(conn.getHeaderField("Retry-After"), conn.getHeaderField("Date"), Instant.now());
+    }
+
+    /**
+     * Interprets a {@code Retry-After} value in either form the header allows: a number of seconds, or
+     * an HTTP-date naming the moment to come back.
+     *
+     * <p>A date is measured against the response's own {@code Date} header when there is one, because
+     * both were written by the same clock; the local clock is only the fallback. Measured against a
+     * local clock that runs a minute fast, "retry in thirty seconds" would read as "retry now". A date
+     * already in the past is a delay of zero rather than no delay at all — the service still said to
+     * wait, and that it is a rate limit is the part worth keeping.
+     *
+     * @param retryAfter the {@code Retry-After} header value, or null
+     * @param date the response's {@code Date} header value, or null
+     * @param now the local time, used when the response carries no usable {@code Date}
+     * @return the delay asked for, or null when the header is absent or unreadable
+     */
+    static Duration parseRetryAfter(String retryAfter, String date, Instant now) {
+        if (retryAfter == null || retryAfter.isBlank()) {
+            return null;
+        }
+        String value = retryAfter.trim();
+        try {
+            long seconds = Long.parseLong(value);
+            return seconds >= 0 ? Duration.ofSeconds(seconds) : null;
+        } catch (NumberFormatException notSeconds) {
+            // Fall through: the other legal form is a date.
+        }
+        Instant at = parseHttpDate(value);
+        if (at == null) {
+            return null;
+        }
+        Instant reference = parseHttpDate(date);
+        Duration delay = Duration.between(reference != null ? reference : now, at);
+        return delay.isNegative() ? Duration.ZERO : delay;
+    }
+
+    /**
+     * Parses an HTTP-date in its preferred (RFC 1123) form.
+     *
+     * @param value the header value, or null
+     * @return the instant, or null when the value is absent or not a date
+     */
+    private static Instant parseHttpDate(String value) {
+        if (value == null || value.isBlank()) {
             return null;
         }
         try {
-            long seconds = Long.parseLong(header.trim());
-            return seconds >= 0 ? Duration.ofSeconds(seconds) : null;
-        } catch (NumberFormatException notSeconds) {
+            return Instant.from(DateTimeFormatter.RFC_1123_DATE_TIME.parse(value.trim()));
+        } catch (DateTimeParseException notADate) {
             return null;
         }
     }
