@@ -29,6 +29,11 @@ import javax.net.ssl.SSLSocketFactory;
  * TLS is then layered by the JVM's own socket factory with HTTPS endpoint identification switched on, so
  * trust and hostname verification are exactly what a direct connection gets.
  *
+ * <p>The {@code CONNECT} names the origin host as the URL wrote it, so the proxy resolves it. The JDK
+ * does still look the name up locally before handing the address over; that lookup's answer is unused
+ * and a failed one changes nothing, but a host that must keep even DNS off the local resolver cannot
+ * get that from this path.
+ *
  * <p>Every path that could reach the origin without the proxy throws. One instance serves one route
  * identity — proxy host, port, and credential — and the JDK keys its keep-alive pool on the factory
  * instance, which is what stops two identities on one gateway from sharing a tunnel.
