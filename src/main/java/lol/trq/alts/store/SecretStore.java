@@ -231,5 +231,12 @@ public final class SecretStore {
      *
      * @param secrets the host key/value secrets, or null
      */
-    private record SecretData(@SerializedName("secrets") Map<String, String> secrets) {}
+    private record SecretData(@SerializedName("secrets") Map<String, String> secrets) {
+
+        // Every value is a secret the host asked to have kept; only the count is safe to print.
+        @Override
+        public String toString() {
+            return "SecretData[" + (secrets == null ? 0 : secrets.size()) + " secrets]";
+        }
+    }
 }

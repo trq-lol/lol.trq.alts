@@ -149,4 +149,22 @@ class HttpUtilStatusTest {
 
         assertThrows(IOException.class, () -> HttpUtil.postJsonForElement(url, null, "[]", null));
     }
+
+    /**
+     * A token endpoint answers with the tokens, and a sign-in redirect carries them in its address. A
+     * host that logs the response it got must not have written a credential by doing so.
+     */
+    @Test
+    void aResponsePrintsItsStatusButNeverItsBodyOrHeaderValue() throws Exception {
+        String url = startServer(200, "{\"access_token\":\"SECRET-TOKEN\"}");
+
+        String object = HttpUtil.postJsonForStatus(url, null, "{}", null).toString();
+        String element = HttpUtil.postJsonForElement(url, null, "{}", null).toString();
+        String header = new HttpUtil.HeaderResponse(302, "https://login.example/#accessToken=SECRET-TOKEN").toString();
+
+        assertFalse(object.contains("SECRET-TOKEN"), object);
+        assertFalse(element.contains("SECRET-TOKEN"), element);
+        assertFalse(header.contains("SECRET-TOKEN"), header);
+        assertTrue(object.contains("200") && element.contains("200") && header.contains("302"));
+    }
 }

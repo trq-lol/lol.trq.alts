@@ -314,7 +314,14 @@ public final class HttpUtil {
      * @param username the proxy username, or null
      * @param authorization the full credential, so a changed password is a new identity too
      */
-    private record TunnelIdentity(String host, int port, String username, String authorization) {}
+    private record TunnelIdentity(String host, int port, String username, String authorization) {
+
+        // The authorization is the proxy credential, and the username often encodes a session.
+        @Override
+        public String toString() {
+            return "TunnelIdentity[" + host + ":" + port + (authorization != null ? ", authenticated" : "") + "]";
+        }
+    }
 
     /**
      * Sends a POST request with a JSON body.
@@ -411,6 +418,20 @@ public final class HttpUtil {
          */
         public boolean rateLimited() {
             return status == 429;
+        }
+
+        /**
+         * Returns a description that leaves the body out. A token endpoint answers with the tokens, so
+         * the generated {@code toString} would put a credential into whatever log a caller wrote the
+         * response to.
+         *
+         * @return a loggable description
+         * @since 0.12.0
+         */
+        @Override
+        public String toString() {
+            return "HttpResponse[status=" + status + ", body=" + (body == null ? "none" : "<redacted>")
+                    + ", retryAfter=" + retryAfter + "]";
         }
     }
 
@@ -521,6 +542,19 @@ public final class HttpUtil {
          */
         public boolean rateLimited() {
             return status == 429;
+        }
+
+        /**
+         * Returns a description that leaves the body out, for the reason {@link HttpResponse#toString()}
+         * does.
+         *
+         * @return a loggable description
+         * @since 0.12.0
+         */
+        @Override
+        public String toString() {
+            return "JsonResponse[status=" + status + ", body=" + (body == null ? "none" : "<redacted>")
+                    + ", retryAfter=" + retryAfter + "]";
         }
     }
 
@@ -634,6 +668,18 @@ public final class HttpUtil {
          */
         public boolean rateLimited() {
             return status == 429;
+        }
+
+        /**
+         * Returns a description that leaves the header's value out. The header read this way is a
+         * redirect's {@code Location}, and a sign-in chain puts codes and tokens in that address.
+         *
+         * @return a loggable description
+         * @since 0.12.0
+         */
+        @Override
+        public String toString() {
+            return "HeaderResponse[status=" + status + ", value=" + (value == null ? "none" : "<redacted>") + "]";
         }
     }
 
