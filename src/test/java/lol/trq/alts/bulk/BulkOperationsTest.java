@@ -247,6 +247,273 @@ class BulkOperationsTest {
         assertEquals(FailureReason.UNKNOWN, report.failures().get(0).reason());
     }
 
+    /** A loopback entitlements endpoint answering per bearer token, and counting what it was asked. */
+    private static final class EntitlementServer implements AutoCloseable {
+
+        final com.sun.net.httpserver.HttpServer server;
+        final List<String> tokens = new java.util.concurrent.CopyOnWriteArrayList<>();
+        volatile java.util.function.Function<String, int[]> statusFor = token -> new int[] {200};
+        volatile String retryAfter;
+
+        EntitlementServer() throws java.io.IOException {
+            lol.trq.alts.net.HttpUtil.bind(null);
+            server = com.sun.net.httpserver.HttpServer.create(
+                    new java.net.InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), 0), 0);
+            server.createContext("/entitlements/mcstore", exchange -> {
+                String token =
+                        exchange.getRequestHeaders().getFirst("Authorization").substring("Bearer ".length());
+                tokens.add(token);
+                int status = statusFor.apply(token)[0];
+                String body = status != 200
+                        ? "{\"error\":\"X\",\"errorMessage\":\"refused\"}"
+                        : token.endsWith("pass")
+                                ? "{\"items\":[{\"name\":\"product_game_pass_pc\"}]}"
+                                : token.endsWith("none")
+                                        ? "{\"items\":[]}"
+                                        : "{\"items\":[{\"name\":\"product_minecraft\"},{\"name\":\"game_minecraft\"}]}";
+                byte[] bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                if (status == 429 && retryAfter != null) {
+                    exchange.getResponseHeaders().add("Retry-After", retryAfter);
+                }
+                exchange.sendResponseHeaders(status, bytes.length);
+                exchange.getResponseBody().write(bytes);
+                exchange.close();
+            });
+            server.start();
+        }
+
+        BulkOperations bulk() {
+            lol.trq.alts.account.AccountEndpoints endpoints = new lol.trq.alts.account.AccountEndpoints("http://"
+                    + java.net.InetAddress.getLoopbackAddress().getHostAddress() + ":"
+                    + server.getAddress().getPort());
+            AltAccountService unused = new AltAccountService() {
+                @Override
+                public CompletableFuture<AccountStatus> check(AltAccount account) {
+                    throw new AssertionError("an entitlement sweep must not check accounts");
+                }
+
+                @Override
+                public CompletableFuture<AccountStatus> refresh(AltAccount account) {
+                    throw new AssertionError("an entitlement sweep must not renew accounts");
+                }
+            };
+            return new BulkOperationsImpl(
+                    new UnusedLoginService(),
+                    unused,
+                    account -> lol.trq.alts.account.AccountServices.of(account.accessToken(), account.uuid(), endpoints)
+                            .entitlements());
+        }
+
+        @Override
+        public void close() {
+            server.stop(0);
+            lol.trq.alts.net.HttpUtil.bind(null);
+        }
+    }
+
+    private static AltAccount owner(int index, String token) {
+        return AltAccount.of(
+                "00000000-0000-4000-8000-00000000000" + index, "Alt" + index, token, AccountType.MICROSOFT);
+    }
+
+    @Test
+    void theEntitlementSweepReportsWhatEachAccountOwns() throws Exception {
+        try (EntitlementServer server = new EntitlementServer()) {
+            List<AltAccount> swept = List.of(owner(0, "t0-java"), owner(1, "t1-pass"), owner(2, "t2-none"));
+
+            BulkReport report = server.bulk()
+                    .entitlementsAll(swept, FAST, BulkProgress.NONE)
+                    .report()
+                    .get();
+
+            assertTrue(report.complete(), "every account was read");
+            assertEquals(3, report.results().size());
+            BulkEntryResult outright = report.results().get(0);
+            assertEquals("Alt0", outright.label());
+            assertTrue(outright.entitlements().ownsJavaOutright());
+            assertFalse(outright.entitlements().viaGamePass());
+            BulkEntryResult subscription = report.results().get(1);
+            assertTrue(subscription.entitlements().ownsJava());
+            assertTrue(subscription.entitlements().viaGamePass(), "a lapsing subscription is told apart");
+            assertFalse(subscription.entitlements().ownsJavaOutright());
+            BulkEntryResult nothing = report.results().get(2);
+            assertTrue(nothing.success(), "owning nothing is an answer, not a failure");
+            assertTrue(nothing.entitlements().isEmpty());
+            assertEquals(swept.get(2), nothing.account());
+        }
+    }
+
+    @Test
+    void anEntitlementSweepRoutesEachRequestForItsOwnAccount() throws Exception {
+        try (EntitlementServer server = new EntitlementServer()) {
+            List<lol.trq.alts.net.NetworkScope> scopes = new java.util.concurrent.CopyOnWriteArrayList<>();
+            lol.trq.alts.net.HttpUtil.bind(scope -> {
+                scopes.add(scope);
+                return lol.trq.alts.net.ProxyRoute.direct();
+            });
+            List<AltAccount> swept = List.of(owner(0, "t0-java"), owner(1, "t1-java"), owner(2, "t2-java"));
+
+            server.bulk()
+                    .entitlementsAll(swept, FAST, BulkProgress.NONE)
+                    .report()
+                    .get();
+
+            assertEquals(3, scopes.size());
+            for (AltAccount account : swept) {
+                assertTrue(
+                        scopes.stream().anyMatch(scope -> account.uuid().equals(scope.accountUuid())),
+                        "a request was routed for " + account.username());
+            }
+        }
+    }
+
+    @Test
+    void aRefusedTokenFailsItsEntryAndIsNotRetried() throws Exception {
+        try (EntitlementServer server = new EntitlementServer()) {
+            server.statusFor = token -> new int[] {token.startsWith("dead") ? 401 : 200};
+
+            BulkReport report = server.bulk()
+                    .entitlementsAll(
+                            List.of(owner(0, "t0-java"), owner(1, "dead-java"), owner(2, "t2-java")),
+                            FAST,
+                            BulkProgress.NONE)
+                    .report()
+                    .get();
+
+            assertEquals(2, report.succeeded());
+            assertFalse(report.stoppedEarly(), "one dead token does not end the sweep");
+            BulkEntryResult failed = report.failures().get(0);
+            assertEquals(FailureReason.INVALID_TOKEN, failed.reason());
+            assertEquals("Alt1", failed.label());
+            assertEquals(1, failed.attempts(), "a refused token is not worth a second attempt");
+            assertEquals(null, failed.entitlements());
+            assertEquals(1, server.tokens.stream().filter("dead-java"::equals).count());
+        }
+    }
+
+    @Test
+    void anAccountWithNoTokenFailsWithoutARequest() throws Exception {
+        try (EntitlementServer server = new EntitlementServer()) {
+            AltAccount offline =
+                    AltAccount.of("00000000-0000-4000-8000-000000000009", "Offline", null, AccountType.OFFLINE);
+
+            BulkReport report = server.bulk()
+                    .entitlementsAll(List.of(offline), FAST, BulkProgress.NONE)
+                    .report()
+                    .get();
+
+            assertEquals(FailureReason.INVALID_TOKEN, report.failures().get(0).reason());
+            assertTrue(server.tokens.isEmpty(), "there is nothing to ask the service about");
+        }
+    }
+
+    @Test
+    void aRateLimitedEntitlementSweepStopsAndSaysSo() throws Exception {
+        try (EntitlementServer server = new EntitlementServer()) {
+            server.statusFor = token -> new int[] {429};
+            server.retryAfter = "30";
+
+            BulkReport report = server.bulk()
+                    .entitlementsAll(accounts(20), FAST.withConcurrency(1), BulkProgress.NONE)
+                    .report()
+                    .get();
+
+            assertTrue(report.stoppedEarly(), "a service asking to be left alone must end the sweep");
+            assertFalse(report.cancelled());
+            assertTrue(report.results().size() < 20);
+            assertTrue(server.tokens.size() < 20, "the rest of the list was never sent");
+        }
+    }
+
+    /** A 429 with no Retry-After is still a stated limit; the absence of a number must not hide it. */
+    @Test
+    void aRateLimitWithNoStatedWaitStillStopsTheSweep() throws Exception {
+        try (EntitlementServer server = new EntitlementServer()) {
+            server.statusFor = token -> new int[] {429};
+
+            BulkReport report = server.bulk()
+                    .entitlementsAll(accounts(20), FAST.withConcurrency(1), BulkProgress.NONE)
+                    .report()
+                    .get();
+
+            assertTrue(report.stoppedEarly());
+            assertEquals(1, server.tokens.size(), "the first limit ends a one-at-a-time sweep");
+        }
+    }
+
+    @Test
+    void aServerErrorInAnEntitlementSweepIsRetriedUpToTheBudget() throws Exception {
+        try (EntitlementServer server = new EntitlementServer()) {
+            AtomicInteger calls = new AtomicInteger();
+            server.statusFor = token -> new int[] {calls.incrementAndGet() <= 2 ? 503 : 200};
+
+            BulkReport report = server.bulk()
+                    .entitlementsAll(List.of(owner(0, "t0-java")), FAST, BulkProgress.NONE)
+                    .report()
+                    .get();
+
+            assertEquals(1, report.succeeded(), "the entry recovers once the service does");
+            assertEquals(3, report.results().get(0).attempts());
+            assertTrue(report.results().get(0).entitlements().ownsJavaOutright());
+        }
+    }
+
+    @Test
+    void cancellingAnEntitlementSweepStopsStartingNewEntries() throws Exception {
+        try (EntitlementServer server = new EntitlementServer()) {
+            BulkOptions slow = new BulkOptions(1, Duration.ofMillis(20), 0, Duration.ZERO, true);
+
+            BulkHandle handle = server.bulk().entitlementsAll(accounts(50), slow, BulkProgress.NONE);
+            Thread.sleep(80);
+            handle.cancel();
+            BulkReport report = handle.report().get();
+
+            assertTrue(report.cancelled());
+            assertTrue(report.results().size() < 50, "saw " + report.results().size());
+        }
+    }
+
+    @Test
+    void anEntitlementSweepReportsProgressForEveryEntry() throws Exception {
+        try (EntitlementServer server = new EntitlementServer()) {
+            AtomicInteger started = new AtomicInteger();
+            AtomicInteger completed = new AtomicInteger();
+            AtomicInteger finished = new AtomicInteger();
+
+            server.bulk()
+                    .entitlementsAll(accounts(6), FAST, new BulkProgress() {
+                        @Override
+                        public void started(int index, int total, String label) {
+                            started.incrementAndGet();
+                        }
+
+                        @Override
+                        public void completed(int index, int total, BulkEntryResult result) {
+                            completed.incrementAndGet();
+                        }
+
+                        @Override
+                        public void finished(BulkReport report) {
+                            finished.incrementAndGet();
+                        }
+                    })
+                    .report()
+                    .get();
+
+            assertEquals(6, started.get());
+            assertEquals(6, completed.get());
+            assertEquals(1, finished.get());
+        }
+    }
+
+    @Test
+    void aResultBuiltTheOldWayCarriesNoEntitlements() {
+        BulkEntryResult result = new BulkEntryResult(0, "Alt0", true, account(0), FailureReason.NONE, "ok", 1);
+
+        assertEquals(null, result.entitlements());
+        assertEquals(null, BulkEntryResult.success(0, account(0), "ok", 1).entitlements());
+    }
+
     /** Stands in for a login service the account-only runs never reach. */
     private static final class UnusedLoginService implements lol.trq.alts.auth.AltLoginService {
 

@@ -7,7 +7,7 @@ import lol.trq.alts.model.LoginMode;
 /**
  * Running one operation over many accounts, paced so the service does not treat it as an attack.
  *
- * <p>Neither operation installs a session. A host writing its own loop over
+ * <p>No operation here installs a session. A host writing its own loop over
  * {@link lol.trq.alts.auth.AltLoginService#loginAccount} gets fifty session switches and, on account
  * nine, a rate limit it has no way to recognise.
  *
@@ -58,4 +58,29 @@ public interface BulkOperations {
      * @since 0.9.0
      */
     BulkHandle checkAll(List<AltAccount> accounts, BulkOptions options, BulkProgress progress);
+
+    /**
+     * Reads what every given account owns, without renewing or changing anything.
+     *
+     * <p>"Which of these own Java outright, and which are riding a subscription that can lapse" is a
+     * question about the whole list, so it is paced like the other sweeps: the same spacing, retries,
+     * progress, cancellation and stop-on-rate-limit, with each request routed for its own account. A
+     * successful entry carries the product set on {@link BulkEntryResult#entitlements()}; an account
+     * that owns nothing succeeds with an empty set, because the read worked.
+     *
+     * <p>Each account is read with the access token it currently holds. One whose token has expired
+     * fails its entry as {@link lol.trq.alts.auth.AltLoginCallback.FailureReason#INVALID_TOKEN}; run
+     * {@link #refreshAll} first when the tokens may be stale. An account with no token at all — an
+     * offline one — fails the same way without a request being made.
+     *
+     * @param accounts the accounts to read
+     * @param options how to pace the run
+     * @param progress where to report progress, or {@link BulkProgress#NONE}
+     * @return a handle on the running operation
+     * @throws UnsupportedOperationException if this implementation predates the entitlement sweep
+     * @since 0.12.0
+     */
+    default BulkHandle entitlementsAll(List<AltAccount> accounts, BulkOptions options, BulkProgress progress) {
+        throw new UnsupportedOperationException("the entitlement sweep is not supported by this implementation");
+    }
 }

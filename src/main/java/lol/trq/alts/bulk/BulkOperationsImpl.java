@@ -10,7 +10,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceArray;
+import java.util.function.Function;
 import java.util.function.IntFunction;
+import lol.trq.alts.account.AccountException;
+import lol.trq.alts.account.AccountServices;
+import lol.trq.alts.account.EntitlementService;
+import lol.trq.alts.account.Entitlements;
 import lol.trq.alts.auth.AccountStatus;
 import lol.trq.alts.auth.AltAccountService;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
@@ -35,9 +40,10 @@ public final class BulkOperationsImpl implements BulkOperations {
 
     private final AltLoginService importService;
     private final AltAccountService accountService;
+    private final Function<AltAccount, EntitlementService> entitlementServices;
 
     /**
-     * Creates the bulk surface.
+     * Creates the bulk surface, reading entitlements from the public Minecraft services.
      *
      * @param importService a login service whose session injector does nothing, so importing resolves
      *     and stores without moving the live session
@@ -45,8 +51,30 @@ public final class BulkOperationsImpl implements BulkOperations {
      * @since 0.9.0
      */
     public BulkOperationsImpl(AltLoginService importService, AltAccountService accountService) {
+        this(
+                importService,
+                accountService,
+                account -> AccountServices.of(account.accessToken(), account.uuid())
+                        .entitlements());
+    }
+
+    /**
+     * Creates the bulk surface with a given source of per-account entitlement services — for a host
+     * whose account services go to an overridden endpoint base, so the sweep reaches the same origin.
+     *
+     * @param importService a login service whose session injector does nothing, so importing resolves
+     *     and stores without moving the live session
+     * @param accountService the account service the refresh and check runs are built on
+     * @param entitlementServices builds the entitlement service for one account, over its access token
+     * @since 0.12.0
+     */
+    public BulkOperationsImpl(
+            AltLoginService importService,
+            AltAccountService accountService,
+            Function<AltAccount, EntitlementService> entitlementServices) {
         this.importService = Objects.requireNonNull(importService, "importService");
         this.accountService = Objects.requireNonNull(accountService, "accountService");
+        this.entitlementServices = Objects.requireNonNull(entitlementServices, "entitlementServices");
     }
 
     @Override
@@ -77,6 +105,55 @@ public final class BulkOperationsImpl implements BulkOperations {
     @Override
     public BulkHandle checkAll(List<AltAccount> accounts, BulkOptions options, BulkProgress progress) {
         return overAccounts(accounts, options, progress, accountService::check);
+    }
+
+    @Override
+    public BulkHandle entitlementsAll(List<AltAccount> accounts, BulkOptions options, BulkProgress progress) {
+        List<AltAccount> items = List.copyOf(accounts == null ? List.of() : accounts);
+        return start(new Run(
+                items.size(),
+                options,
+                progress,
+                index -> items.get(index).username(),
+                index -> CompletableFuture.supplyAsync(() -> entitlementsOf(items.get(index)))));
+    }
+
+    /**
+     * Reads one account's entitlements and classifies the outcome the way the runner expects.
+     *
+     * <p>A refused token is terminal for this entry, since the sweep only looks and never renews. A
+     * rate limit always carries a wait — zero when the service named none — because the runner
+     * recognises a stated limit by that wait being present. Everything else that is not an answer is a
+     * service or transport failure, which is worth a retry.
+     *
+     * @param account the account to read
+     * @return the attempt
+     */
+    private Attempt entitlementsOf(AltAccount account) {
+        if (account.accessToken() == null || account.accessToken().isBlank()) {
+            return new Attempt(false, account, FailureReason.INVALID_TOKEN, "Account has no access token", null, null);
+        }
+        try {
+            Entitlements owned = entitlementServices.apply(account).fetch();
+            String summary = owned.isEmpty() ? "Owns nothing" : owned.products().size() + " product(s)";
+            return new Attempt(true, account, FailureReason.NONE, summary, null, owned);
+        } catch (AccountException failure) {
+            if (failure.rateLimited()) {
+                Duration wait = failure.retryAfter() != null ? failure.retryAfter() : Duration.ZERO;
+                return new Attempt(
+                        false, account, FailureReason.NETWORK, "Rate limited by the entitlement service", wait, null);
+            }
+            if (failure.tokenRefused()) {
+                return new Attempt(false, account, FailureReason.INVALID_TOKEN, "Access token was refused", null, null);
+            }
+            return new Attempt(
+                    false,
+                    account,
+                    FailureReason.NETWORK,
+                    "Entitlement lookup failed" + (failure.status() > 0 ? " with status " + failure.status() : ""),
+                    null,
+                    null);
+        }
     }
 
     /**
@@ -117,17 +194,18 @@ public final class BulkOperationsImpl implements BulkOperations {
             case COOKIE_TEXT -> importService.loginCookie(entry, mode).thenApply(BulkOperationsImpl::toAttempt);
             case OFFLINE_NAME -> importService.loginOffline(entry, mode).thenApply(BulkOperationsImpl::toAttempt);
             case UNKNOWN ->
-                CompletableFuture.completedFuture(
-                        new Attempt(false, null, FailureReason.INVALID_TOKEN, "Unrecognised credential format", null));
+                CompletableFuture.completedFuture(new Attempt(
+                        false, null, FailureReason.INVALID_TOKEN, "Unrecognised credential format", null, null));
         };
     }
 
     private static Attempt toAttempt(LoginResult result) {
-        return new Attempt(result.success(), result.account(), result.reason(), result.message(), null);
+        return new Attempt(result.success(), result.account(), result.reason(), result.message(), null, null);
     }
 
     private static Attempt toAttempt(AccountStatus status) {
-        return new Attempt(status.usable(), status.account(), status.reason(), status.message(), status.retryAfter());
+        return new Attempt(
+                status.usable(), status.account(), status.reason(), status.message(), status.retryAfter(), null);
     }
 
     /**
@@ -182,11 +260,20 @@ public final class BulkOperationsImpl implements BulkOperations {
     private static CompletableFuture<BulkEntryResult> attempt(Run run, int index, int attempt) {
         return run.attempts
                 .apply(index)
-                .exceptionally(failure -> new Attempt(false, null, FailureReason.UNKNOWN, describe(failure), null))
+                .exceptionally(
+                        failure -> new Attempt(false, null, FailureReason.UNKNOWN, describe(failure), null, null))
                 .thenCompose(outcome -> {
                     if (outcome.success()) {
                         return CompletableFuture.completedFuture(
-                                BulkEntryResult.success(index, outcome.account(), outcome.message(), attempt));
+                                outcome.entitlements() != null
+                                        ? BulkEntryResult.success(
+                                                index,
+                                                outcome.account(),
+                                                outcome.entitlements(),
+                                                outcome.message(),
+                                                attempt)
+                                        : BulkEntryResult.success(
+                                                index, outcome.account(), outcome.message(), attempt));
                     }
                     String label = outcome.account() != null ? outcome.account().username() : run.labeller.apply(index);
                     BulkEntryResult failed =
@@ -234,7 +321,12 @@ public final class BulkOperationsImpl implements BulkOperations {
 
     /** One attempt's outcome, flattened so both surfaces feed the same runner. */
     private record Attempt(
-            boolean success, AltAccount account, FailureReason reason, String message, Duration retryAfter) {}
+            boolean success,
+            AltAccount account,
+            FailureReason reason,
+            String message,
+            Duration retryAfter,
+            Entitlements entitlements) {}
 
     /** The mutable state of one run, and its handle. */
     private static final class Run implements BulkHandle {

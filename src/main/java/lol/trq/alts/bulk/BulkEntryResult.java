@@ -1,5 +1,6 @@
 package lol.trq.alts.bulk;
 
+import lol.trq.alts.account.Entitlements;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
 import lol.trq.alts.model.AltAccount;
 
@@ -17,6 +18,8 @@ import lol.trq.alts.model.AltAccount;
  * @param reason the classified cause, {@link FailureReason#NONE} on success
  * @param message a short human-readable description
  * @param attempts how many times this entry was tried, counting the first
+ * @param entitlements what the account owns, on a successful entry of an entitlement sweep; {@code null}
+ *     for every other kind of run and for a failed entry; added in 0.12.0
  * @author trq
  * @since 0.9.0
  */
@@ -27,7 +30,32 @@ public record BulkEntryResult(
         AltAccount account,
         FailureReason reason,
         String message,
-        int attempts) {
+        int attempts,
+        Entitlements entitlements) {
+
+    /**
+     * Creates a result carrying no entitlements — the shape this record had before {@code entitlements}
+     * was added.
+     *
+     * @param index the entry's position
+     * @param label a name safe to display and log
+     * @param success whether the entry succeeded
+     * @param account the resolved or refreshed account, or {@code null}
+     * @param reason the classified cause
+     * @param message a short description
+     * @param attempts how many times it was tried
+     * @since 0.9.0
+     */
+    public BulkEntryResult(
+            int index,
+            String label,
+            boolean success,
+            AltAccount account,
+            FailureReason reason,
+            String message,
+            int attempts) {
+        this(index, label, success, account, reason, message, attempts, null);
+    }
 
     /**
      * Creates a successful result.
@@ -41,6 +69,23 @@ public record BulkEntryResult(
      */
     public static BulkEntryResult success(int index, AltAccount account, String message, int attempts) {
         return new BulkEntryResult(index, account.username(), true, account, FailureReason.NONE, message, attempts);
+    }
+
+    /**
+     * Creates a successful entitlement-sweep result.
+     *
+     * @param index the entry's position
+     * @param account the account that was read
+     * @param entitlements what it owns
+     * @param message a short description
+     * @param attempts how many times it was tried
+     * @return a successful result carrying the entitlements
+     * @since 0.12.0
+     */
+    public static BulkEntryResult success(
+            int index, AltAccount account, Entitlements entitlements, String message, int attempts) {
+        return new BulkEntryResult(
+                index, account.username(), true, account, FailureReason.NONE, message, attempts, entitlements);
     }
 
     /**

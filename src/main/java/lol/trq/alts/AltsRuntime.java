@@ -101,7 +101,9 @@ public final class AltsRuntime<H> {
         // The import runs resolve and store through a login service whose injector does nothing, which
         // is what keeps importing fifty credentials from switching session fifty times.
         this.bulk = new BulkOperationsImpl(
-                new AltLoginServiceImpl(session -> {}, builder.microsoftAuth), loginService.accountService());
+                new AltLoginServiceImpl(session -> {}, builder.microsoftAuth),
+                loginService.accountService(),
+                account -> accountServices(account).entitlements());
         this.skinCache = new SkinAvatarCache<>(builder.avatarSource, builder.textureUploader, builder.mainThread);
 
         // Game stats are optional and per-server: one cache per registered source. A request for a
