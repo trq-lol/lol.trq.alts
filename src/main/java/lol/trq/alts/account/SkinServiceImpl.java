@@ -2,6 +2,8 @@ package lol.trq.alts.account;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import java.security.SecureRandom;
+import java.util.HexFormat;
 import lol.trq.alts.net.Multipart;
 import lol.trq.alts.net.NetworkScope;
 
@@ -14,7 +16,7 @@ import lol.trq.alts.net.NetworkScope;
  */
 final class SkinServiceImpl implements SkinService {
 
-    private static final String BOUNDARY = "lol-trq-alts-skin-boundary-9f2a1c";
+    private static final SecureRandom BOUNDARIES = new SecureRandom();
 
     private final AccountHttp http;
     private final AccountEndpoints endpoints;
@@ -38,7 +40,7 @@ final class SkinServiceImpl implements SkinService {
 
     @Override
     public PlayerProfile upload(byte[] pngBytes, SkinModel model) throws AccountException {
-        Multipart form = new Multipart(BOUNDARY)
+        Multipart form = new Multipart(boundary())
                 .field("variant", (model == null ? SkinModel.CLASSIC : model).apiVariant())
                 .file("file", "skin.png", "image/png", pngBytes);
         JsonObject response =
@@ -49,5 +51,18 @@ final class SkinServiceImpl implements SkinService {
     @Override
     public void reset() throws AccountException {
         http.sendJson("DELETE", endpoints.activeSkin(), null, NetworkScope.Purpose.PROFILE);
+    }
+
+    /**
+     * Returns a fresh multipart boundary. Random per request, so no fixed string exists for file content
+     * to collide with — a constant boundary is one a crafted file can contain, ending its own part early
+     * and appending fields of its choosing.
+     *
+     * @return a boundary unique to one request
+     */
+    private static String boundary() {
+        byte[] random = new byte[16];
+        BOUNDARIES.nextBytes(random);
+        return "alts-skin-" + HexFormat.of().formatHex(random);
     }
 }
