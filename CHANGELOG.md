@@ -7,16 +7,296 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Device-code login, a wider account surface, a host-supplied store key, and a hardening pass over the
+transport, the stores, the sign-in routes and the shared vault. Several defaults changed on the way, so
+read the upgrade notes first.
+
+### Upgrading
+
+Every item here is a break or a change in behaviour that a host has to act on or at least know about.
+
+- **Dependency coordinate.** The repository moved to the `trq-lol` organisation and JitPack coordinates
+  follow the repository owner, so the dependency is now `com.github.trq-lol:lol.trq.alts:0.12.0`. The
+  previous coordinate serves releases up to 0.11.1 only.
+- **Removed API.** `AccountNetworkUtil.fetchProfileFromToken(String)` and
+  `fetchProfileFromToken(String, String)`, deprecated since 0.8.0, are removed. Use
+  `fetchProfile(token, profileUrl, scope)`, which returns the status alongside the identity.
+- **Records that gained components.** `LoginResult` (`xstsError`, `retryAfter`), `MicrosoftAuthConfig`
+  (`deviceCodeUrl`, `deviceTokenUrl`), `ClaimResult` (`stopReason`), `NameEligibility` (`changedAt`) and
+  `BulkEntryResult` (`entitlements`). Each keeps a constructor with its previous arity, so
+  `new LoginResult(...)` and the like still compile. A record deconstruction pattern does not: add the
+  new components to it.
+- **New `FailureReason` constants.** `RATE_LIMITED`, `XBOX_DENIED`, `DECLINED` and `TIMED_OUT`. A switch
+  expression over the enum with no `default` stops compiling until it handles them; a switch statement
+  compiles and silently skips them. `AccountStatus.State.NOT_ENTITLED` now also covers `XBOX_DENIED`.
+- **A rate limit is `RATE_LIMITED`, not `NETWORK`.** A `429` from any step of a login, check, refresh or
+  import used to be reported as `NETWORK`. Code that retries on `NETWORK` no longer retries a throttle,
+  and should wait for `LoginResult.retryAfter()` or `AccountStatus.retryAfter()` when one is stated.
+  `AccountStatus.state()` is still `UNREACHABLE` for it, and `rateLimited()` is true with or without a
+  stated wait. In `bulk()`, `stopOnRateLimit` now also stops on a `429` that names no wait.
+- **Sign-in failures are classified.** `loginMicrosoft` used to report every failure as `UNKNOWN` and
+  `loginCookieFile` every failure as `INVALID_TOKEN`. Both now report `NETWORK`, `RATE_LIMITED`,
+  `INVALID_TOKEN`, `NOT_ENTITLED`, `XBOX_DENIED`, `DECLINED` or `TIMED_OUT` as the case is. A handler
+  that treated `UNKNOWN` as "the Microsoft login failed" needs a `default` branch.
+- **Store key provider.** `Builder.storeKeyProvider(...)` is optional. Once one is installed, a store
+  file opens under the host's key or is reported unreadable. A store written under the machine-derived
+  default does not load under a provider unless `Builder.migrateFromMachineKey(true)` is set. Set it on
+  the one launch that first installs the provider over existing files: that launch loads the old store,
+  rewrites it under the host's key, and reseals or removes the rolling backup and every unreadable copy.
+  Leave it off afterwards, because while it is on the machine-derived key is still accepted. When the
+  provider throws, or returns `null` or fewer than `StoreKeyProvider.MIN_LENGTH` (16) bytes, the store
+  is unreadable and every write is refused until a later `AltStore.load()` / `SecretStore.load()`
+  succeeds; `saveError()` says so. `AltStore.keyProvider(null)`, `SecretStore.keyProvider(null)` and a
+  second runtime built without a provider never remove an installed one.
+- **Unreadable copies are named differently.** A store file that could not be read is copied to
+  `<name>.unreadable.<time>` (epoch milliseconds) before a write replaces it, one copy per distinct
+  file, newest five kept. It used to be a single `<name>.unreadable`, made once. A host or a support
+  script that looks for the old name should match the prefix.
+- **`HttpUtil.bind(null)` no longer clears a proxy provider.** Neither does building a second runtime
+  with no `proxyProvider`. There is no public call that removes an installed provider.
+- **Blocking work left the common pool.** Every request, and everything that waits on one, now runs on
+  the library executor (`IoExecutor.executor()`): one virtual thread per task by default, or the
+  executor passed to `Builder.executor(...)`. Continuations a host chains without an executor,
+  `AsyncCache` loaders, `GameStatsSource.fetch`, `AvatarSource` and `DeviceCodePrompt.show` run there
+  rather than on `ForkJoinPool.commonPool()`. A host that relied on common-pool threads, their names or
+  their thread-locals should supply its own executor.
+- **Store writes are coalesced.** A runtime built through `AltsRuntime.Builder` writes each store on a
+  background daemon thread 100 ms (`AltStore.DEFAULT_WRITE_DELAY`) after a mutation, so a mutation is
+  not yet on disk when the call returns. `AltStore.save()`, `AltStore.flush()` and
+  `SecretStore.flush()` write at once, and a shutdown hook flushes on a normal exit. Call `flush()`
+  before leaving by a route that skips shutdown hooks. `AltStore.writeDelay(Duration.ZERO)` after
+  `build()` restores synchronous writes; a store bound directly, without the builder, stays synchronous.
+- **Deprecated `SharedVault` entry points.** The one-argument constructor `SharedVault(KeyWrapScheme)`
+  is deprecated because it installs `KeyBindingVerifier.trustTransport()` without being asked; use
+  `SharedVault(KeyWrapScheme, KeyBindingVerifier)` and choose the verifier. `addMember(ctx, member)`,
+  `rotateKey(ctx, alts, List<MemberPublicKey>)` and `removeMember(ctx, alts, List<MemberPublicKey>)`
+  are deprecated in favour of `addMember(ctx, member, keyBindingSig)`,
+  `rotateKey(ctx, alts, manifest)` and `removeMember(ctx, alts, manifest, removedMemberId)`. The
+  deprecated forms run the verifier with no signature, so they fail under a verifier that requires one.
+  The new forms throw the checked `VaultException`.
+- **`SharedVault` refuses more.** `openRepo` rejects a manifest whose scheme id is not the configured
+  scheme or whose member entry names a different key epoch, `decryptPayload` rejects an envelope from
+  another epoch, and malformed envelopes, payloads and missing transport objects fail with
+  `VaultException` instead of an unchecked exception. `RepoAddress` and `RepoLocator.decode` reject
+  userinfo, whitespace, and path, query or fragment characters in the host.
+- **`AsyncCache` behaviour.** The cache is bounded (`DEFAULT_MAX_ENTRIES`, 4096; entries read longest
+  ago go first). A failed fetch is retried after a growing backoff, where it used to stay failed until
+  `invalidate`. A failed refresh keeps the stale value. The loader runs on the library executor.
+- **`NtpTimeSource.now()` no longer measures inline.** It returns the OS clock plus the last measured
+  offset and never touches the network, so before the first measurement lands it is the uncorrected OS
+  clock. Call the blocking `sync()` first when the correction has to be in hand. A reply is accepted
+  only as a server-mode answer from a synchronised server that echoes the request's nonce.
+- **Skin uploads are validated locally.** `SkinService.upload` throws `SkinValidationException` (an
+  `AccountException`) before any request for data that is empty, larger than
+  `SkinService.MAX_SKIN_BYTES` (1 MiB), not a PNG, or not 64x64 or 64x32.
+- **Cookie login uses `live.com` cookies only.** Cookies an export attributes to any other domain are
+  dropped, cookies are attached only to HTTPS hosts their domain covers, and the chain stops on a hop
+  that is not HTTPS. An export that holds no `live.com` cookies fails the login.
+- **Session-token login confirms the identity before storing.** With `LoginMode.ADD` the token always
+  goes through the profile lookup, so adding a session token costs a request and can fail as `NETWORK`
+  or `RATE_LIMITED`.
+- **Request headers.** `HttpUtil` refuses a header name or value holding a control character with an
+  `IllegalArgumentException` whose message quotes nothing, and reads at most 1 MiB of a JSON or text
+  body. Failure messages no longer repeat a transport exception's own message.
+
 ### Added
 
-- `SkinAvatarCache.invalidate(uuid)` drops a cached head so the next `get` fetches it again, for a host
-  that knows a skin changed. It returns the dropped handle so the host can free the texture. A fetch
-  still in flight when the entry is invalidated is discarded instead of writing the old head back.
+- **Device-code login.** `AltLoginService.loginDeviceCode(prompt, mode)` runs the OAuth
+  device-authorization grant: the host shows a short code and the verification address through the new
+  `spi/DeviceCodePrompt` seam, and the library polls until the sign-in is approved, declined or expired.
+  It needs no loopback port and no local browser. Polling honours the advertised interval (held to
+  between 1 and 60 seconds), adds five seconds on `slow_down`, tolerates a few unanswered polls, and
+  stops at the advertised expiry (held to 30 minutes). Cancelling the returned future stops it.
+  `MicrosoftAuthConfig` gains `deviceCodeUrl` and `deviceTokenUrl`, defaulting to the consumers tenant,
+  and `withDeviceCodeEndpoints(...)`.
+- **PKCE on the browser login.** Every `loginMicrosoft` generates a code verifier, sends its S256
+  challenge on the authorize URL and the verifier on the token exchange.
+- **Typed sign-in failures.** `FailureReason.RATE_LIMITED`, `XBOX_DENIED`, `DECLINED` and `TIMED_OUT`;
+  `LoginResult.xstsError()` carrying the decoded Xbox Live refusal; `LoginResult.retryAfter()` and
+  `rateLimited()`; and `MicrosoftAuthUtil.AuthFlowException`, the typed failure each step of the chain
+  raises.
+- **Account services.** On `alts.accountServices(account)`:
+  - `attributes()`: `PlayerAttributesService` reads privileges, preferences and platform ban status
+    (`PlayerAttributes`), and sets the profanity filter. Unknown fields are ignored and unknown ban
+    scopes are kept.
+  - `certificates()`: `CertificateService` requests the chat-signing key pair (`PlayerCertificate`),
+    which decodes to `java.security` keys, reports expiry, and redacts the private key from `toString`.
+    Nothing is persisted.
+  - `blocklist()`: `BlocklistService` reads the players the account has blocked.
+  - `profile().fetchIfPresent()` returns an entitled account's missing profile as an empty result, and
+    `profile().create(name)` creates one, returning a classified `ProfileCreationResult`.
+  - `skin().upload(Path, model)`, `skin().resetToDefault()` and `cape().hideActive()`, the last two
+    returning the updated profile.
+  - `NameEligibility.changedAt()`, with `estimatedNextChange()` and `estimatedWaitAt(now)`. The service
+    returns no such date; the estimate is the last change plus the documented 30-day cooldown.
+  - `ClaimResult.stopReason()` and `rateLimited()`, stating why a scheduled claim stopped.
+- **Public profile lookup.** `alts.profileLookup()` (`ProfileLookupService`) resolves a player by name
+  or UUID with no token and no account. `byNames` posts ten names per request to the batch endpoint,
+  de-duplicated without regard to case. A rate limit part-way through fails the call rather than
+  returning a partial list.
+- **Bulk entitlement sweep.** `bulk().entitlementsAll(...)` reads what every account owns through the
+  same runner as `checkAll` and `refreshAll`. A successful entry carries the product set on
+  `BulkEntryResult.entitlements()`.
+- **Store key provider.** `spi/StoreKeyProvider`, `Builder.storeKeyProvider(...)` and
+  `Builder.migrateFromMachineKey(boolean)`: the host supplies the key material both encrypted stores
+  are sealed under.
+- **Store reporting and control.** `AltStore.saveError()`, `AltStore.loadWarning()`,
+  `AltStore.flush()`, `AltStore.writeDelay(Duration)`, `AltStore.DEFAULT_WRITE_DELAY`, and the same
+  `saveError`, `flush` and `writeDelay` on `SecretStore`.
+- **Library executor.** `net/IoExecutor` and `Builder.executor(...)`.
+- **Rollback floor for shared repositories.** `vault/RepoPin`, `SharedVault.openRepo(manifest, identity,
+  pin)` and `RepoContext.pin()`. A host that persists the pin gets a floor on key epoch and payload
+  version.
+- **Verified wraps.** `SharedVault(KeyWrapScheme, KeyBindingVerifier)` runs the verifier before every
+  wrap to another member's keys, through the new `KeyBindingVerifier.verify(repoId, claimed,
+  keyBindingSig)`, with `addMember`, `rotateKey` and `removeMember` overloads that carry what it needs.
+- **Transport additions.** `HttpUtil.postJsonForElement` (for a top-level JSON array),
+  `getBytesForStatus` (with an optional per-hop redirect predicate), `postJsonForStatus` with a scope,
+  `HeaderResponse.rateLimited()`, `BytesResponse`, `JsonResponse`, and `net/FailureText`, which
+  describes a failure by its kind without repeating its message.
+- `AccountException.retryAfter()` and `notFound()`. The class is no longer final, so a typed failure can
+  extend it.
+- `MicrosoftAuthUtil.authenticateWithRefreshToken(config, refreshToken, scope)`, so every hop of a
+  renewal names its account and a `ProxyProvider` can route a refresh per account.
+- `SkinAvatarCache.invalidate(uuid)` drops a cached head so the next `get` fetches it again, and returns
+  the dropped handle so the host can free the texture. A fetch still in flight when the entry is
+  invalidated is discarded.
+- `AsyncCache(loader, ttlMillis, maxEntries)`, `AsyncCache.size()`, `NtpTimeSource(server, port,
+  resyncInterval)`, `NtpTimeSource.synced()` and `offset()`.
+- Build metadata: an `Automatic-Module-Name` of `lol.trq.alts`, and a POM with URL, SCM, developer and
+  issue-tracker entries.
+
+### Changed
+
+- All blocking work runs on the library executor rather than the common pool.
+- Store files are written atomically: staged in a sibling temporary file, forced to disk, moved into
+  place. Writers are serialized and ordered, the replaced file is kept as a rolling `<name>.bak`, and
+  the file is created owner-only on POSIX file systems. Mutations are atomic with respect to each other
+  and to a save. One derived key seals many writes, so PBKDF2 runs once per process and not once per
+  save. The bundle format is unchanged.
+- Builder-created runtimes coalesce store writes (see Upgrading).
+- An authenticated HTTP proxy now works for HTTPS targets. The library opens the `CONNECT` tunnel
+  itself and sends the credential on the `CONNECT` only. Kept-alive connections are reused only by the
+  same proxy host, port and credential. A plain `http` request through an authenticated proxy is not
+  kept alive.
+- The binary fetch follows redirects by hand: never when the request carries an `Authorization` header,
+  dropping credential headers when a hop leaves the origin, refusing a step from `https` to `http`, and
+  stopping after five hops. The route is resolved once per fetch.
+- `Retry-After` is read as seconds or as an HTTP-date, the latter measured against the response's own
+  `Date` header.
+- A bulk run that meets a rate limit stops when `stopOnRateLimit` is set, and otherwise holds the whole
+  run back for the stated wait, or a growing one when none was stated, before that entry tries again.
+- `CredentialKind` takes a bare word for an offline account only when it is a valid name: 3 to 16
+  letters, digits or underscores.
+- A scheduled name claim stops on a rate limit and on cancellation of the returned future.
+- Avatar downloads are bounded to six in flight; the rest queue. The texture address must name the
+  Mojang texture host, is fetched over HTTPS, redirects are held to that host, and the image's declared
+  dimensions are checked before decoding.
+- The sign-in callback server listens on `127.0.0.1` and `::1`, releases its port as soon as the login
+  completes or is cancelled, and lets only a request carrying the login's `state` decide the outcome.
+- The cookie chain is followed to the redirect that carries the token instead of a fixed count,
+  resolves relative redirects, accepts a token only from the service the sign-in starts at, and reads
+  `#HttpOnly_` lines of a Netscape export as cookies. Its Minecraft services endpoints come from
+  `MicrosoftAuthConfig`.
+- Names placed in URL paths are percent-encoded as one path segment. A public lookup accepts legacy
+  names of one and two characters; creating and changing a name keep the stricter rule.
+- Gson is declared `compileOnlyApi`, so the published metadata carries it for compilation. The host
+  still provides it at runtime.
+- The examples are compiled with `-Xlint:deprecation -Werror`.
+
+### Deprecated
+
+- `SharedVault(KeyWrapScheme)`, `SharedVault.addMember(RepoContext, MemberPublicKey)`,
+  `rotateKey(RepoContext, List<AltAccount>, List<MemberPublicKey>)` and
+  `removeMember(RepoContext, List<AltAccount>, List<MemberPublicKey>)`. See Upgrading.
+
+### Removed
+
+- `AccountNetworkUtil.fetchProfileFromToken(String)` and `fetchProfileFromToken(String, String)`.
+- `HttpUtil.bind(null)` as a way to remove a proxy provider, and `keyProvider(null)` as a way to remove
+  a store key provider. The resets that remain are package-private test seams, refused unless the JVM
+  carries `-Dlol.trq.alts.testSeams=true`, which the Gradle `test` task sets.
 
 ### Fixed
 
-- The avatar retry backoff now grows. A retry replaced the failure record before fetching, so a second
-  failure always counted as the first and every retry waited the base 5 seconds.
+- Overlapping saves, or a crash mid-write, could leave a truncated store file that the next start
+  treated as unreadable. A failed save is now reported on `saveError()` instead of being swallowed.
+- `AltStore.useAccount` no longer writes a caller's stale credentials back over the stored entry.
+  Entries with no UUID, and duplicates, are skipped on load and noted on `loadWarning()`.
+- A proxy that required a credential answered `407` to every HTTPS request, because the JDK built its
+  `CONNECT` without the `Proxy-Authorization` header.
+- `getHeader` and `getBytes` disconnected after every response and a redirect's body was never drained,
+  so those calls opened a new socket each time.
+- A `429` with an HTTP-date `Retry-After`, or with none, was treated as naming no delay or as an outage.
+- A refresh answer with no `access_token`, or a JSON `null` `refresh_token`, threw an unchecked
+  exception that the import route reported as a network failure. It is now a classified failed step,
+  and a missing rotated token keeps the one just redeemed.
+- A refusal further down the renewal chain keeps its own reason instead of passing for an outage.
+- `loginAccount(null)` returns a failed result rather than throwing.
+- The avatar retry backoff now grows. A retry replaced the failure record before fetching, so every
+  retry waited the base five seconds. A small PNG declaring a huge canvas left its cache entry pending
+  forever; any throwable in the fetch or upload now resolves the entry to failed with retry.
+- `AsyncCache` eviction could abort with a comparator contract violation under concurrent reads and
+  leave a key pending forever.
+- A scheduled claim kept sending for the rest of its window after a `429`.
+- `NameService.eligibility()` threw an unchecked exception on a `null` `nameChangeAllowed`.
+- The sign-in callback matched `error_code=` as `code=`, and listened on the IPv4 loopback only, which
+  a system resolving `localhost` to `::1` first could not reach.
+- A relative `Location` in the cookie chain failed the login.
+- Vault and crypto input from outside the process (a stored identity, a wrapped key, an envelope, a
+  payload, a manifest) could surface `IllegalArgumentException`, `NullPointerException` or a Gson
+  exception. These are now `CryptoException` or `VaultException`, and null list elements are skipped.
+- The Javadoc builds without warnings.
+
+### Security
+
+- **Tokens stay out of messages and `toString`.** A header value holding a line break made the JDK
+  throw an exception quoting the whole value, usually `Bearer <token>`, and that message was appended
+  to login results, account statuses and account exceptions. Headers with control characters are now
+  refused before the JDK sees them, pasted tokens are stripped of whitespace and control characters,
+  and a failure the library did not write is described by its kind. `HttpResponse`, `JsonResponse`,
+  `HeaderResponse` and `AuthToken` print no body, header value or token.
+- **The proxy credential no longer reaches the origin.** For an HTTPS target the JDK sent the
+  `Proxy-Authorization` header to the origin inside the tunnel on every call.
+- **Credentials stay on their origin across redirects.** The binary fetch delegated redirects to the
+  JDK, which replayed a `Cookie` header to whatever host a `3xx` named.
+- **Cookie login no longer sends unrelated cookies to the sign-in hosts**, and no longer attaches the
+  `Cookie` header to whatever URL a `Location` header named.
+- **A web page can no longer end a pending browser login.** Any request to the loopback callback path
+  with missing parameters or the wrong `state` used to complete the login exceptionally.
+- **PKCE** protects the authorization code on its way to the loopback redirect.
+- **A session token's identity is confirmed before it is stored.** The fast path read the username and
+  UUID from the unsigned token payload and, in `ADD` mode, merged the result over the stored account
+  with the claimed UUID.
+- **Host-keyed stores cannot be weakened or overwritten.** Migration reseals every kept copy, the
+  machine-derived key is not accepted unless the host opts in for a launch, a second runtime cannot
+  reset the key, and a store whose key was unavailable is not overwritten.
+- **Proxy routes copy their password** on the way in and out, so neither side can rewrite the
+  credential a route authenticates with.
+- **Response bodies are capped** at 1 MiB for JSON and text.
+- **The skin upload uses a random multipart boundary** per request; a constant one could be embedded in
+  a crafted file to append fields.
+- **Shared vault.** The key-binding verifier existed but nothing called it; it now runs before every
+  wrap, and the data key is wrapped only to the keys it returned. Manifests below a host-persisted
+  `RepoPin`, scheme mismatches and epoch mismatches are rejected. A stored identity's public keys are
+  checked against its private material on unlock, its PBKDF2 iteration count is bounded, and key
+  material is cleared from temporary arrays after use. `RepoAddress` rejects hosts carrying userinfo.
+- **Test seams are out of a host's reach.** `HttpUtil.resetForTests()` was public and removed the proxy
+  provider for the whole process.
+
+### Notes
+
+The device-code flow and the reworked cookie sign-in chain were tested against loopback and scripted
+servers only. Neither has been verified against the live Microsoft services in this release, so treat
+both as unproven there until a host has exercised them.
+
+What the shared vault does not protect against, and what the default store key is and is not, are
+stated in [SECURITY.md](SECURITY.md). One limit of the proxy tunnel is stated there too: the JVM still
+resolves the origin host name through the local resolver.
+
+Of the [1.0.0 design](docs/specs/2026-08-06-account-management-1.0.md), this release ships device-code
+login, the bulk entitlement sweep and the removal of the deprecated profile methods. Username and
+password login was not built, by decision.
 
 ## [0.11.1] - 2026-10-11
 
