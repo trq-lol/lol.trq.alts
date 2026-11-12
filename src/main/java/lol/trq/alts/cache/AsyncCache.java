@@ -129,7 +129,12 @@ public final class AsyncCache<K, V> {
         if (existing == null) {
             Entry pending = Entry.pending(now, 0);
             if (entries.putIfAbsent(key, pending) == null) {
-                evictIfOver(key);
+                try {
+                    evictIfOver(key);
+                } catch (RuntimeException evictionFailed) {
+                    // The marker is already in the map. Whatever went wrong keeping the cache within its
+                    // bound, the fetch below must still run, or this key would answer null for good.
+                }
                 fetch(key, pending);
             }
             return null;
@@ -194,14 +199,30 @@ public final class AsyncCache<K, V> {
         if (excess <= 0) {
             return;
         }
-        List<Map.Entry<K, Entry>> candidates = new ArrayList<>(entries.entrySet());
-        candidates.removeIf(candidate -> candidate.getKey().equals(justAdded));
-        candidates.sort(Comparator.comparingLong(candidate -> candidate.getValue().lastRead));
+        // Each read time is copied out once, before sorting. Other threads restamp entries while this
+        // runs, and a sort whose keys change under it is one the JDK is entitled to abort.
+        List<Candidate<K>> candidates = new ArrayList<>();
+        for (Map.Entry<K, Entry> entry : entries.entrySet()) {
+            if (!entry.getKey().equals(justAdded)) {
+                candidates.add(new Candidate<>(entry.getKey(), entry.getValue(), entry.getValue().lastRead));
+            }
+        }
+        candidates.sort(Comparator.comparingLong(Candidate::lastRead));
         for (int i = 0; i < excess && i < candidates.size(); i++) {
-            Map.Entry<K, Entry> victim = candidates.get(i);
-            entries.remove(victim.getKey(), victim.getValue());
+            Candidate<K> victim = candidates.get(i);
+            entries.remove(victim.key(), victim.entry());
         }
     }
+
+    /**
+     * An entry as it stood when an eviction looked at it.
+     *
+     * @param key the entry's key
+     * @param entry the entry itself, so only that exact instance is removed
+     * @param lastRead when it had last been read at that moment
+     * @param <K> the key type
+     */
+    private record Candidate<K>(K key, Entry entry, long lastRead) {}
 
     /**
      * Drops the entry for {@code key} so the next {@link #get(Object)} refetches it. Use to force a
