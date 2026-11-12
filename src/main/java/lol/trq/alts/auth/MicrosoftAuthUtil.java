@@ -11,7 +11,10 @@ import java.security.SecureRandom;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
+import lol.trq.alts.auth.AltLoginCallback.FailureReason;
 import lol.trq.alts.net.HttpUtil;
 import lol.trq.alts.net.MicrosoftCallbackServer;
 import lol.trq.alts.net.NetworkScope;
@@ -28,8 +31,8 @@ public final class MicrosoftAuthUtil {
 
     private static final String STATE_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_";
 
-    /** Every step of this flow is an identity-service exchange, so they share one scope. */
-    private static final NetworkScope AUTH = NetworkScope.of(NetworkScope.Purpose.AUTH);
+    /** The scope for a flow that has no account yet: a fresh interactive login or a credential import. */
+    private static final NetworkScope NO_ACCOUNT = NetworkScope.of(NetworkScope.Purpose.AUTH);
 
     private MicrosoftAuthUtil() {}
 
@@ -47,7 +50,7 @@ public final class MicrosoftAuthUtil {
 
         return server.start()
                 .thenCompose(code -> exchangeCodeForToken(config, code, server.redirectUri()))
-                .thenCompose(tokens -> completeFrom(config, tokens))
+                .thenCompose(tokens -> completeFrom(config, tokens, NO_ACCOUNT))
                 .whenComplete((profile, error) -> server.stop());
     }
 
@@ -68,21 +71,37 @@ public final class MicrosoftAuthUtil {
         if (refreshToken == null || refreshToken.isBlank()) {
             return CompletableFuture.failedFuture(new RefreshRejectedException("refresh token is blank", true));
         }
-        return exchangeRefreshForToken(config, refreshToken).thenCompose(tokens -> completeFrom(config, tokens));
+        return exchangeRefreshForToken(config, refreshToken, NO_ACCOUNT)
+                .thenCompose(tokens -> completeFrom(config, tokens, NO_ACCOUNT));
     }
 
     /**
-     * Runs the Xbox Live, XSTS, Minecraft services, and profile steps shared by both entry points.
+     * Runs the Xbox Live, XSTS, Minecraft services, and profile steps shared by every entry point.
      *
      * @param config the host's Microsoft authentication configuration
      * @param tokens the Microsoft tokens produced by whichever first step ran
+     * @param account a scope naming the account this is for, or one naming none
      * @return a future containing the resolved profile
      */
-    private static CompletableFuture<MinecraftProfile> completeFrom(MicrosoftAuthConfig config, MsTokens tokens) {
-        return authenticateWithXboxLive(config, tokens)
-                .thenCompose(xblToken -> authenticateWithXSTS(config, xblToken))
-                .thenCompose(xstsData -> authenticateWithMinecraft(config, xstsData))
-                .thenCompose(session -> getMinecraftProfile(config, session, tokens));
+    private static CompletableFuture<MinecraftProfile> completeFrom(
+            MicrosoftAuthConfig config, MsTokens tokens, NetworkScope account) {
+        return authenticateWithXboxLive(config, tokens, account)
+                .thenCompose(xblToken -> authenticateWithXSTS(config, xblToken, account))
+                .thenCompose(xstsData -> authenticateWithMinecraft(config, xstsData, account))
+                .thenCompose(session -> getMinecraftProfile(config, session, tokens, account));
+    }
+
+    /**
+     * Builds the scope for one hop, keeping the account and stating the hop's own purpose.
+     *
+     * @param purpose what this hop fetches
+     * @param account a scope naming the account, or {@code null}
+     * @return the hop's scope
+     */
+    private static NetworkScope scope(NetworkScope.Purpose purpose, NetworkScope account) {
+        return account == null
+                ? NetworkScope.of(purpose)
+                : NetworkScope.forAccount(purpose, account.accountUuid(), account.accountUsername());
     }
 
     /**
@@ -152,21 +171,16 @@ public final class MicrosoftAuthUtil {
     static CompletableFuture<MsTokens> exchangeCodeForToken(
             MicrosoftAuthConfig config, String code, String redirectUri) {
         return CompletableFuture.supplyAsync(() -> {
-            try {
-                String body = String.format(
-                        "client_id=%s&code=%s&grant_type=authorization_code&redirect_uri=%s&scope=%s",
-                        URLEncoder.encode(config.clientId(), StandardCharsets.UTF_8),
-                        URLEncoder.encode(code, StandardCharsets.UTF_8),
-                        URLEncoder.encode(redirectUri, StandardCharsets.UTF_8),
-                        URLEncoder.encode(config.scope(), StandardCharsets.UTF_8));
-                JsonObject response = HttpUtil.postForm(config.tokenUrl(), null, body, AUTH);
-                if (response == null) throw new Exception("Token exchange failed");
-                return new MsTokens(
-                        response.get("access_token").getAsString(),
-                        response.get("refresh_token").getAsString());
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
+            String body = "client_id=" + encode(config.clientId()) + "&code=" + encode(code)
+                    + "&grant_type=authorization_code&redirect_uri=" + encode(redirectUri) + "&scope="
+                    + encode(config.scope());
+            JsonObject json = send(
+                            "Token exchange",
+                            () -> HttpUtil.postFormForStatus(config.tokenUrl(), null, body, NO_ACCOUNT))
+                    .body();
+            return read(
+                    "Token exchange",
+                    () -> new MsTokens(json.get("access_token").getAsString(), stringOrNull(json, "refresh_token")));
         });
     }
 
@@ -177,10 +191,11 @@ public final class MicrosoftAuthUtil {
      *
      * @param config the host's Microsoft authentication configuration
      * @param refreshToken the stored refresh token to redeem
+     * @param account a scope naming the account this is for, or one naming none
      * @return a future containing the freshly issued Microsoft tokens
      */
     private static CompletableFuture<MsTokens> exchangeRefreshForToken(
-            MicrosoftAuthConfig config, String refreshToken) {
+            MicrosoftAuthConfig config, String refreshToken, NetworkScope account) {
         return CompletableFuture.supplyAsync(() -> {
             HttpUtil.HttpResponse response;
             try {
@@ -194,7 +209,8 @@ public final class MicrosoftAuthUtil {
                 if (config.redirectUri() != null) {
                     body += "&redirect_uri=" + URLEncoder.encode(config.redirectUri(), StandardCharsets.UTF_8);
                 }
-                response = HttpUtil.postFormForStatus(config.tokenUrl(), null, body, AUTH);
+                response = HttpUtil.postFormForStatus(
+                        config.tokenUrl(), null, body, scope(NetworkScope.Purpose.AUTH, account));
             } catch (Exception transportFailure) {
                 throw new RefreshRejectedException("refresh transport failure", false, transportFailure);
             }
@@ -239,26 +255,24 @@ public final class MicrosoftAuthUtil {
      *
      * @param config the host's Microsoft authentication configuration
      * @param tokens the Microsoft tokens from the previous step
+     * @param account a scope naming the account this is for, or one naming none
      * @return a future containing the Xbox Live token
      */
-    private static CompletableFuture<String> authenticateWithXboxLive(MicrosoftAuthConfig config, MsTokens tokens) {
+    private static CompletableFuture<String> authenticateWithXboxLive(
+            MicrosoftAuthConfig config, MsTokens tokens, NetworkScope account) {
         return CompletableFuture.supplyAsync(() -> {
-            try {
-                JsonObject body = new JsonObject();
-                JsonObject properties = new JsonObject();
-                properties.addProperty("AuthMethod", "RPS");
-                properties.addProperty("SiteName", "user.auth.xboxlive.com");
-                properties.addProperty("RpsTicket", config.rpsTicketPrefix() + tokens.accessToken());
-                body.add("Properties", properties);
-                body.addProperty("RelyingParty", "http://auth.xboxlive.com");
-                body.addProperty("TokenType", "JWT");
+            JsonObject body = new JsonObject();
+            JsonObject properties = new JsonObject();
+            properties.addProperty("AuthMethod", "RPS");
+            properties.addProperty("SiteName", "user.auth.xboxlive.com");
+            properties.addProperty("RpsTicket", config.rpsTicketPrefix() + tokens.accessToken());
+            body.add("Properties", properties);
+            body.addProperty("RelyingParty", "http://auth.xboxlive.com");
+            body.addProperty("TokenType", "JWT");
 
-                JsonObject response = HttpUtil.postJson(config.xboxLiveAuthUrl(), null, body.toString(), AUTH);
-                if (response == null) throw new Exception("Xbox Live auth failed");
-                return response.get("Token").getAsString();
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
+            JsonObject json = send("Xbox Live auth", () -> postJson(config.xboxLiveAuthUrl(), body, account))
+                    .body();
+            return read("Xbox Live auth", () -> json.get("Token").getAsString());
         });
     }
 
@@ -267,41 +281,45 @@ public final class MicrosoftAuthUtil {
      *
      * @param config the host's Microsoft authentication configuration
      * @param xblToken the Xbox Live token from the previous step
+     * @param account a scope naming the account this is for, or one naming none
      * @return a future containing the XSTS token and user hash
      */
-    private static CompletableFuture<XstsData> authenticateWithXSTS(MicrosoftAuthConfig config, String xblToken) {
+    private static CompletableFuture<XstsData> authenticateWithXSTS(
+            MicrosoftAuthConfig config, String xblToken, NetworkScope account) {
         return CompletableFuture.supplyAsync(() -> {
+            JsonObject body = new JsonObject();
+            JsonObject properties = new JsonObject();
+            JsonArray userTokens = new JsonArray();
+            userTokens.add(xblToken);
+            properties.add("UserTokens", userTokens);
+            properties.addProperty("SandboxId", "RETAIL");
+            body.add("Properties", properties);
+            body.addProperty("RelyingParty", "rp://api.minecraftservices.com/");
+            body.addProperty("TokenType", "JWT");
+
+            // Read the status so an XSTS refusal's XErr can be decoded: the endpoint answers a
+            // rejection with a code that says exactly what is wrong, which a bare "auth failed"
+            // throws away.
+            HttpUtil.HttpResponse status;
             try {
-                JsonObject body = new JsonObject();
-                JsonObject properties = new JsonObject();
-                JsonArray userTokens = new JsonArray();
-                userTokens.add(xblToken);
-                properties.add("UserTokens", userTokens);
-                properties.addProperty("SandboxId", "RETAIL");
-                body.add("Properties", properties);
-                body.addProperty("RelyingParty", "rp://api.minecraftservices.com/");
-                body.addProperty("TokenType", "JWT");
-
-                // Read the status so an XSTS refusal's XErr can be decoded: the endpoint answers a
-                // rejection with a code that says exactly what is wrong, which a bare "auth failed"
-                // throws away.
-                HttpUtil.HttpResponse status = HttpUtil.postJsonForStatus(config.xstsAuthUrl(), null, body.toString());
-                if (!status.successful() || status.body() == null) {
-                    throw xstsFailure(status);
-                }
-                JsonObject response = status.body();
-
-                String token = response.get("Token").getAsString();
-                String uhs = response.getAsJsonObject("DisplayClaims")
-                        .getAsJsonArray("xui")
-                        .get(0)
-                        .getAsJsonObject()
-                        .get("uhs")
-                        .getAsString();
-                return new XstsData(token, uhs);
-            } catch (Exception e) {
-                throw new RuntimeException(e);
+                status = postJson(config.xstsAuthUrl(), body, account);
+            } catch (Exception transportFailure) {
+                throw unreachable("XSTS auth", transportFailure);
             }
+            if (!status.successful() || status.body() == null) {
+                throw xstsFailure(status);
+            }
+            JsonObject response = status.body();
+            return read(
+                    "XSTS auth",
+                    () -> new XstsData(
+                            response.get("Token").getAsString(),
+                            response.getAsJsonObject("DisplayClaims")
+                                    .getAsJsonArray("xui")
+                                    .get(0)
+                                    .getAsJsonObject()
+                                    .get("uhs")
+                                    .getAsString()));
         });
     }
 
@@ -310,22 +328,20 @@ public final class MicrosoftAuthUtil {
      *
      * @param config the host's Microsoft authentication configuration
      * @param xstsData the XSTS data from the previous step
+     * @param account a scope naming the account this is for, or one naming none
      * @return a future containing the Minecraft services session and its lifetime
      */
     private static CompletableFuture<McSession> authenticateWithMinecraft(
-            MicrosoftAuthConfig config, XstsData xstsData) {
+            MicrosoftAuthConfig config, XstsData xstsData, NetworkScope account) {
         return CompletableFuture.supplyAsync(() -> {
-            try {
-                JsonObject body = new JsonObject();
-                body.addProperty("identityToken", "XBL3.0 x=" + xstsData.uhs() + ";" + xstsData.token());
-                JsonObject response = HttpUtil.postJson(config.minecraftLoginUrl(), null, body.toString(), AUTH);
-                if (response == null) throw new Exception("MC services auth failed");
-                long expiresIn =
-                        response.has("expires_in") ? response.get("expires_in").getAsLong() : 0L;
-                return new McSession(response.get("access_token").getAsString(), expiresIn);
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
+            JsonObject body = new JsonObject();
+            body.addProperty("identityToken", "XBL3.0 x=" + xstsData.uhs() + ";" + xstsData.token());
+            JsonObject json = send("Minecraft services auth", () -> postJson(config.minecraftLoginUrl(), body, account))
+                    .body();
+            return read("Minecraft services auth", () -> {
+                long expiresIn = json.has("expires_in") ? json.get("expires_in").getAsLong() : 0L;
+                return new McSession(json.get("access_token").getAsString(), expiresIn);
+            });
         });
     }
 
@@ -335,37 +351,166 @@ public final class MicrosoftAuthUtil {
      * @param config the host's Microsoft authentication configuration
      * @param session the final Minecraft services session
      * @param tokens the Microsoft tokens the flow started from
+     * @param account a scope naming the account this is for, or one naming none
      * @return a future containing the populated profile
      */
     private static CompletableFuture<MinecraftProfile> getMinecraftProfile(
-            MicrosoftAuthConfig config, McSession session, MsTokens tokens) {
+            MicrosoftAuthConfig config, McSession session, MsTokens tokens, NetworkScope account) {
         return CompletableFuture.supplyAsync(() -> {
+            HttpUtil.HttpResponse response;
             try {
-                JsonObject profile = HttpUtil.get(
+                response = HttpUtil.getForStatus(
                         config.minecraftProfileUrl(),
                         Map.of("Authorization", "Bearer " + session.accessToken()),
-                        NetworkScope.of(NetworkScope.Purpose.PROFILE));
-
-                if (profile == null) throw new Exception("Profile fetch failed");
-
-                String uuid = profile.get("id").getAsString();
-                String username = profile.get("name").getAsString();
-
-                if (!uuid.contains("-")) {
-                    uuid = uuid.replaceFirst(
-                            "(\\p{XDigit}{8})(\\p{XDigit}{4})(\\p{XDigit}{4})(\\p{XDigit}{4})(\\p{XDigit}+)",
-                            "$1-$2-$3-$4-$5");
-                }
-                return new MinecraftProfile(
-                        username,
-                        uuid,
-                        session.accessToken(),
-                        tokens.refreshToken(),
-                        absoluteExpiry(session.expiresIn()));
-            } catch (Exception e) {
-                throw new RuntimeException(e);
+                        scope(NetworkScope.Purpose.PROFILE, account));
+            } catch (Exception transportFailure) {
+                throw unreachable("Profile fetch", transportFailure);
             }
+            if (response.status() == 404) {
+                // Signed in, but there is no Minecraft profile behind the account.
+                throw new AuthFlowException("This account has no Minecraft profile", FailureReason.NOT_ENTITLED);
+            }
+            if (!response.successful() || response.body() == null) {
+                throw stepFailure("Profile fetch", response);
+            }
+            JsonObject profile = response.body();
+            return read(
+                    "Profile fetch",
+                    () -> new MinecraftProfile(
+                            profile.get("name").getAsString(),
+                            AuthFormats.dashedUuid(profile.get("id").getAsString()),
+                            session.accessToken(),
+                            tokens.refreshToken(),
+                            absoluteExpiry(session.expiresIn())));
         });
+    }
+
+    /**
+     * Posts a JSON body on one account's behalf, returning the status alongside the parsed body.
+     *
+     * @param url the endpoint
+     * @param body the JSON payload
+     * @param account a scope naming the account this is for, or one naming none
+     * @return the status and parsed body
+     * @throws Exception if a network or protocol error occurs
+     */
+    private static HttpUtil.HttpResponse postJson(String url, JsonObject body, NetworkScope account) throws Exception {
+        return HttpUtil.sendForStatus(
+                "POST",
+                url,
+                "application/json",
+                null,
+                body.toString().getBytes(StandardCharsets.UTF_8),
+                scope(NetworkScope.Purpose.AUTH, account));
+    }
+
+    /**
+     * Sends one step's request and insists on a successful JSON answer, classifying anything else.
+     *
+     * @param step the step's name, for the failure message
+     * @param request the request to send
+     * @return the successful response, whose body is never null
+     */
+    private static HttpUtil.HttpResponse send(String step, Callable<HttpUtil.HttpResponse> request) {
+        HttpUtil.HttpResponse response;
+        try {
+            response = request.call();
+        } catch (Exception transportFailure) {
+            throw unreachable(step, transportFailure);
+        }
+        if (!response.successful()) {
+            throw stepFailure(step, response);
+        }
+        if (response.body() == null) {
+            throw unexpected(step, null);
+        }
+        return response;
+    }
+
+    /**
+     * Reads the fields a step needs out of its response, turning a missing or mistyped one into a
+     * classified failure rather than a bare {@code NullPointerException}.
+     *
+     * @param step the step's name, for the failure message
+     * @param reader the extraction to run
+     * @param <T> the extracted type
+     * @return the extracted value
+     */
+    private static <T> T read(String step, Supplier<T> reader) {
+        try {
+            return reader.get();
+        } catch (RuntimeException malformed) {
+            throw unexpected(step, malformed);
+        }
+    }
+
+    /**
+     * Classifies a step the service answered with a failure status. A throttle and an outage are kept
+     * apart from a refusal: the first two say nothing about the credential.
+     *
+     * @param step the step's name
+     * @param response the failing response
+     * @return the exception to fail the flow with
+     */
+    static AuthFlowException stepFailure(String step, HttpUtil.HttpResponse response) {
+        return stepFailure(step, response.status());
+    }
+
+    /**
+     * Classifies a failure status; see {@link #stepFailure(String, HttpUtil.HttpResponse)}.
+     *
+     * @param step the step's name
+     * @param status the failing HTTP status
+     * @return the exception to fail the flow with
+     */
+    static AuthFlowException stepFailure(String step, int status) {
+        FailureReason reason;
+        if (status == 429) {
+            reason = FailureReason.RATE_LIMITED;
+        } else if (status >= 500 || status == 408) {
+            reason = FailureReason.NETWORK;
+        } else {
+            reason = FailureReason.INVALID_TOKEN;
+        }
+        return new AuthFlowException(step + " failed with status " + status, reason);
+    }
+
+    static AuthFlowException unreachable(String step, Exception transportFailure) {
+        return new AuthFlowException(step + " could not be reached", FailureReason.NETWORK, transportFailure);
+    }
+
+    static AuthFlowException unexpected(String step, RuntimeException malformed) {
+        return new AuthFlowException(step + " returned an unexpected response", FailureReason.UNKNOWN, malformed);
+    }
+
+    private static String encode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private static String stringOrNull(JsonObject json, String key) {
+        return json.has(key) && json.get(key).isJsonPrimitive() ? json.get(key).getAsString() : null;
+    }
+
+    private static String redacted(String secret) {
+        return secret == null ? "null" : "<redacted>";
+    }
+
+    /**
+     * Finds the classified failure inside whatever a failed stage completed with. A stage wraps its
+     * cause in a {@code CompletionException}, sometimes more than once, so the chain is walked.
+     *
+     * @param failure the throwable a stage completed with
+     * @return the classified failure, or {@code null} when the chain holds none
+     * @since 0.12.0
+     */
+    public static AuthFlowException classified(Throwable failure) {
+        int depth = 0;
+        for (Throwable current = failure; current != null && depth < 16; current = current.getCause(), depth++) {
+            if (current instanceof AuthFlowException classified) {
+                return classified;
+            }
+        }
+        return null;
     }
 
     /**
@@ -442,7 +587,7 @@ public final class MicrosoftAuthUtil {
      * @param response the XSTS rejection
      * @return the exception to fail the flow with
      */
-    private static XstsAuthException xstsFailure(HttpUtil.HttpResponse response) {
+    private static AuthFlowException xstsFailure(HttpUtil.HttpResponse response) {
         long xerr = 0L;
         JsonObject body = response.body();
         if (body != null && body.has("XErr") && body.get("XErr").isJsonPrimitive()) {
@@ -453,7 +598,67 @@ public final class MicrosoftAuthUtil {
             }
         }
         XstsError error = XstsError.fromCode(xerr);
-        return new XstsAuthException("XSTS auth failed (" + error + ", status " + response.status() + ")", error);
+        int status = response.status();
+        if (error == XstsError.UNKNOWN && (status == 429 || status == 408 || status >= 500)) {
+            // No stated refusal: the service is throttling or failing, which is no verdict on the account.
+            return stepFailure("XSTS auth", response);
+        }
+        return new XstsAuthException("XSTS auth failed (" + error + ", status " + status + ")", error);
+    }
+
+    /**
+     * Signals that a step of the Microsoft sign-in chain failed, carrying a {@link FailureReason} so a
+     * caller can tell an unreachable service from a throttled one from a refused credential without
+     * reading the message. The message names the step and the status and never carries a token or code.
+     *
+     * @author trq
+     * @since 0.12.0
+     */
+    public static class AuthFlowException extends RuntimeException {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        /**
+         * The classified cause.
+         *
+         * @serial
+         */
+        private final FailureReason reason;
+
+        /**
+         * Creates a classified failure.
+         *
+         * @param message the failure description
+         * @param reason the classified cause
+         * @since 0.12.0
+         */
+        public AuthFlowException(String message, FailureReason reason) {
+            this(message, reason, null);
+        }
+
+        /**
+         * Creates a classified failure carrying the underlying one.
+         *
+         * @param message the failure description
+         * @param reason the classified cause
+         * @param cause the underlying failure, or {@code null}
+         * @since 0.12.0
+         */
+        public AuthFlowException(String message, FailureReason reason, Throwable cause) {
+            super(message, cause);
+            this.reason = reason == null ? FailureReason.UNKNOWN : reason;
+        }
+
+        /**
+         * Returns the classified cause.
+         *
+         * @return the reason, never {@code null}
+         * @since 0.12.0
+         */
+        public FailureReason reason() {
+            return reason;
+        }
     }
 
     /**
@@ -463,11 +668,16 @@ public final class MicrosoftAuthUtil {
      * @author trq
      * @since 1.0.0
      */
-    public static final class XstsAuthException extends RuntimeException {
+    public static final class XstsAuthException extends AuthFlowException {
 
         @Serial
         private static final long serialVersionUID = 1L;
 
+        /**
+         * The classified cause of the refusal.
+         *
+         * @serial
+         */
         private final XstsError error;
 
         /**
@@ -478,7 +688,7 @@ public final class MicrosoftAuthUtil {
          * @since 1.0.0
          */
         public XstsAuthException(String message, XstsError error) {
-            super(message);
+            super(message, FailureReason.XBOX_DENIED);
             this.error = error;
         }
 
@@ -494,11 +704,26 @@ public final class MicrosoftAuthUtil {
     }
 
     /** Holds the Microsoft OAuth access and refresh tokens. */
-    private record MsTokens(String accessToken, String refreshToken) {}
+    private record MsTokens(String accessToken, String refreshToken) {
+        @Override
+        public String toString() {
+            return "MsTokens[accessToken=" + redacted(accessToken) + ", refreshToken=" + redacted(refreshToken) + "]";
+        }
+    }
 
     /** Holds the Minecraft services session token and its advertised lifetime in seconds. */
-    private record McSession(String accessToken, long expiresIn) {}
+    private record McSession(String accessToken, long expiresIn) {
+        @Override
+        public String toString() {
+            return "McSession[accessToken=" + redacted(accessToken) + ", expiresIn=" + expiresIn + "]";
+        }
+    }
 
     /** Holds XSTS authorization data. */
-    private record XstsData(String token, String uhs) {}
+    private record XstsData(String token, String uhs) {
+        @Override
+        public String toString() {
+            return "XstsData[token=" + redacted(token) + ", uhs=" + redacted(uhs) + "]";
+        }
+    }
 }

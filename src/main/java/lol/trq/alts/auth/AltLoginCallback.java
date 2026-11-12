@@ -55,7 +55,40 @@ public interface AltLoginCallback {
          *
          * @since 0.8.0
          */
-        NOT_ENTITLED
+        NOT_ENTITLED,
+
+        /**
+         * A service answered that the caller is sending too many requests. The credential is untouched;
+         * the remedy is to wait, or to send the request from a different address.
+         *
+         * @since 0.12.0
+         */
+        RATE_LIMITED,
+
+        /**
+         * The sign-in succeeded but Xbox Live refused to authorize the account. The result's
+         * {@link LoginResult#xstsError()} says why, and each cause is something the user fixes at a
+         * specific place rather than by retrying.
+         *
+         * @since 0.12.0
+         */
+        XBOX_DENIED,
+
+        /**
+         * The user refused the sign-in — declined the consent page, or declined the device-code
+         * request.
+         *
+         * @since 0.12.0
+         */
+        DECLINED,
+
+        /**
+         * An interactive sign-in was not finished in time: the device code expired, or the browser
+         * login was never completed. Starting again issues a fresh challenge.
+         *
+         * @since 0.12.0
+         */
+        TIMED_OUT
     }
 
     /**
@@ -65,10 +98,26 @@ public interface AltLoginCallback {
      * @param message a descriptive message (success notification or error reason)
      * @param account the authenticated account object, or null if the attempt failed
      * @param reason the machine-readable cause, {@link FailureReason#NONE} on success; added in 0.6.0
+     * @param xstsError why Xbox Live refused to authorize the account, or {@code null} when the attempt
+     *     did not fail at that step; added in 0.12.0
      * @author trq
      * @since 0.1.0
      */
-    record LoginResult(boolean success, String message, AltAccount account, FailureReason reason) {
+    record LoginResult(boolean success, String message, AltAccount account, FailureReason reason, XstsError xstsError) {
+
+        /**
+         * Creates a result that carries no Xbox Live refusal. This is the canonical constructor as it
+         * stood before {@code xstsError} existed, kept so positional construction still compiles.
+         *
+         * @param success whether the authentication was successful
+         * @param message a descriptive message
+         * @param account the authenticated account object, or null if the attempt failed
+         * @param reason the machine-readable cause
+         * @since 0.12.0
+         */
+        public LoginResult(boolean success, String message, AltAccount account, FailureReason reason) {
+            this(success, message, account, reason, null);
+        }
 
         /**
          * Creates a successful login result.
@@ -100,6 +149,19 @@ public interface AltLoginCallback {
          */
         public static LoginResult failure(String message, FailureReason cause) {
             return new LoginResult(false, message, null, cause);
+        }
+
+        /**
+         * Creates a failed login result carrying the reason Xbox Live refused the account.
+         *
+         * @param message the human-readable reason why the authentication failed
+         * @param cause the classified cause, for hosts that branch on the outcome
+         * @param xstsError why Xbox Live refused, or {@code null} when it did not
+         * @return a new result indicating failure
+         * @since 0.12.0
+         */
+        public static LoginResult failure(String message, FailureReason cause, XstsError xstsError) {
+            return new LoginResult(false, message, null, cause, xstsError);
         }
     }
 }

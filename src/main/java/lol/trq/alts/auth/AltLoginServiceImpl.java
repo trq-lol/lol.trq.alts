@@ -4,16 +4,17 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
-import java.util.Base64;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
+import lol.trq.alts.auth.MicrosoftAuthUtil.AuthFlowException;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
@@ -32,6 +33,10 @@ import lol.trq.alts.store.AltStore;
  * @since 0.1.0
  */
 public class AltLoginServiceImpl implements AltLoginService {
+
+    private static final Pattern JWT_UUID_CLAIM = Pattern.compile("\"(?:id|mc)\"\\s*:\\s*\"([a-fA-F0-9\\-]+)\"");
+    private static final Pattern JWT_NAME_CLAIM = Pattern.compile("\"name\"\\s*:\\s*\"([^\"]+)\"");
+    private static final Pattern NOT_USERNAME = Pattern.compile("[^a-zA-Z0-9_]");
 
     private final SessionInjector sessionInjector;
     private final MicrosoftAuthConfig microsoftAuth;
@@ -121,7 +126,8 @@ public class AltLoginServiceImpl implements AltLoginService {
     public CompletableFuture<AltLoginCallback.LoginResult> loginOffline(String name, LoginMode mode) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                String cleanName = name == null ? "" : name.trim().replaceAll("[^a-zA-Z0-9_]", "");
+                String cleanName =
+                        name == null ? "" : NOT_USERNAME.matcher(name.trim()).replaceAll("");
                 if (cleanName.isEmpty() || cleanName.length() > 16) {
                     return AltLoginCallback.LoginResult.failure(
                             "Invalid username length (1-16 chars)", FailureReason.INVALID_TOKEN);
@@ -149,11 +155,48 @@ public class AltLoginServiceImpl implements AltLoginService {
         }
         return MicrosoftAuthUtil.authenticate(microsoftAuth)
                 .thenApply(profile -> finalizeLogin(profile, AccountType.MICROSOFT, mode))
-                .exceptionally(ex -> {
-                    String msg = ex.getMessage();
-                    if (ex.getCause() != null) msg = ex.getCause().getMessage();
-                    return AltLoginCallback.LoginResult.failure("Microsoft Auth: " + msg, FailureReason.UNKNOWN);
-                });
+                .exceptionally(failure -> classifiedFailure("Microsoft Auth", failure));
+    }
+
+    /**
+     * Maps a failed sign-in onto a result whose reason says what kind of failure it was. An unreachable
+     * service, a throttled one, a refused credential, and an Xbox Live refusal each have a different
+     * remedy, so none of them may be reported as another.
+     *
+     * @param label the route's name, prefixed to the message
+     * @param failure the throwable the flow failed with
+     * @return the classified failure result
+     */
+    private static AltLoginCallback.LoginResult classifiedFailure(String label, Throwable failure) {
+        AuthFlowException classified = MicrosoftAuthUtil.classified(failure);
+        if (classified != null) {
+            XstsError xstsError = classified instanceof MicrosoftAuthUtil.XstsAuthException xsts ? xsts.error() : null;
+            return AltLoginCallback.LoginResult.failure(
+                    label + ": " + classified.getMessage(), classified.reason(), xstsError);
+        }
+
+        Throwable cause = failure;
+        while (cause instanceof CompletionException && cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        if (cause instanceof TimeoutException) {
+            return AltLoginCallback.LoginResult.failure(label + ": sign-in timed out", FailureReason.TIMED_OUT);
+        }
+        if (cause instanceof IllegalArgumentException) {
+            // The credential text itself could not be read.
+            return AltLoginCallback.LoginResult.failure(
+                    label + ": " + describe(cause, "unreadable credential"), FailureReason.INVALID_TOKEN);
+        }
+        if (cause instanceof IOException) {
+            return AltLoginCallback.LoginResult.failure(
+                    label + ": " + describe(cause, "connection failed"), FailureReason.NETWORK);
+        }
+        return AltLoginCallback.LoginResult.failure(
+                label + ": " + describe(cause, "unknown error"), FailureReason.UNKNOWN);
+    }
+
+    private static String describe(Throwable cause, String fallback) {
+        return cause.getMessage() != null ? cause.getMessage() : fallback;
     }
 
     /**
@@ -166,18 +209,16 @@ public class AltLoginServiceImpl implements AltLoginService {
     @Override
     public CompletableFuture<AltLoginCallback.LoginResult> loginCookie(String cookieData, LoginMode mode) {
         return CompletableFuture.supplyAsync(() -> {
-            try {
-                if (cookieData == null || cookieData.isBlank())
-                    return AltLoginCallback.LoginResult.failure("Cookie data empty", FailureReason.INVALID_TOKEN);
-
-                MinecraftProfile profile = CookieAuthUtil.authenticate(cookieData);
-                return finalizeLogin(
-                        profile.username(), profile.uuid(), profile.accessToken(), AccountType.COOKIE, mode);
-            } catch (Exception e) {
-                String msg = e.getMessage();
-                return AltLoginCallback.LoginResult.failure(
-                        "Cookie Auth: " + (msg != null ? msg : "Unknown error"), FailureReason.INVALID_TOKEN);
+            if (cookieData == null || cookieData.isBlank()) {
+                return AltLoginCallback.LoginResult.failure("Cookie data empty", FailureReason.INVALID_TOKEN);
             }
+            MinecraftProfile profile;
+            try {
+                profile = CookieAuthUtil.authenticate(cookieData);
+            } catch (Exception e) {
+                return classifiedFailure("Cookie Auth", e);
+            }
+            return finalizeLogin(profile.username(), profile.uuid(), profile.accessToken(), AccountType.COOKIE, mode);
         });
     }
 
@@ -201,16 +242,12 @@ public class AltLoginServiceImpl implements AltLoginService {
                     try {
                         return CookieFile.read(file);
                     } catch (IOException e) {
-                        throw new CompletionException(e);
+                        // Not a network failure: the file is the credential, and it could not be read.
+                        throw new AuthFlowException(describe(e, "could not be read"), FailureReason.INVALID_TOKEN, e);
                     }
                 })
                 .thenCompose(cookieData -> loginCookie(cookieData, mode))
-                .exceptionally(ex -> {
-                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-                    return AltLoginCallback.LoginResult.failure(
-                            "Cookie file: " + (cause.getMessage() != null ? cause.getMessage() : "could not be read"),
-                            FailureReason.INVALID_TOKEN);
-                });
+                .exceptionally(failure -> classifiedFailure("Cookie file", failure));
     }
 
     /**
@@ -254,6 +291,10 @@ public class AltLoginServiceImpl implements AltLoginService {
      */
     @Override
     public CompletableFuture<AltLoginCallback.LoginResult> loginAccount(AltAccount account) {
+        if (account == null) {
+            return CompletableFuture.completedFuture(
+                    AltLoginCallback.LoginResult.failure("No account given", FailureReason.UNKNOWN));
+        }
         if (account.type() == AccountType.OFFLINE) {
             return loginOffline(account.username(), LoginMode.DIRECT);
         }
@@ -323,7 +364,8 @@ public class AltLoginServiceImpl implements AltLoginService {
      * @return the login result
      */
     private AltLoginCallback.LoginResult finalizeLogin(MinecraftProfile profile, AccountType type, LoginMode mode) {
-        AltAccount account = AltAccount.of(formatUuid(profile.uuid()), profile.username(), profile.accessToken(), type)
+        AltAccount account = AltAccount.of(
+                        AuthFormats.dashedUuid(profile.uuid()), profile.username(), profile.accessToken(), type)
                 .withTokens(profile.accessToken(), profile.refreshToken(), profile.expiresAt());
 
         if (mode == LoginMode.ADD) {
@@ -362,7 +404,7 @@ public class AltLoginServiceImpl implements AltLoginService {
     private AltLoginCallback.LoginResult finalizeLogin(
             String username, String uuid, String token, AccountType type, LoginMode mode) {
         try {
-            String fmtUuid = formatUuid(uuid);
+            String fmtUuid = AuthFormats.dashedUuid(uuid);
             AltAccount account = AltAccount.of(fmtUuid, username, token, type);
             if (mode == LoginMode.ADD) {
                 account = account.mergedOnto(storedRecord(fmtUuid));
@@ -395,9 +437,9 @@ public class AltLoginServiceImpl implements AltLoginService {
                 return Optional.empty();
             }
 
-            String payload = decodeJwtPayload(token);
-            String uuid = extractRegex(payload, "\"(?:id|mc)\"\\s*:\\s*\"([a-fA-F0-9\\-]+)\"");
-            String username = extractRegex(payload, "\"name\"\\s*:\\s*\"([^\"]+)\"");
+            String payload = AuthFormats.jwtPayload(token);
+            String uuid = firstGroup(JWT_UUID_CLAIM, payload);
+            String username = firstGroup(JWT_NAME_CLAIM, payload);
 
             if (uuid != null && username != null) {
                 return Optional.of(finalizeLogin(username, uuid, token, AccountType.SESSION, mode));
@@ -408,27 +450,14 @@ public class AltLoginServiceImpl implements AltLoginService {
     }
 
     /**
-     * Decodes the Base64-encoded payload section of a JSON Web Token.
+     * Finds the first capture group of {@code pattern} within {@code text}.
      *
-     * @param token the full JWT string
-     * @return the decoded JSON payload
-     */
-    private String decodeJwtPayload(String token) {
-        String base64 = token.split("\\.")[1];
-        int padding = (4 - base64.length() % 4) % 4;
-        base64 = base64.replace('-', '+').replace('_', '/');
-        return new String(Base64.getDecoder().decode(base64 + "=".repeat(padding)), StandardCharsets.UTF_8);
-    }
-
-    /**
-     * Finds the first capture group of {@code regex} within {@code text}.
-     *
+     * @param pattern the compiled pattern
      * @param text the source text
-     * @param regex the regular expression
      * @return the first capture group value, or null if not found
      */
-    private String extractRegex(String text, String regex) {
-        Matcher m = Pattern.compile(regex).matcher(text);
+    private static String firstGroup(Pattern pattern, String text) {
+        Matcher m = pattern.matcher(text);
         return m.find() ? m.group(1) : null;
     }
 
@@ -476,19 +505,5 @@ public class AltLoginServiceImpl implements AltLoginService {
             for (String p : t.split(":")) if (p.startsWith("eyJ")) return p;
         }
         return t.toLowerCase(Locale.ROOT).startsWith("bearer ") ? t.substring(7).trim() : t;
-    }
-
-    /**
-     * Formats a raw UUID string by adding dashes if they are missing.
-     *
-     * @param u the raw UUID string
-     * @return a formatted UUID string with dashes
-     */
-    private String formatUuid(String u) {
-        return u.contains("-")
-                ? u
-                : u.replaceFirst(
-                        "(\\p{XDigit}{8})(\\p{XDigit}{4})(\\p{XDigit}{4})(\\p{XDigit}{4})(\\p{XDigit}+)",
-                        "$1-$2-$3-$4-$5");
     }
 }
