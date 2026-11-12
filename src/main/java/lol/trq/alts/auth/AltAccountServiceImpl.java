@@ -6,6 +6,8 @@ import java.util.concurrent.CompletableFuture;
 import lol.trq.alts.auth.AccountNetworkUtil.ProfileLookup;
 import lol.trq.alts.auth.AccountStatus.State;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
+import lol.trq.alts.auth.MicrosoftAuthUtil.AuthFlowException;
+import lol.trq.alts.auth.MicrosoftAuthUtil.RefreshRejectedException;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.net.IoExecutor;
@@ -173,12 +175,29 @@ public class AltAccountServiceImpl implements AltAccountService {
      */
     private AccountStatus renewalFailure(Throwable failure, AltAccount account) {
         Throwable cause = failure.getCause() != null ? failure.getCause() : failure;
-        boolean permanent =
-                cause instanceof MicrosoftAuthUtil.RefreshRejectedException rejection && rejection.permanent();
+        RefreshRejectedException rejection = cause instanceof RefreshRejectedException rejected ? rejected : null;
+        boolean permanent = rejection != null && rejection.permanent();
         String message = "Refresh: " + (cause.getMessage() != null ? cause.getMessage() : "unknown error");
 
+        if (rejection != null && rejection.rateLimited()) {
+            return AccountStatus.failure(
+                    account, State.UNREACHABLE, FailureReason.RATE_LIMITED, message, rejection.retryAfter());
+        }
         if (!permanent) {
-            return AccountStatus.failure(account, State.UNREACHABLE, FailureReason.NETWORK, message);
+            // The token was redeemed, or never got the chance: whatever failed after that is classified by
+            // the step that failed. A throttle keeps its stated wait, and a refusal further down the chain
+            // -- Xbox Live turning the account away -- is reported as what it is rather than as an outage a
+            // caller would retry into.
+            AuthFlowException classified = rejection == null ? MicrosoftAuthUtil.classified(failure) : null;
+            if (classified == null) {
+                return AccountStatus.failure(account, State.UNREACHABLE, FailureReason.NETWORK, message);
+            }
+            return AccountStatus.failure(
+                    account,
+                    renewalStateFor(classified.reason()),
+                    classified.reason(),
+                    message,
+                    classified.retryAfter());
         }
         AltStore.clearRefreshToken(account.uuid());
         return AccountStatus.failure(
@@ -235,6 +254,9 @@ public class AltAccountServiceImpl implements AltAccountService {
         if (lookup.missingProfile()) {
             return FailureReason.NOT_ENTITLED;
         }
+        if (lookup.rateLimited()) {
+            return FailureReason.RATE_LIMITED;
+        }
         return FailureReason.NETWORK;
     }
 
@@ -261,16 +283,41 @@ public class AltAccountServiceImpl implements AltAccountService {
      * Maps a cause onto the state that describes it, given whether renewal is still on the table. A
      * refused token is only re-authentication material when there is no refresh token left to try.
      *
+     * <p>Exhaustive on purpose, with no {@code default}: a reason added later has to be placed here
+     * deliberately rather than landing on {@link State#UNKNOWN} by omission.
+     *
      * @param reason the classified cause
      * @param renewable whether the account could still be renewed
      * @return the matching state
      */
-    private static State stateFor(FailureReason reason, boolean renewable) {
+    static State stateFor(FailureReason reason, boolean renewable) {
         return switch (reason) {
+            case NONE -> State.VALID;
             case INVALID_TOKEN -> renewable ? State.EXPIRED : State.REAUTH_REQUIRED;
-            case NOT_ENTITLED -> State.NOT_ENTITLED;
-            case NETWORK -> State.UNREACHABLE;
-            default -> State.UNKNOWN;
+            case REAUTH_REQUIRED -> State.REAUTH_REQUIRED;
+            // Xbox Live turning the account away shares the remedy of a missing profile: neither a retry
+            // nor a fresh login changes it, and the reason says which of the two it was.
+            case NOT_ENTITLED, XBOX_DENIED -> State.NOT_ENTITLED;
+            // A throttle is the service being unavailable to this caller for now. Nothing was spent, and
+            // it is the reason, not the state, that tells a caller to wait rather than retry.
+            case NETWORK, RATE_LIMITED -> State.UNREACHABLE;
+            // Only an interactive sign-in can be declined or run out of time, and neither check nor
+            // refresh is one, so there is no account state these describe.
+            case DECLINED, TIMED_OUT -> State.UNKNOWN;
+            case NOT_CONFIGURED, UNKNOWN -> State.UNKNOWN;
         };
+    }
+
+    /**
+     * Maps the cause of a failed renewal onto a state. Differs from {@link #stateFor} in one place: a
+     * token refused part-way down the chain is not a verdict on the stored refresh token, which the
+     * token endpoint had just accepted, so it neither asks for another refresh nor claims the credential
+     * was discarded.
+     *
+     * @param reason the classified cause
+     * @return the matching state
+     */
+    private static State renewalStateFor(FailureReason reason) {
+        return reason == FailureReason.INVALID_TOKEN ? State.UNKNOWN : stateFor(reason, false);
     }
 }

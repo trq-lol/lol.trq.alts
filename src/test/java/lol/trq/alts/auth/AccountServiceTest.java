@@ -13,6 +13,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -22,6 +23,7 @@ import lol.trq.alts.auth.AltLoginCallback.FailureReason;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.BanInfo;
+import lol.trq.alts.model.LoginMode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -47,6 +49,7 @@ class AccountServiceTest {
     private final AtomicInteger profileCalls = new AtomicInteger();
 
     private int profileStatus = 200;
+    private String retryAfter;
 
     @BeforeEach
     void setUp() throws IOException {
@@ -70,6 +73,9 @@ class AccountServiceTest {
                 exchange -> respond(exchange, 200, "{\"access_token\":\"mc-access\",\"expires_in\":86400}"));
         server.createContext("/mcprofile", exchange -> {
             profileCalls.incrementAndGet();
+            if (retryAfter != null) {
+                exchange.getResponseHeaders().add("Retry-After", retryAfter);
+            }
             respond(exchange, profileStatus, profileStatus == 200 ? PROFILE_BODY : "{}");
         });
         server.start();
@@ -225,6 +231,151 @@ class AccountServiceTest {
                 "stored-refresh",
                 AltStoreTestSupport.find(UUID).refreshToken(),
                 "an outage must not cost the user their credential");
+    }
+
+    /**
+     * A 429 that names no wait used to be reported as an outage, which a sweep retries and then walks
+     * past. It is the service asking to be left alone, and the status has to say so either way.
+     */
+    @Test
+    void aRateLimitedCheckSaysSoWithOrWithoutAStatedWait() throws Exception {
+        profileStatus = 429;
+        AltAccount account = renewable(NOW + 3_600_000L);
+        AltStoreTestSupport.seed(account);
+
+        AccountStatus bare = service().check(account).get();
+
+        assertEquals(FailureReason.RATE_LIMITED, bare.reason());
+        assertEquals(State.UNREACHABLE, bare.state());
+        assertTrue(bare.rateLimited(), "a rate limit that names no wait is still a rate limit");
+        assertNull(bare.retryAfter());
+        assertFalse(bare.usable());
+
+        retryAfter = "30";
+        AccountStatus stated = service().check(account).get();
+
+        assertEquals(FailureReason.RATE_LIMITED, stated.reason());
+        assertTrue(stated.rateLimited());
+        assertEquals(Duration.ofSeconds(30), stated.retryAfter());
+        assertEquals(0, tokenCalls.get(), "a throttled lookup is no reason to spend a rotation");
+    }
+
+    @Test
+    void aRateLimitedValidationDuringRefreshIsNotAnsweredWithARenewal() throws Exception {
+        profileStatus = 429;
+        AltAccount account = renewable(NOW + 3_600_000L);
+        AltStoreTestSupport.seed(account);
+
+        AccountStatus status = service().refresh(account).get();
+
+        assertEquals(FailureReason.RATE_LIMITED, status.reason());
+        assertTrue(status.rateLimited());
+        assertEquals(0, tokenCalls.get(), "a throttled lookup says nothing about the token");
+    }
+
+    @Test
+    void aRateLimitedRenewalKeepsTheCredentialAndSaysSo() throws Exception {
+        server.removeContext("/token");
+        server.createContext("/token", exchange -> {
+            tokenCalls.incrementAndGet();
+            exchange.getResponseHeaders().add("Retry-After", "12");
+            respond(exchange, 429, "{}");
+        });
+        AltAccount account = renewable(NOW - 1);
+        AltStoreTestSupport.seed(account);
+
+        AccountStatus status = service().refresh(account).get();
+
+        assertEquals(State.UNREACHABLE, status.state());
+        assertEquals(FailureReason.RATE_LIMITED, status.reason());
+        assertTrue(status.rateLimited());
+        assertEquals(Duration.ofSeconds(12), status.retryAfter());
+        assertEquals(1, tokenCalls.get());
+        assertEquals(
+                "stored-refresh",
+                AltStoreTestSupport.find(UUID).refreshToken(),
+                "a throttle must not cost the user their credential");
+    }
+
+    /** The same answer on the import route, which is what a bulk import reads to know when to stop. */
+    @Test
+    void aRateLimitedRefreshTokenImportIsClassifiedAsOne() throws Exception {
+        server.removeContext("/token");
+        server.createContext("/token", exchange -> respond(exchange, 429, "{}"));
+        AltLoginServiceImpl logins = new AltLoginServiceImpl(session -> {}, config);
+
+        AltLoginCallback.LoginResult throttled =
+                logins.loginRefreshToken("M.C123_imported", LoginMode.DIRECT).get();
+
+        assertFalse(throttled.success());
+        assertEquals(FailureReason.RATE_LIMITED, throttled.reason());
+
+        server.removeContext("/token");
+        server.createContext(
+                "/token", exchange -> respond(exchange, 200, "{\"access_token\":\"ms\",\"refresh_token\":\"r\"}"));
+        server.removeContext("/xsts");
+        server.createContext("/xsts", exchange -> respond(exchange, 401, "{\"XErr\":2148916233}"));
+
+        AltLoginCallback.LoginResult denied =
+                logins.loginRefreshToken("M.C123_imported", LoginMode.DIRECT).get();
+
+        assertEquals(FailureReason.XBOX_DENIED, denied.reason(), "a refusal after redemption is not an outage");
+        assertEquals(XstsError.NO_XBOX_ACCOUNT, denied.xstsError());
+    }
+
+    /** The token endpoint accepted the refresh token; a throttle further down is still a throttle. */
+    @Test
+    void aRateLimitFurtherDownTheRenewalChainIsReportedAsOne() throws Exception {
+        server.removeContext("/xbl");
+        server.createContext("/xbl", exchange -> respond(exchange, 429, "{}"));
+        AltAccount account = renewable(NOW - 1);
+        AltStoreTestSupport.seed(account);
+
+        AccountStatus status = service().refresh(account).get();
+
+        assertEquals(FailureReason.RATE_LIMITED, status.reason());
+        assertTrue(status.rateLimited());
+        assertEquals("stored-refresh", AltStoreTestSupport.find(UUID).refreshToken());
+    }
+
+    /** Xbox Live turning the account away is not an outage, and retrying it only spends rotations. */
+    @Test
+    void anXboxRefusalDuringRenewalIsNotReportedAsAnOutage() throws Exception {
+        server.removeContext("/xsts");
+        server.createContext("/xsts", exchange -> respond(exchange, 401, "{\"XErr\":2148916233}"));
+        AltAccount account = renewable(NOW - 1);
+        AltStoreTestSupport.seed(account);
+
+        AccountStatus status = service().refresh(account).get();
+
+        assertEquals(FailureReason.XBOX_DENIED, status.reason());
+        assertEquals(State.NOT_ENTITLED, status.state());
+        assertFalse(status.rateLimited());
+        assertEquals(
+                "stored-refresh",
+                AltStoreTestSupport.find(UUID).refreshToken(),
+                "the refresh token was accepted, so it is not the thing that is spent");
+    }
+
+    /**
+     * Every reason has a state chosen for it. The mapping has no default branch, so this is as much a
+     * record of the choices as a test of them.
+     */
+    @Test
+    void everyFailureReasonMapsOntoADeliberateState() {
+        assertEquals(State.UNREACHABLE, AltAccountServiceImpl.stateFor(FailureReason.RATE_LIMITED, true));
+        assertEquals(State.UNREACHABLE, AltAccountServiceImpl.stateFor(FailureReason.NETWORK, true));
+        assertEquals(State.NOT_ENTITLED, AltAccountServiceImpl.stateFor(FailureReason.XBOX_DENIED, true));
+        assertEquals(State.NOT_ENTITLED, AltAccountServiceImpl.stateFor(FailureReason.NOT_ENTITLED, true));
+        assertEquals(State.UNKNOWN, AltAccountServiceImpl.stateFor(FailureReason.DECLINED, true));
+        assertEquals(State.UNKNOWN, AltAccountServiceImpl.stateFor(FailureReason.TIMED_OUT, true));
+        assertEquals(State.EXPIRED, AltAccountServiceImpl.stateFor(FailureReason.INVALID_TOKEN, true));
+        assertEquals(State.REAUTH_REQUIRED, AltAccountServiceImpl.stateFor(FailureReason.INVALID_TOKEN, false));
+        assertEquals(State.REAUTH_REQUIRED, AltAccountServiceImpl.stateFor(FailureReason.REAUTH_REQUIRED, true));
+        for (FailureReason reason : FailureReason.values()) {
+            // Throws for a constant the mapping does not place.
+            AltAccountServiceImpl.stateFor(reason, false);
+        }
     }
 
     @Test

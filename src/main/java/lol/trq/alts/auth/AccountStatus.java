@@ -50,12 +50,17 @@ public record AccountStatus(
         REAUTH_REQUIRED,
 
         /**
-         * The credentials authenticated, but the account has no Minecraft profile. Neither retrying nor
-         * re-authenticating helps.
+         * The credentials authenticated, but the account cannot be played as it stands: it has no
+         * Minecraft profile ({@link FailureReason#NOT_ENTITLED}), or Xbox Live refused to authorize it
+         * ({@link FailureReason#XBOX_DENIED}). Neither retrying nor re-authenticating helps.
          */
         NOT_ENTITLED,
 
-        /** The service could not be reached, or failed. Retryable, and nothing was spent. */
+        /**
+         * The service could not be reached, failed, or is throttling the caller
+         * ({@link FailureReason#RATE_LIMITED}, for which {@link AccountStatus#rateLimited()} is true).
+         * Nothing was spent. An outage is worth a retry; a rate limit is worth a wait.
+         */
         UNREACHABLE,
 
         /** Something else went wrong, which the library could not classify. */
@@ -95,13 +100,17 @@ public record AccountStatus(
     }
 
     /**
-     * Returns whether the service asked the caller to wait before trying this account again.
+     * Returns whether the service asked the caller to slow down before trying this account again.
      *
-     * @return true if a delay was stated
+     * <p>True for a rate limit whether or not the service said how long to wait: since 0.12.0 a bare
+     * {@code 429} is reported as {@link FailureReason#RATE_LIMITED} with a {@code null}
+     * {@link #retryAfter()}, where it used to pass for an outage.
+     *
+     * @return true if the reason is {@link FailureReason#RATE_LIMITED} or a delay was stated
      * @since 0.9.0
      */
     public boolean rateLimited() {
-        return retryAfter != null;
+        return reason == FailureReason.RATE_LIMITED || retryAfter != null;
     }
 
     /**

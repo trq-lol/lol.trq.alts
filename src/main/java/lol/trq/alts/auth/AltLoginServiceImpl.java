@@ -417,12 +417,24 @@ public class AltLoginServiceImpl implements AltLoginService {
      */
     private static AltLoginCallback.LoginResult importFailure(Throwable ex) {
         Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-        boolean permanent =
-                cause instanceof MicrosoftAuthUtil.RefreshRejectedException rejection && rejection.permanent();
-
-        return AltLoginCallback.LoginResult.failure(
-                "Refresh: " + (cause.getMessage() != null ? cause.getMessage() : "unknown error"),
-                permanent ? FailureReason.REAUTH_REQUIRED : FailureReason.NETWORK);
+        if (!(cause instanceof MicrosoftAuthUtil.RefreshRejectedException rejection)) {
+            // The token was redeemed and a later step failed, which that step has already classified: a
+            // throttle, an Xbox Live refusal, and an outage each keep their own reason.
+            if (MicrosoftAuthUtil.classified(ex) != null) {
+                return classifiedFailure("Refresh", ex);
+            }
+            return AltLoginCallback.LoginResult.failure(
+                    "Refresh: " + describe(cause, "unknown error"), FailureReason.NETWORK);
+        }
+        FailureReason reason;
+        if (rejection.permanent()) {
+            reason = FailureReason.REAUTH_REQUIRED;
+        } else if (rejection.rateLimited()) {
+            reason = FailureReason.RATE_LIMITED;
+        } else {
+            reason = FailureReason.NETWORK;
+        }
+        return AltLoginCallback.LoginResult.failure("Refresh: " + describe(cause, "unknown error"), reason);
     }
 
     /**

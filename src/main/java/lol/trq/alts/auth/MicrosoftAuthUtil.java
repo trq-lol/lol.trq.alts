@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Locale;
@@ -589,6 +590,12 @@ public final class MicrosoftAuthUtil {
                         throw new RefreshRejectedException("refresh transport failure", false, transportFailure);
                     }
 
+                    if (response.rateLimited()) {
+                        // Said apart from an outage: the remedy is to wait, and a caller working through
+                        // many accounts must stop sending rather than retry into the limit.
+                        throw RefreshRejectedException.rateLimited(
+                                "refresh rate limited with status " + response.status(), response.retryAfter());
+                    }
                     if (!response.successful() || response.body() == null) {
                         throw new RefreshRejectedException(
                                 "refresh rejected with status " + response.status(), tokenIsSpent(response));
@@ -841,7 +848,10 @@ public final class MicrosoftAuthUtil {
      * @return the exception to fail the flow with
      */
     static AuthFlowException stepFailure(String step, HttpUtil.HttpResponse response) {
-        return stepFailure(step, response.status());
+        AuthFlowException classified = stepFailure(step, response.status());
+        return response.retryAfter() == null
+                ? classified
+                : new AuthFlowException(classified.getMessage(), classified.reason(), response.retryAfter(), null);
     }
 
     /**
@@ -935,6 +945,20 @@ public final class MicrosoftAuthUtil {
         private final boolean permanent;
 
         /**
+         * Whether the redemption was throttled.
+         *
+         * @serial
+         */
+        private final boolean rateLimited;
+
+        /**
+         * How long the service asked the caller to wait, or null.
+         *
+         * @serial
+         */
+        private final Duration retryAfter;
+
+        /**
          * Creates a rejection.
          *
          * @param message the failure description
@@ -957,6 +981,49 @@ public final class MicrosoftAuthUtil {
         public RefreshRejectedException(String message, boolean permanent, Throwable cause) {
             super(message, cause);
             this.permanent = permanent;
+            this.rateLimited = false;
+            this.retryAfter = null;
+        }
+
+        private RefreshRejectedException(String message, Duration retryAfter) {
+            super(message);
+            this.permanent = false;
+            this.rateLimited = true;
+            this.retryAfter = retryAfter;
+        }
+
+        /**
+         * Creates a rejection for a redemption the token endpoint throttled. Never permanent: a rate
+         * limit says nothing about the refresh token.
+         *
+         * @param message the failure description
+         * @param retryAfter how long the service asked the caller to wait, or {@code null} when it named
+         *     no wait
+         * @return the rejection
+         * @since 0.12.0
+         */
+        public static RefreshRejectedException rateLimited(String message, Duration retryAfter) {
+            return new RefreshRejectedException(message, retryAfter);
+        }
+
+        /**
+         * Returns whether the token endpoint answered that the caller is sending too many requests.
+         *
+         * @return true if the redemption was throttled
+         * @since 0.12.0
+         */
+        public boolean rateLimited() {
+            return rateLimited;
+        }
+
+        /**
+         * Returns how long the service asked the caller to wait before trying again, when it said.
+         *
+         * @return the stated wait, or {@code null} when none was given
+         * @since 0.12.0
+         */
+        public Duration retryAfter() {
+            return retryAfter;
         }
 
         /**
@@ -1019,6 +1086,13 @@ public final class MicrosoftAuthUtil {
         private final FailureReason reason;
 
         /**
+         * How long the service asked the caller to wait, or null.
+         *
+         * @serial
+         */
+        private final Duration retryAfter;
+
+        /**
          * Creates a classified failure.
          *
          * @param message the failure description
@@ -1040,6 +1114,22 @@ public final class MicrosoftAuthUtil {
         public AuthFlowException(String message, FailureReason reason, Throwable cause) {
             super(message, cause);
             this.reason = reason == null ? FailureReason.UNKNOWN : reason;
+            this.retryAfter = null;
+        }
+
+        /**
+         * Creates a classified failure carrying the wait the service asked for.
+         *
+         * @param message the failure description
+         * @param reason the classified cause
+         * @param retryAfter how long the service asked the caller to wait, or {@code null}
+         * @param cause the underlying failure, or {@code null}
+         * @since 0.12.0
+         */
+        public AuthFlowException(String message, FailureReason reason, Duration retryAfter, Throwable cause) {
+            super(message, cause);
+            this.reason = reason == null ? FailureReason.UNKNOWN : reason;
+            this.retryAfter = retryAfter;
         }
 
         /**
@@ -1050,6 +1140,16 @@ public final class MicrosoftAuthUtil {
          */
         public FailureReason reason() {
             return reason;
+        }
+
+        /**
+         * Returns how long the service asked the caller to wait before trying again, when it said.
+         *
+         * @return the stated wait, or {@code null} when none was given
+         * @since 0.12.0
+         */
+        public Duration retryAfter() {
+            return retryAfter;
         }
     }
 
