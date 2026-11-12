@@ -1,6 +1,7 @@
 package lol.trq.alts.bulk;
 
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /**
  * What one line of a pasted credential list appears to be.
@@ -22,14 +23,21 @@ public enum CredentialKind {
     /** Exported browser cookies, in any of the shapes the cookie route reads. */
     COOKIE_TEXT,
 
-    /** A bare username, for an offline account. */
+    /**
+     * A bare username, for an offline account. Only a line that is a valid Minecraft name — three to
+     * sixteen letters, digits, or underscores — is taken for one.
+     */
     OFFLINE_NAME,
 
     /** Something this cannot place. Never guessed at. */
     UNKNOWN;
 
-    /** Longest a Minecraft username can be, which is what makes a bare word recognisable as one. */
-    private static final int MAX_USERNAME = 16;
+    /**
+     * The shape of a Minecraft username. Anything shorter, longer, or carrying another character is not a
+     * name the game accepts, so a stray word or a fragment of punctuation in a pasted list is not turned
+     * into an account.
+     */
+    private static final Pattern USERNAME = Pattern.compile("[A-Za-z0-9_]{3,16}");
 
     /**
      * Decides what a line is.
@@ -59,7 +67,7 @@ public enum CredentialKind {
         if (value.contains("login.live.com") || value.contains("\t") || value.contains("\"name\"")) {
             return COOKIE_TEXT;
         }
-        if (value.length() <= MAX_USERNAME && value.matches("\\w+")) {
+        if (USERNAME.matcher(value).matches()) {
             return OFFLINE_NAME;
         }
         return UNKNOWN;

@@ -55,6 +55,21 @@ class CredentialKindTest {
         assertEquals(CredentialKind.UNKNOWN, CredentialKind.detect("user@example.com"));
     }
 
+    /** A junk line in a pasted list must fail its entry, not become an offline account. */
+    @Test
+    void junkLinesAreNotTakenForUsernames() {
+        assertEquals(CredentialKind.UNKNOWN, CredentialKind.detect("ab"), "shorter than any valid name");
+        assertEquals(CredentialKind.UNKNOWN, CredentialKind.detect("x"));
+        assertEquals(CredentialKind.UNKNOWN, CredentialKind.detect("--"));
+        assertEquals(CredentialKind.UNKNOWN, CredentialKind.detect("#accounts"));
+        assertEquals(CredentialKind.UNKNOWN, CredentialKind.detect("two words"));
+        assertEquals(CredentialKind.UNKNOWN, CredentialKind.detect("user:password"));
+        assertEquals(CredentialKind.UNKNOWN, CredentialKind.detect("näme"), "letters outside ASCII are not a name");
+        assertEquals(CredentialKind.UNKNOWN, CredentialKind.detect("seventeen_chars__"));
+        assertEquals(CredentialKind.OFFLINE_NAME, CredentialKind.detect("abc"), "the shortest valid name");
+        assertEquals(CredentialKind.OFFLINE_NAME, CredentialKind.detect("sixteen_chars___"), "the longest");
+    }
+
     @Test
     void aSessionTokenIsNotMistakenForAUsername() {
         assertEquals(CredentialKind.SESSION_TOKEN, CredentialKind.detect(JWT), "length alone must not decide");
