@@ -1,5 +1,8 @@
 package lol.trq.alts.account;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+
 /**
  * The Minecraft services base a host's account calls go to. Defaults to the public host; a host fronting
  * the services with its own proxy, or a test pointing at a loopback, overrides the base and every path
@@ -36,11 +39,11 @@ public record AccountEndpoints(String base) {
     }
 
     String nameAvailability(String name) {
-        return base + "/minecraft/profile/name/" + name + "/available";
+        return base + "/minecraft/profile/name/" + segment(name) + "/available";
     }
 
     String nameChange(String name) {
-        return base + "/minecraft/profile/name/" + name;
+        return base + "/minecraft/profile/name/" + segment(name);
     }
 
     String nameChangeInfo() {
@@ -57,5 +60,19 @@ public record AccountEndpoints(String base) {
 
     String activeCape() {
         return base + "/minecraft/profile/capes/active";
+    }
+
+    /**
+     * Encodes a caller-supplied value as one path segment. Concatenated raw, a name carrying a slash, a
+     * question mark, or a fragment marker would address a different endpoint than the one the caller
+     * asked for, or fail to parse as a URL at all.
+     *
+     * @param value the value to place in a path
+     * @return the percent-encoded segment
+     */
+    static String segment(String value) {
+        // URLEncoder speaks form encoding, where a space is a plus; in a path a plus is a literal plus.
+        return URLEncoder.encode(value == null ? "" : value, StandardCharsets.UTF_8)
+                .replace("+", "%20");
     }
 }
