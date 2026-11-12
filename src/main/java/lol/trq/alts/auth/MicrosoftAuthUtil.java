@@ -602,11 +602,17 @@ public final class MicrosoftAuthUtil {
                                 "refresh rejected with status " + response.status(), tokenIsSpent(response));
                     }
 
+                    // Read defensively: a 2xx whose body lacks the access token, or names a null refresh
+                    // token, is a step that failed, not a reason to throw a bare NullPointerException that
+                    // nothing downstream can classify. The token in hand is kept when none was issued.
                     JsonObject json = response.body();
-                    String rotated = json.has("refresh_token")
-                            ? json.get("refresh_token").getAsString()
-                            : refreshToken;
-                    return new MsTokens(json.get("access_token").getAsString(), rotated);
+                    String access = stringOrNull(json, "access_token");
+                    if (isBlank(access)) {
+                        throw new AuthFlowException(
+                                "Token refresh returned an unexpected response", FailureReason.UNKNOWN);
+                    }
+                    String rotated = stringOrNull(json, "refresh_token");
+                    return new MsTokens(access, isBlank(rotated) ? refreshToken : rotated);
                 },
                 IoExecutor.executor());
     }
