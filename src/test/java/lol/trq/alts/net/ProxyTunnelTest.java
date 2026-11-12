@@ -68,6 +68,13 @@ class ProxyTunnelTest {
             exchange.getResponseBody().write(bytes);
             exchange.close();
         });
+        origin.createContext("/refused", exchange -> {
+            byte[] bytes = "{\"error\":\"nope\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("X-Marker", "seen");
+            exchange.sendResponseHeaders(403, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
         origin.start();
         HttpUtil.tlsSocketFactoryForTests(tls.trustingFactory());
     }
@@ -208,6 +215,33 @@ class ProxyTunnelTest {
                 List.of(first.authorizationHeader(), second.authorizationHeader()),
                 proxy.authorizations(),
                 "each identity must open its own tunnel, authenticated as itself");
+    }
+
+    /**
+     * The other half of keying reuse by identity: the same identity does reuse. A login chain makes
+     * several calls to each host, and a tunnel plus a TLS handshake per call is what closing the
+     * connection after every response used to cost.
+     */
+    @Test
+    void oneIdentityReusesItsTunnelAcrossRequests() throws Exception {
+        proxy = new ConnectProxy(null);
+        ProxyRoute route = throughProxy().withCredentials("session-a", "pass".toCharArray());
+        HttpUtil.bind(scope -> route);
+        String refused = originUrl().replace("/profile", "/refused");
+
+        HttpUtil.get(originUrl(), null, PROFILE);
+        HttpUtil.getBytes(originUrl(), null, 1 << 20, PROFILE);
+        assertEquals(
+                "seen", HttpUtil.getHeader(refused, null, "X-Marker", PROFILE).value());
+        assertEquals(403, HttpUtil.getForStatus(refused, null, PROFILE).status());
+        HttpUtil.get(refused, null, PROFILE);
+        HttpUtil.get(originUrl(), null, PROFILE);
+
+        assertEquals(3, originHits.get());
+        assertEquals(
+                1,
+                proxy.requestLines().size(),
+                "six requests as one identity to one origin need one tunnel: " + proxy.requestLines());
     }
 
     @Test

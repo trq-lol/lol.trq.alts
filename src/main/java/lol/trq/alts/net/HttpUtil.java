@@ -3,11 +3,9 @@ package lol.trq.alts.net;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.Proxy;
@@ -40,6 +38,16 @@ public final class HttpUtil {
 
     /** How long to wait for response bytes before giving the request up. */
     private static final int READ_TIMEOUT_MILLIS = 30_000;
+
+    /**
+     * Largest JSON or text response body read. Every body these endpoints legitimately send is a few
+     * kilobytes; an unbounded read is a memory hazard the moment a response arrives through a proxy the
+     * library does not control.
+     */
+    static final int MAX_TEXT_BODY_BYTES = 1 << 20;
+
+    /** How much of an unwanted body is drained to keep its connection reusable before giving it up. */
+    private static final int MAX_DISCARDED_BYTES = 64 * 1024;
 
     /** How many proxy identities keep a tunnel factory, and with it a set of reusable connections. */
     static final int MAX_TUNNEL_FACTORIES = 64;
@@ -525,14 +533,12 @@ public final class HttpUtil {
     public static HeaderResponse getHeader(
             String urlString, Map<String, String> headers, String headerName, NetworkScope scope) throws Exception {
         HttpURLConnection conn = open(urlString, scope);
-        try {
-            conn.setRequestMethod("GET");
-            applyHeaders(conn, null, headers);
-            int status = conn.getResponseCode();
-            return new HeaderResponse(status, conn.getHeaderField(headerName));
-        } finally {
-            conn.disconnect();
-        }
+        conn.setRequestMethod("GET");
+        applyHeaders(conn, null, headers);
+        int status = conn.getResponseCode();
+        String value = conn.getHeaderField(headerName);
+        discardBody(conn, status);
+        return new HeaderResponse(status, value);
     }
 
     /**
@@ -557,21 +563,17 @@ public final class HttpUtil {
     public static byte[] getBytes(String urlString, Map<String, String> headers, long maxBytes, NetworkScope scope)
             throws Exception {
         HttpURLConnection conn = open(urlString, scope);
-        try {
-            conn.setRequestMethod("GET");
-            conn.setInstanceFollowRedirects(!carriesCredential(headers));
-            applyHeaders(conn, null, headers);
+        conn.setRequestMethod("GET");
+        conn.setInstanceFollowRedirects(!carriesCredential(headers));
+        applyHeaders(conn, null, headers);
 
-            int status = conn.getResponseCode();
-            if (status < 200 || status >= 300) {
-                drainErrorBody(conn);
-                return null;
-            }
-            try (InputStream in = conn.getInputStream()) {
-                return readCapped(in, maxBytes);
-            }
-        } finally {
-            conn.disconnect();
+        int status = conn.getResponseCode();
+        if (status < 200 || status >= 300) {
+            discardBody(conn, status);
+            return null;
+        }
+        try (InputStream in = conn.getInputStream()) {
+            return readCapped(in, maxBytes);
         }
     }
 
@@ -659,28 +661,63 @@ public final class HttpUtil {
 
         // Validation check for successful response codes (200-299)
         if (status < 200 || status >= 300) {
-            drainErrorBody(conn);
+            discardBody(conn, status);
             return null;
         }
 
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
-            return JsonParser.parseReader(br).getAsJsonObject();
+        return JsonParser.parseString(readText(conn.getInputStream())).getAsJsonObject();
+    }
+
+    /**
+     * Reads a JSON or text body whole, refusing one past {@link #MAX_TEXT_BODY_BYTES}.
+     *
+     * @param in the body stream; closed on return
+     * @return the body decoded as UTF-8
+     * @throws IOException if reading fails or the body runs past the limit
+     */
+    private static String readText(InputStream in) throws IOException {
+        try (in) {
+            byte[] bytes = readCapped(in, MAX_TEXT_BODY_BYTES);
+            if (bytes == null) {
+                throw new IOException("response body exceeds the " + MAX_TEXT_BODY_BYTES + " byte limit");
+            }
+            return new String(bytes, StandardCharsets.UTF_8);
         }
     }
 
     /**
-     * Consumes and closes a rejected response's body. An error body left unread keeps its connection out
-     * of the keep-alive pool, so a run of failures — a rate limit, a service having a bad minute — opens
-     * a fresh socket every time instead of reusing one.
+     * Returns the stream a response's body arrives on, whichever side of 400 its status falls.
      *
-     * @param conn the connection whose error body to discard
+     * @param conn the connection
+     * @param status the response status
+     * @return the body stream, or null when the response has none
+     * @throws IOException if the stream cannot be opened
      */
-    private static void drainErrorBody(HttpURLConnection conn) {
-        try (InputStream errors = conn.getErrorStream()) {
-            if (errors != null) {
-                errors.transferTo(OutputStream.nullOutputStream());
+    private static InputStream responseStream(HttpURLConnection conn, int status) throws IOException {
+        return status >= 400 ? conn.getErrorStream() : conn.getInputStream();
+    }
+
+    /**
+     * Consumes and closes a body nobody will read. A body left unread keeps its connection out of the
+     * keep-alive pool, so a run of failures — a rate limit, a service having a bad minute — opens a fresh
+     * socket, and behind a proxy a fresh tunnel, every time instead of reusing one. The read is bounded:
+     * past {@link #MAX_DISCARDED_BYTES} the connection is cheaper to drop than to drain.
+     *
+     * @param conn the connection whose body to discard
+     * @param status the response status
+     */
+    private static void discardBody(HttpURLConnection conn, int status) {
+        try (InputStream body = responseStream(conn, status)) {
+            if (body == null) {
+                return;
             }
-        } catch (Exception ignored) {
+            byte[] chunk = new byte[8192];
+            long total = 0;
+            int read;
+            while (total <= MAX_DISCARDED_BYTES && (read = body.read(chunk)) != -1) {
+                total += read;
+            }
+        } catch (IOException ignored) {
             // Draining is an optimization; failing to do it must never fail the request.
         }
     }
@@ -717,15 +754,16 @@ public final class HttpUtil {
 
         int status = conn.getResponseCode();
         Duration retryAfter = retryAfter(conn);
-        InputStream stream = status >= 200 && status < 300 ? conn.getInputStream() : conn.getErrorStream();
+        InputStream stream = responseStream(conn, status);
         if (stream == null) {
             return new HttpResponse(status, null, retryAfter);
         }
 
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
-            JsonElement parsed = JsonParser.parseReader(br);
+        String text = readText(stream);
+        try {
+            JsonElement parsed = JsonParser.parseString(text);
             return new HttpResponse(status, parsed.isJsonObject() ? parsed.getAsJsonObject() : null, retryAfter);
-        } catch (Exception parseFailure) {
+        } catch (RuntimeException parseFailure) {
             return new HttpResponse(status, null, retryAfter);
         }
     }
