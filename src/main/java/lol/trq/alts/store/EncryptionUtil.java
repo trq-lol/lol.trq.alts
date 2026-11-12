@@ -1,6 +1,7 @@
 package lol.trq.alts.store;
 
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.security.spec.KeySpec;
 import java.util.Base64;
@@ -15,16 +16,27 @@ import javax.crypto.spec.SecretKeySpec;
  * AES-GCM encryption and decryption for secure local data persistence. Uses PBKDF2 for key derivation
  * and GCM for authenticated encryption, so stored account data is both private and tamper-evident.
  *
+ * <p>The bundle is {@code Base64([salt:16][nonce:12][ciphertext+tag])}. The salt selects the key and
+ * the nonce is drawn fresh for every message, so one derived key can seal many messages: the stores
+ * derive once per process and reuse that key, which keeps the 65,536 PBKDF2 iterations off every save
+ * without changing a byte of the format.
+ *
  * @author trq
  * @since 0.1.0
  */
 public final class EncryptionUtil {
+
+    /** The length of the PBKDF2 salt, in bytes. */
+    private static final int SALT_LENGTH = 16;
 
     /** The length of the initialization vector for AES-GCM, in bytes. */
     private static final int GCM_IV_LENGTH = 12;
 
     /** The size of the authentication tag, in bits. */
     private static final int GCM_TAG_LENGTH = 128;
+
+    /** One generator for salts and nonces; {@link SecureRandom} is safe to share between threads. */
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     private EncryptionUtil() {}
 
@@ -53,19 +65,41 @@ public final class EncryptionUtil {
      * @throws Exception if encryption or key derivation fails
      */
     public static String encrypt(String plaintext, String password) throws Exception {
-        SecureRandom random = new SecureRandom();
+        return encrypt(plaintext, derive(password));
+    }
 
-        // Generate a fresh salt for PBKDF2
-        byte[] salt = new byte[16];
-        random.nextBytes(salt);
+    /**
+     * Derives a key from {@code password} under a fresh random salt, for sealing any number of messages
+     * with {@link #encrypt(String, DerivedKey)}.
+     *
+     * @param password the password or hardware key used for derivation
+     * @return the derived key together with the salt that selects it
+     * @throws GeneralSecurityException if key derivation fails
+     */
+    static DerivedKey derive(String password) throws GeneralSecurityException {
+        byte[] salt = new byte[SALT_LENGTH];
+        RANDOM.nextBytes(salt);
+        return new DerivedKey(salt, deriveKey(password, salt));
+    }
 
-        // Generate a fresh IV for GCM
+    /**
+     * Encrypts a plaintext string under an already-derived key, in the same bundle format as
+     * {@link #encrypt(String, String)}. The nonce is drawn fresh on every call, which is what makes
+     * reusing the key sound: GCM only fails when a key and nonce pair repeats, and a random 96-bit
+     * nonce stays far inside its collision bound for any number of saves one process will ever make.
+     *
+     * @param plaintext the string to encrypt
+     * @param key the derived key and its salt
+     * @return a Base64-encoded string containing the encrypted data and metadata
+     * @throws GeneralSecurityException if encryption fails
+     */
+    static String encrypt(String plaintext, DerivedKey key) throws GeneralSecurityException {
+        byte[] salt = key.salt();
         byte[] iv = new byte[GCM_IV_LENGTH];
-        random.nextBytes(iv);
+        RANDOM.nextBytes(iv);
 
-        SecretKey key = deriveKey(password, salt);
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-        cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_LENGTH, iv));
+        cipher.init(Cipher.ENCRYPT_MODE, key.key(), new GCMParameterSpec(GCM_TAG_LENGTH, iv));
 
         byte[] ciphertext = cipher.doFinal(plaintext.getBytes(StandardCharsets.UTF_8));
 
@@ -89,8 +123,11 @@ public final class EncryptionUtil {
      */
     public static String decrypt(String encrypted, String password) throws Exception {
         byte[] combined = Base64.getDecoder().decode(encrypted);
+        if (combined.length < SALT_LENGTH + GCM_IV_LENGTH + GCM_TAG_LENGTH / 8) {
+            throw new GeneralSecurityException("bundle is too short to be an encrypted store");
+        }
 
-        byte[] salt = new byte[16];
+        byte[] salt = new byte[SALT_LENGTH];
         byte[] iv = new byte[GCM_IV_LENGTH];
         byte[] ciphertext = new byte[combined.length - salt.length - iv.length];
 
@@ -112,12 +149,20 @@ public final class EncryptionUtil {
      * @param password the input password string
      * @param salt the unique salt for this operation
      * @return a secret key suitable for AES encryption
-     * @throws Exception if key factory generation fails
+     * @throws GeneralSecurityException if key factory generation fails
      */
-    private static SecretKey deriveKey(String password, byte[] salt) throws Exception {
+    private static SecretKey deriveKey(String password, byte[] salt) throws GeneralSecurityException {
         SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
         // 65,536 iterations balances security and performance for a hardware-bound local file
         KeySpec spec = new PBEKeySpec(password.toCharArray(), salt, 65536, 256);
         return new SecretKeySpec(factory.generateSecret(spec).getEncoded(), "AES");
     }
+
+    /**
+     * A key derived once and reused, with the salt a reader needs to derive it again.
+     *
+     * @param salt the PBKDF2 salt written at the head of every bundle sealed with this key
+     * @param key the derived AES key
+     */
+    record DerivedKey(byte[] salt, SecretKey key) {}
 }
