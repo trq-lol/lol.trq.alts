@@ -1,6 +1,8 @@
 package lol.trq.alts.vault.transport;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -75,5 +77,17 @@ class TransportDtoSerializationTest {
                 List.of(new MemberEntry("ed", "x", wrappedKey(), 1L)),
                 1L);
         assertEquals(req, GSON.fromJson(GSON.toJson(req), MemberRemoveRequest.class));
+    }
+
+    @Test
+    void authTokenToStringRedactsTheBearerValue() {
+        AuthToken token = new AuthToken("jwt.value.here", 1_700_000_000_000L);
+
+        assertFalse(token.toString().contains("jwt.value.here"));
+        assertTrue(token.toString().contains("1700000000000"));
+        assertEquals("AuthToken[token=null, expiresAt=0]", new AuthToken(null, 0L).toString());
+        // Redaction is display only: the value and equality are untouched.
+        assertEquals("jwt.value.here", token.token());
+        assertEquals(token, new AuthToken("jwt.value.here", 1_700_000_000_000L));
     }
 }

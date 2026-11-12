@@ -14,4 +14,16 @@ import com.google.gson.annotations.SerializedName;
  */
 public record AuthToken(
         @SerializedName("token") String token,
-        @SerializedName("expiresAt") long expiresAt) {}
+        @SerializedName("expiresAt") long expiresAt) {
+
+    /**
+     * Renders this token without its value, so a bearer credential never reaches a log line or an
+     * exception message.
+     *
+     * @return a description carrying the expiry and only whether a token is present
+     */
+    @Override
+    public String toString() {
+        return "AuthToken[token=" + (token == null ? "null" : "<redacted>") + ", expiresAt=" + expiresAt + "]";
+    }
+}
