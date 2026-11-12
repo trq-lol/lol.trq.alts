@@ -6,12 +6,26 @@ cannot drift from the library API) but are not part of the published jar.
 ## `GettingStartedExample`
 
 The compiled companion to [`../docs/GETTING_STARTED.md`](../docs/GETTING_STARTED.md). Every snippet
-that guide shows is a method here, one per section: building the runtime, reporting a store that could
-not be read, logging in and reading the caches, logging in from a cookie file, silent renewal and
-refresh-token import, branching on the typed failure reason, and creating a shared repository under
-either refresh-token sharing policy.
+that guide shows is a method here, one per section:
 
-This file is the authoritative copy — the guide inlines its key lines. Change the library API and the
+- `buildRuntime`, `warnIfTheStoreDidNotLoad`: wiring the seams and reporting a store that could not be read.
+- `buildRuntimeWithHostKey`: sealing the stores under a host-supplied key, with the one-launch migration opt-in.
+- `logInAndRead`, `logInWithDeviceCode`, `logInFromCookieFile`: browser, device-code and cookie-file sign-in.
+- `logInStoredAccount`, `importRefreshToken`, `logInStoredAccountWithBranching`: silent renewal, refresh-token
+  import, and branching on the typed failure reason, rate limits included.
+- `proxyPerAccount`: one proxy route per account.
+- `sweepStoredAccounts`, `refreshEverything`, `importPastedCredentials`: checking and renewing accounts
+  without logging in, singly and in bulk.
+- `manageAccount`, `readAttributes`, `claimAtDrop`: profile, entitlements, name change, player attributes
+  and bans, and a scheduled name claim.
+- `lookUpPlayers`: anonymous lookup by name and by list, with the rate-limit branch.
+- `sharedVault`, `openPinned`, `createRepositories`: constructing the vault with an explicit key-binding
+  verifier, opening a repository against a stored rollback floor, and both refresh-token sharing policies.
+- `readGameStats`: reading one server's stat chips.
+
+The file is compiled with `-Xlint:deprecation -Werror`, so it cannot use deprecated API.
+
+This file is the authoritative copy; the guide inlines from it. Change the library API and the
 build breaks here, which is the point: markdown alone rots silently. Keep the two in step when either
 moves. Spotless formats this directory too, so a snippet pasted into the guide is already house-styled.
 
@@ -33,7 +47,7 @@ AltsRuntime<MyHandle> alts = new AltsRuntime.Builder<MyHandle>()
         .build();
 
 // uuid -> stats for example.net (null on the first call while the background fetch runs,
-// then the chips on a later frame; unknown server ids return null forever).
+// then the chips on a later call; unknown server ids return null forever).
 GameStats stats = alts.gameStats("example.net").get(playerUuid);
 if (stats != null) {
     for (GameStats.Stat chip : stats.stats()) {
