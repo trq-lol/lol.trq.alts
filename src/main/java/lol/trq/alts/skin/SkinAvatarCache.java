@@ -136,15 +136,41 @@ public final class SkinAvatarCache<H> {
         return removed == null || removed instanceof Pending || removed instanceof Failed ? null : (H) removed;
     }
 
+    /**
+     * Fetches an avatar off-thread and hands it to the main thread for upload.
+     *
+     * <p>Every way this can go wrong ends with the entry marked failed. A pending marker that nothing
+     * resolves is never retried, so the head would stay missing for the life of the process — and the
+     * failures that used to slip through were exactly the ones not shaped like an {@link Exception}: an
+     * {@link Error} out of an image decode, a pool or a main-thread executor refusing the task.
+     *
+     * @param key the cache key being fetched
+     * @param pending the marker this fetch owns
+     */
     private void fetchAsync(String key, Pending pending) {
-        CompletableFuture.supplyAsync(() -> downloadBytes(key))
-                .thenAccept(bytes -> mainThread.execute(() -> upload(key, pending, bytes)));
+        try {
+            CompletableFuture.supplyAsync(() -> downloadBytes(key)).whenComplete((bytes, failure) -> {
+                if (failure != null || bytes == null) {
+                    markFailed(key, pending);
+                    return;
+                }
+                try {
+                    mainThread.execute(() -> upload(key, pending, bytes));
+                } catch (Throwable refused) {
+                    markFailed(key, pending);
+                }
+            });
+        } catch (Throwable refused) {
+            markFailed(key, pending);
+        }
     }
 
     private byte[] downloadBytes(String key) {
         try {
             return source.avatarPng(key, FACE_PX);
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
+            // Throwable, not Exception: a source that runs out of memory decoding a hostile image has
+            // failed this one avatar, and the entry must still resolve.
             return null;
         }
     }
@@ -154,10 +180,6 @@ public final class SkinAvatarCache<H> {
         if (cache.get(key) != pending) {
             return;
         }
-        if (bytes == null) {
-            markFailed(key, pending);
-            return;
-        }
         try {
             H handle = uploader.upload(new ByteArrayInputStream(bytes));
             if (handle != null) {
@@ -165,7 +187,7 @@ public final class SkinAvatarCache<H> {
             } else {
                 markFailed(key, pending);
             }
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
             markFailed(key, pending);
         }
     }

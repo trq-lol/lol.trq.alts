@@ -177,4 +177,76 @@ class SkinAvatarCacheTest {
         Thread.sleep(30);
         assertEquals(3, fetches.get());
     }
+
+    /**
+     * The regression this guards: an {@link Error} out of the fetch — an image decode running out of
+     * memory — slipped past a catch for {@link Exception}, so nothing ever resolved the entry and the head
+     * stayed pending, never retried, for the life of the process.
+     */
+    @Test
+    void anErrorFromTheSourceResolvesToAFailureThatIsRetried() throws Exception {
+        AtomicInteger fetches = new AtomicInteger();
+        AtomicLong now = new AtomicLong(0);
+        AvatarSource source = (uuid, size) -> {
+            if (fetches.incrementAndGet() == 1) {
+                throw new OutOfMemoryError("simulated: decoding a hostile image");
+            }
+            return PNG;
+        };
+        SkinAvatarCache<String> cache = new SkinAvatarCache<>(source, bytes -> "handle", Runnable::run, now::get);
+
+        assertNull(cache.get("uuid-1"));
+        Thread.sleep(50);
+        assertNull(cache.get("uuid-1"));
+        assertEquals(1, fetches.get(), "the failure backs off rather than refetching at once");
+
+        now.addAndGet(10_000);
+        assertEquals("handle", await(cache, "uuid-1"), "the entry was failed-with-retry, not stuck pending");
+    }
+
+    @Test
+    void anErrorFromTheUploaderResolvesToAFailureThatIsRetried() throws Exception {
+        AtomicInteger uploads = new AtomicInteger();
+        AtomicLong now = new AtomicLong(0);
+        SkinAvatarCache<String> cache = new SkinAvatarCache<>(
+                (uuid, size) -> PNG,
+                bytes -> {
+                    if (uploads.incrementAndGet() == 1) {
+                        throw new OutOfMemoryError("simulated: texture allocation");
+                    }
+                    return "handle";
+                },
+                Runnable::run,
+                now::get);
+
+        assertNull(cache.get("uuid-1"));
+        Thread.sleep(50);
+        assertNull(cache.get("uuid-1"));
+
+        now.addAndGet(10_000);
+        assertEquals("handle", await(cache, "uuid-1"));
+    }
+
+    @Test
+    void aMainThreadExecutorThatRefusesTheTaskResolvesToAFailureThatIsRetried() throws Exception {
+        AtomicInteger submissions = new AtomicInteger();
+        AtomicLong now = new AtomicLong(0);
+        SkinAvatarCache<String> cache = new SkinAvatarCache<>(
+                (uuid, size) -> PNG,
+                bytes -> "handle",
+                task -> {
+                    if (submissions.incrementAndGet() == 1) {
+                        throw new IllegalStateException("simulated: executor shut down");
+                    }
+                    task.run();
+                },
+                now::get);
+
+        assertNull(cache.get("uuid-1"));
+        Thread.sleep(50);
+        assertNull(cache.get("uuid-1"));
+
+        now.addAndGet(10_000);
+        assertEquals("handle", await(cache, "uuid-1"));
+    }
 }
