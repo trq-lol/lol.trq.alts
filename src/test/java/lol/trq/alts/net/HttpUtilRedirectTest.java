@@ -125,6 +125,23 @@ class HttpUtilRedirectTest {
     }
 
     @Test
+    void aCallerThatPinnedItsHostIsNotRedirectedOffIt() throws Exception {
+        URI pinned = URI.create(base(first));
+
+        HttpUtil.BytesResponse away = HttpUtil.getBytesForStatus(
+                base(first) + "/away", null, 1024, null, hop -> HttpUtil.sameOrigin(pinned, hop));
+
+        assertEquals(302, away.status(), "the caller sees the redirect instead of having it chased");
+        assertNull(away.body());
+        assertEquals(0, elsewhereHits.get(), "the host the caller did not choose must never be contacted");
+
+        HttpUtil.BytesResponse nearby = HttpUtil.getBytesForStatus(
+                base(first) + "/nearby", null, 1024, null, hop -> HttpUtil.sameOrigin(pinned, hop));
+
+        assertArrayEquals(IMAGE, nearby.body(), "a redirect that stays where the caller allowed is still followed");
+    }
+
+    @Test
     void anAuthorizationHeaderIsNeverCarriedToAnotherHost() throws Exception {
         Map<String, String> headers = Map.of("authorization", "Bearer secret-token");
 

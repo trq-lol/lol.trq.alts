@@ -19,6 +19,8 @@ import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.function.Predicate;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLSocketFactory;
 import lol.trq.alts.spi.ProxyProvider;
@@ -786,6 +788,36 @@ public final class HttpUtil {
      */
     public static BytesResponse getBytesForStatus(
             String urlString, Map<String, String> headers, long maxBytes, NetworkScope scope) throws Exception {
+        return getBytesForStatus(urlString, headers, maxBytes, scope, anywhere -> true);
+    }
+
+    /**
+     * Sends a GET request and returns the raw response body alongside the status, following a redirect
+     * only where {@code redirectAllowed} says it may lead. For a caller that chose the first address
+     * because of who serves it: without this, the server at that address chooses every address after it.
+     *
+     * <p>The predicate is asked about each hop's resolved target before that hop is requested, on top of
+     * the rules {@link #getBytes(String, Map, long, NetworkScope)} always applies. A hop it refuses is
+     * not requested and is reported as the redirect itself, with its {@code 3xx} status and no body. A
+     * predicate that refuses everything makes this a fetch that follows no redirect at all.
+     *
+     * @param urlString the target URL
+     * @param headers optional HTTP headers to include in the request
+     * @param maxBytes the largest body to accept
+     * @param scope what is being fetched, and on whose behalf
+     * @param redirectAllowed decides, per hop, whether a redirect to that address may be followed
+     * @return the status, and the body when the status is 2xx and the body fits the cap
+     * @throws Exception if a network or protocol error occurs
+     * @since 0.12.0
+     */
+    public static BytesResponse getBytesForStatus(
+            String urlString,
+            Map<String, String> headers,
+            long maxBytes,
+            NetworkScope scope,
+            Predicate<URI> redirectAllowed)
+            throws Exception {
+        Objects.requireNonNull(redirectAllowed, "redirectAllowed");
         // Resolved once: every hop of one fetch leaves from the same address.
         ProxyRoute route = routeFor(scope);
         boolean follow = !carriesCredential(headers);
@@ -808,7 +840,7 @@ public final class HttpUtil {
             String location = conn.getHeaderField("Location");
             discardBody(conn, status);
             URI next = follow && isRedirect(status) && hop < MAX_REDIRECTS ? redirectTarget(target, location) : null;
-            if (next == null) {
+            if (next == null || !redirectAllowed.test(next)) {
                 return new BytesResponse(status, null, retryAfter);
             }
             if (!sameOrigin(target, next)) {

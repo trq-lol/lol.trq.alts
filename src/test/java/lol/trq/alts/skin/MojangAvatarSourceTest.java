@@ -1,6 +1,7 @@
 package lol.trq.alts.skin;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -9,6 +10,7 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.zip.CRC32;
 import javax.imageio.ImageIO;
@@ -57,6 +59,24 @@ class MojangAvatarSourceTest {
         assertNull(MojangAvatarSource.trustedTextureUrl("//textures.minecraft.net" + TEXTURE_PATH));
         assertNull(MojangAvatarSource.trustedTextureUrl("http://textures.minecraft.net"));
         assertNull(MojangAvatarSource.trustedTextureUrl("not a url"));
+    }
+
+    @Test
+    void aRedirectIsFollowedOnlyToTheTextureHostOverHttps() {
+        assertTrue(MojangAvatarSource.trustedTextureHop(URI.create("https://textures.minecraft.net/texture/abc")));
+
+        for (String elsewhere : new String[] {
+            "https://skins.example/texture/abc",
+            "http://textures.minecraft.net/texture/abc",
+            "https://textures.minecraft.net.example/texture/abc",
+            "https://textures.minecraft.net:8443/texture/abc",
+            "https://user@textures.minecraft.net/texture/abc",
+            "https://127.0.0.1/texture/abc",
+        }) {
+            assertFalse(
+                    MojangAvatarSource.trustedTextureHop(URI.create(elsewhere)),
+                    "pinning the first address is worth nothing if a redirect may leave it: " + elsewhere);
+        }
     }
 
     @Test

@@ -76,8 +76,15 @@ public final class MojangAvatarSource implements AvatarSource {
         if (skinUrl == null) {
             return null;
         }
-        byte[] skinBytes = HttpUtil.getBytes(
-                skinUrl, null, MAX_SKIN_BYTES, NetworkScope.forAccount(NetworkScope.Purpose.AVATAR, uuid, null));
+        // The address was admitted because of its host, so a redirect is held to the same host: left
+        // to follow redirects freely, the fetch would end wherever the last response pointed it.
+        byte[] skinBytes = HttpUtil.getBytesForStatus(
+                        skinUrl,
+                        null,
+                        MAX_SKIN_BYTES,
+                        NetworkScope.forAccount(NetworkScope.Purpose.AVATAR, uuid, null),
+                        MojangAvatarSource::trustedTextureHop)
+                .body();
         if (skinBytes == null) {
             return null;
         }
@@ -150,6 +157,22 @@ public final class MojangAvatarSource implements AvatarSource {
             return null;
         }
         return "https://" + TEXTURE_HOST + path;
+    }
+
+    /**
+     * Decides whether a redirect met while fetching a skin may be followed: only to Mojang's texture
+     * host, over HTTPS, on its default port. The pin on the first address means nothing if the response
+     * from it can name any other.
+     *
+     * @param target where the redirect leads
+     * @return true when the target is the texture host over HTTPS
+     */
+    static boolean trustedTextureHop(URI target) {
+        return target != null
+                && "https".equalsIgnoreCase(target.getScheme())
+                && TEXTURE_HOST.equalsIgnoreCase(target.getHost())
+                && target.getRawUserInfo() == null
+                && target.getPort() == -1;
     }
 
     /**
