@@ -40,6 +40,12 @@ import lol.trq.alts.store.AltStore;
  */
 public final class BulkOperationsImpl implements BulkOperations {
 
+    /**
+     * How long a rate limit is waited out when the service named no wait and the options give no retry
+     * delay to grow one from. Retrying a throttled request at once is the one thing never done.
+     */
+    private static final Duration UNSTATED_RATE_LIMIT_WAIT = Duration.ofSeconds(1);
+
     private final AltLoginService importService;
     private final AltAccountService accountService;
     private final Function<AltAccount, EntitlementService> entitlementServices;
@@ -124,9 +130,8 @@ public final class BulkOperationsImpl implements BulkOperations {
      * Reads one account's entitlements and classifies the outcome the way the runner expects.
      *
      * <p>A refused token is terminal for this entry, since the sweep only looks and never renews. A
-     * rate limit always carries a wait — zero when the service named none — because the runner
-     * recognises a stated limit by that wait being present. Everything else that is not an answer is a
-     * service or transport failure, which is worth a retry.
+     * rate limit is reported as one, with the wait the service named when it named one. Everything else
+     * that is not an answer is a service or transport failure, which is worth a retry.
      *
      * @param account the account to read
      * @return the attempt
@@ -141,9 +146,13 @@ public final class BulkOperationsImpl implements BulkOperations {
             return new Attempt(true, account, FailureReason.NONE, summary, null, owned);
         } catch (AccountException failure) {
             if (failure.rateLimited()) {
-                Duration wait = failure.retryAfter() != null ? failure.retryAfter() : Duration.ZERO;
                 return new Attempt(
-                        false, account, FailureReason.NETWORK, "Rate limited by the entitlement service", wait, null);
+                        false,
+                        account,
+                        FailureReason.RATE_LIMITED,
+                        "Rate limited by the entitlement service",
+                        failure.retryAfter(),
+                        null);
             }
             if (failure.tokenRefused()) {
                 return new Attempt(false, account, FailureReason.INVALID_TOKEN, "Access token was refused", null, null);
@@ -201,6 +210,7 @@ public final class BulkOperationsImpl implements BulkOperations {
         };
     }
 
+    // A login result carries no stated wait, so a throttled import is recognised by its reason alone.
     private static Attempt toAttempt(LoginResult result) {
         return new Attempt(result.success(), result.account(), result.reason(), result.message(), null, null);
     }
@@ -254,6 +264,12 @@ public final class BulkOperationsImpl implements BulkOperations {
     /**
      * Runs one entry, retrying a transient failure until the budget runs out.
      *
+     * <p>Three kinds of failure, three treatments. A rate limit — recognised by its reason, or by a
+     * stated wait on any reason — ends the run when the options say to stop, and otherwise holds the
+     * whole run back for the wait before this entry tries again, so no worker keeps sending into it. An
+     * unreachable or failing service is retried on a growing delay. Everything else is an answer about
+     * the credential or the account, which asking again does not change.
+     *
      * @param run the run
      * @param index the entry
      * @param attempt which attempt this is, counting from 1
@@ -281,20 +297,34 @@ public final class BulkOperationsImpl implements BulkOperations {
                     BulkEntryResult failed =
                             BulkEntryResult.failure(index, label, outcome.reason(), outcome.message(), attempt);
 
-                    if (outcome.retryAfter() != null && run.options.stopOnRateLimit()) {
-                        // Continuing to send to a service that has asked to be left alone is how an
-                        // address earns a longer ban than the one it is already serving.
-                        run.stopped.set(true);
-                        return CompletableFuture.completedFuture(failed);
+                    if (outcome.rateLimited()) {
+                        if (run.options.stopOnRateLimit()) {
+                            // Continuing to send to a service that has asked to be left alone is how an
+                            // address earns a longer ban than the one it is already serving.
+                            run.stopped.set(true);
+                            return CompletableFuture.completedFuture(failed);
+                        }
+                        if (attempt > run.options.maxRetries()) {
+                            return CompletableFuture.completedFuture(failed);
+                        }
+                        // The caller chose to wait limits out. The wait is the one the service named, or a
+                        // growing one when it named none -- never an immediate retry -- and it holds back
+                        // every other entry too, since the limit is on the address rather than the account.
+                        Duration wait = positive(outcome.retryAfter())
+                                ? outcome.retryAfter()
+                                : Backoff.exponential(attempt, run.options.retryBaseDelay());
+                        if (!positive(wait)) {
+                            wait = UNSTATED_RATE_LIMIT_WAIT;
+                        }
+                        run.holdBack(wait);
+                        return delay(wait).thenCompose(ignored -> attempt(run, index, attempt + 1));
                     }
                     boolean retryable = outcome.reason() == FailureReason.NETWORK;
                     if (!retryable || attempt > run.options.maxRetries()) {
                         return CompletableFuture.completedFuture(failed);
                     }
-                    Duration wait = outcome.retryAfter() != null
-                            ? outcome.retryAfter()
-                            : Backoff.exponential(attempt, run.options.retryBaseDelay());
-                    return delay(wait).thenCompose(ignored -> attempt(run, index, attempt + 1));
+                    return delay(Backoff.exponential(attempt, run.options.retryBaseDelay()))
+                            .thenCompose(ignored -> attempt(run, index, attempt + 1));
                 });
     }
 
@@ -315,6 +345,10 @@ public final class BulkOperationsImpl implements BulkOperations {
                 .thenAccept(ignored -> {});
     }
 
+    private static boolean positive(Duration duration) {
+        return duration != null && !duration.isZero() && !duration.isNegative();
+    }
+
     private static String describe(Throwable failure) {
         Throwable cause = failure.getCause() != null ? failure.getCause() : failure;
         return cause.getMessage() != null
@@ -329,7 +363,13 @@ public final class BulkOperationsImpl implements BulkOperations {
             FailureReason reason,
             String message,
             Duration retryAfter,
-            Entitlements entitlements) {}
+            Entitlements entitlements) {
+
+        /** Whether the service asked to be left alone: a rate limit by reason, or a stated wait on any. */
+        boolean rateLimited() {
+            return reason == FailureReason.RATE_LIMITED || retryAfter != null;
+        }
+    }
 
     /** The mutable state of one run, and its handle. */
     private static final class Run implements BulkHandle {
@@ -387,6 +427,18 @@ public final class BulkOperationsImpl implements BulkOperations {
                 nextStartMillis = earliest + options.minSpacing().toMillis();
             }
             return delay(Duration.ofMillis(waitMillis));
+        }
+
+        /**
+         * Pushes the next entry's start back, so a rate limit being waited out pauses the run rather
+         * than only the entry that met it.
+         *
+         * @param wait how long nothing new should start
+         */
+        void holdBack(Duration wait) {
+            synchronized (spacingLock) {
+                nextStartMillis = Math.max(nextStartMillis, System.currentTimeMillis() + wait.toMillis());
+            }
         }
 
         void record(int index, BulkEntryResult result) {

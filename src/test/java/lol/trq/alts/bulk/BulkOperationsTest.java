@@ -13,8 +13,10 @@ import java.util.function.Function;
 import lol.trq.alts.auth.AccountStatus;
 import lol.trq.alts.auth.AltAccountService;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
+import lol.trq.alts.auth.AltLoginCallback.LoginResult;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
+import lol.trq.alts.model.LoginMode;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -172,6 +174,201 @@ class BulkOperationsTest {
 
         assertFalse(report.stoppedEarly());
         assertEquals(1, report.succeeded(), "the entry succeeded on the attempt after the wait");
+    }
+
+    /**
+     * A 429 that names no wait is still the service asking to be left alone. It used to pass for an
+     * outage, so a run retried it and then moved on to the next account, into the same limit.
+     */
+    @Test
+    void aRateLimitWithNoStatedWaitStopsTheRunWithoutARetry() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        BulkOperations bulk = bulkOver(account -> {
+            calls.incrementAndGet();
+            return CompletableFuture.completedFuture(AccountStatus.failure(
+                    account, AccountStatus.State.UNREACHABLE, FailureReason.RATE_LIMITED, "slow down"));
+        });
+
+        BulkReport checked = bulk.checkAll(accounts(20), FAST.withConcurrency(1), BulkProgress.NONE)
+                .report()
+                .get();
+
+        assertTrue(checked.stoppedEarly(), "a rate limit must end the run whether or not it names a wait");
+        assertEquals(1, calls.get(), "the limited entry is not retried and the next is never started");
+        assertEquals(FailureReason.RATE_LIMITED, checked.failures().get(0).reason());
+        assertEquals(1, checked.failures().get(0).attempts());
+
+        calls.set(0);
+        BulkReport refreshed = bulk.refreshAll(accounts(20), FAST.withConcurrency(1), BulkProgress.NONE)
+                .report()
+                .get();
+
+        assertTrue(refreshed.stoppedEarly());
+        assertEquals(1, calls.get());
+    }
+
+    /**
+     * Waiting a limit out means waiting. With no stated wait the delay grows from the retry base rather
+     * than being zero (jittered, so at least half the base), and it holds the rest of the run back too: the limit is on the address, so the
+     * next account would only walk into it.
+     */
+    @Test
+    void aRateLimitBeingWaitedOutHoldsTheWholeRunBack() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        List<Long> startedAt = new java.util.concurrent.CopyOnWriteArrayList<>();
+        BulkOperations bulk = bulkOver(account -> {
+            startedAt.add(System.nanoTime());
+            if (calls.incrementAndGet() == 1) {
+                return CompletableFuture.completedFuture(AccountStatus.failure(
+                        account, AccountStatus.State.UNREACHABLE, FailureReason.RATE_LIMITED, "slow down"));
+            }
+            return CompletableFuture.completedFuture(AccountStatus.valid(account));
+        });
+        BulkOptions patient = new BulkOptions(2, Duration.ZERO, 2, Duration.ofMillis(80), false);
+
+        BulkReport report = bulk.refreshAll(accounts(3), patient, BulkProgress.NONE)
+                .report()
+                .get();
+
+        assertFalse(report.stoppedEarly());
+        assertEquals(3, report.succeeded());
+        assertEquals(4, calls.get(), "the limited entry is tried once more, after the wait");
+        long firstToLast = (startedAt.get(startedAt.size() - 1) - startedAt.get(0)) / 1_000_000L;
+        assertTrue(firstToLast >= 35, "the retry must have waited out the backoff, not fired at once");
+        long firstToThird = (startedAt.get(2) - startedAt.get(0)) / 1_000_000L;
+        assertTrue(firstToThird >= 35, "entries queued behind the limit must wait it out too: " + firstToThird);
+    }
+
+    /** A limit that never lifts still ends: waiting it out is bounded by the same budget a retry is. */
+    @Test
+    void aRateLimitThatNeverLiftsGivesUpAtTheRetryBudget() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        BulkOperations bulk = bulkOver(account -> {
+            calls.incrementAndGet();
+            return CompletableFuture.completedFuture(AccountStatus.failure(
+                    account, AccountStatus.State.UNREACHABLE, FailureReason.RATE_LIMITED, "slow down"));
+        });
+
+        BulkReport report = bulk.checkAll(List.of(account(0)), FAST.withoutStoppingOnRateLimit(), BulkProgress.NONE)
+                .report()
+                .get();
+
+        assertEquals(3, calls.get(), "one attempt plus two waits");
+        assertEquals(FailureReason.RATE_LIMITED, report.failures().get(0).reason());
+    }
+
+    /**
+     * Each of these is an answer about the credential or the account. Asking again does not change it,
+     * and for a refresh every ask spends a rotation.
+     */
+    @Test
+    void anAnswerAboutTheAccountIsNeverRetried() throws Exception {
+        for (FailureReason reason : List.of(
+                FailureReason.XBOX_DENIED,
+                FailureReason.DECLINED,
+                FailureReason.TIMED_OUT,
+                FailureReason.INVALID_TOKEN,
+                FailureReason.NOT_ENTITLED,
+                FailureReason.NOT_CONFIGURED,
+                FailureReason.UNKNOWN)) {
+            AtomicInteger calls = new AtomicInteger();
+            BulkOperations bulk = bulkOver(account -> {
+                calls.incrementAndGet();
+                return CompletableFuture.completedFuture(
+                        AccountStatus.failure(account, AccountStatus.State.UNKNOWN, reason, "no"));
+            });
+
+            BulkReport report = bulk.refreshAll(accounts(2), FAST.withConcurrency(1), BulkProgress.NONE)
+                    .report()
+                    .get();
+
+            assertEquals(2, calls.get(), reason + " must fail its entry on the first attempt");
+            assertFalse(report.stoppedEarly(), reason + " is about one account and must not end the run");
+            assertEquals(reason, report.failures().get(0).reason());
+        }
+    }
+
+    /**
+     * A login result carries no wait, so an import used to be unable to see a rate limit at all: every
+     * remaining credential was sent into it.
+     */
+    @Test
+    void aRateLimitedImportStopsTheRun() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        BulkOperations bulk = importingThrough(token -> {
+            calls.incrementAndGet();
+            return LoginResult.failure("slow down", FailureReason.RATE_LIMITED);
+        });
+
+        BulkReport report = bulk.importCredentials(sessionTokens(20), LoginMode.DIRECT, FAST.withConcurrency(1), null)
+                .report()
+                .get();
+
+        assertTrue(report.stoppedEarly(), "a throttled import must stop sending credentials");
+        assertEquals(1, calls.get());
+        assertEquals(FailureReason.RATE_LIMITED, report.failures().get(0).reason());
+    }
+
+    @Test
+    void anImportRetriesAnOutageButNotARefusal() throws Exception {
+        AtomicInteger outages = new AtomicInteger();
+        BulkOperations flaky = importingThrough(token -> {
+            outages.incrementAndGet();
+            return LoginResult.failure("down", FailureReason.NETWORK);
+        });
+        flaky.importCredentials(sessionTokens(1), LoginMode.DIRECT, FAST, null)
+                .report()
+                .get();
+        assertEquals(3, outages.get(), "an outage is worth the retry budget");
+
+        for (FailureReason reason : List.of(
+                FailureReason.XBOX_DENIED,
+                FailureReason.DECLINED,
+                FailureReason.TIMED_OUT,
+                FailureReason.INVALID_TOKEN)) {
+            AtomicInteger calls = new AtomicInteger();
+            BulkOperations bulk = importingThrough(token -> {
+                calls.incrementAndGet();
+                return LoginResult.failure("no", reason);
+            });
+
+            bulk.importCredentials(sessionTokens(1), LoginMode.DIRECT, FAST, null)
+                    .report()
+                    .get();
+
+            assertEquals(1, calls.get(), reason + " must not be retried");
+        }
+    }
+
+    private static List<String> sessionTokens(int count) {
+        List<String> tokens = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            tokens.add("eyJ" + i);
+        }
+        return tokens;
+    }
+
+    /** Builds a bulk surface whose session-token import is the given function. */
+    private static BulkOperations importingThrough(Function<String, LoginResult> login) {
+        AltAccountService unused = new AltAccountService() {
+            @Override
+            public CompletableFuture<AccountStatus> check(AltAccount account) {
+                throw new AssertionError("an import does not check accounts");
+            }
+
+            @Override
+            public CompletableFuture<AccountStatus> refresh(AltAccount account) {
+                throw new AssertionError("an import does not refresh accounts");
+            }
+        };
+        return new BulkOperationsImpl(
+                new UnusedLoginService() {
+                    @Override
+                    public CompletableFuture<LoginResult> loginSession(String sessionToken, LoginMode mode) {
+                        return CompletableFuture.completedFuture(login.apply(sessionToken));
+                    }
+                },
+                unused);
     }
 
     @Test
@@ -438,6 +635,7 @@ class BulkOperationsTest {
 
             assertTrue(report.stoppedEarly());
             assertEquals(1, server.tokens.size(), "the first limit ends a one-at-a-time sweep");
+            assertEquals(FailureReason.RATE_LIMITED, report.failures().get(0).reason());
         }
     }
 
@@ -515,7 +713,7 @@ class BulkOperationsTest {
     }
 
     /** Stands in for a login service the account-only runs never reach. */
-    private static final class UnusedLoginService implements lol.trq.alts.auth.AltLoginService {
+    private static class UnusedLoginService implements lol.trq.alts.auth.AltLoginService {
 
         private static CompletableFuture<lol.trq.alts.auth.AltLoginCallback.LoginResult> unused() {
             throw new AssertionError("the import routes are not exercised by an account run");

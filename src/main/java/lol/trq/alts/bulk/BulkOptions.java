@@ -9,7 +9,8 @@ import java.time.Duration;
  * @param minSpacing the least time between two entries <em>starting</em>
  * @param maxRetries how many times a retryable failure is retried, beyond the first attempt
  * @param retryBaseDelay the delay a retry grows from when the service asked for nothing specific
- * @param stopOnRateLimit whether a stated rate limit ends the run rather than being waited out
+ * @param stopOnRateLimit whether a rate limit ends the run rather than being waited out; a limit counts
+ *     whether or not the service said how long to wait
  * @author trq
  * @since 0.9.0
  */
@@ -55,7 +56,9 @@ public record BulkOptions(
     }
 
     /**
-     * Returns a copy that keeps going through a stated rate limit, waiting each one out.
+     * Returns a copy that keeps going through a rate limit, waiting each one out: for as long as the
+     * service asked, or on a growing delay when it named no wait. The whole run pauses for the wait, and
+     * an entry that is still limited after {@code maxRetries} waits fails.
      *
      * <p>Worth knowing what that trades: continuing to send to a service that has asked you to stop is
      * how an address earns a longer ban than the one it is already serving.
