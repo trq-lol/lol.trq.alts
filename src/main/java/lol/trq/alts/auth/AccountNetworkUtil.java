@@ -91,41 +91,6 @@ public final class AccountNetworkUtil {
     }
 
     /**
-     * Validates a Minecraft access token against the default profile endpoint.
-     *
-     * @param token the Minecraft/Bearer access token to validate
-     * @return a String array containing {@code [username, uuid]}, or {@code null} if the token is invalid
-     * @throws Exception if a network error occurs during the request
-     * @deprecated since 0.8.0, use {@link #fetchProfile(String, String, NetworkScope)}. This form
-     *     collapses a refused token and an account with no Minecraft profile onto the same {@code null},
-     *     which are different problems with different answers.
-     */
-    @Deprecated(since = "0.8.0")
-    public static String[] fetchProfileFromToken(String token) throws Exception {
-        return fetchProfileFromToken(token, MicrosoftAuthConfig.DEFAULT_MINECRAFT_PROFILE_URL);
-    }
-
-    /**
-     * Validates a Minecraft access token against a caller-supplied profile endpoint, so a host that
-     * fronts Minecraft services with its own proxy validates through the same route it authenticates
-     * through.
-     *
-     * @param token the Minecraft/Bearer access token to validate
-     * @param profileUrl the Minecraft services profile endpoint
-     * @return a String array containing {@code [username, uuid]}, or {@code null} if the token is invalid
-     * @throws Exception if a network error occurs during the request
-     * @since 0.6.0
-     * @deprecated since 0.8.0, use {@link #fetchProfile(String, String, NetworkScope)}. This form
-     *     collapses a refused token and an account with no Minecraft profile onto the same {@code null},
-     *     which are different problems with different answers.
-     */
-    @Deprecated(since = "0.8.0")
-    public static String[] fetchProfileFromToken(String token, String profileUrl) throws Exception {
-        ProfileLookup lookup = fetchProfile(token, profileUrl, NetworkScope.of(NetworkScope.Purpose.PROFILE));
-        return lookup.found() ? new String[] {lookup.username(), lookup.uuid()} : null;
-    }
-
-    /**
      * Validates a Minecraft access token and resolves the identity behind it, reporting the status
      * either way.
      *

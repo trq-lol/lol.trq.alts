@@ -1,8 +1,8 @@
 package lol.trq.alts.auth;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -10,6 +10,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicReference;
+import lol.trq.alts.net.NetworkScope;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -43,16 +44,24 @@ class AccountNetworkUtilTest {
     void resolvesProfileFromTheSuppliedEndpoint() throws Exception {
         String url = startServer(200, "{\"id\":\"abc\",\"name\":\"Alex\"}");
 
-        String[] profile = AccountNetworkUtil.fetchProfileFromToken("tok", url);
+        AccountNetworkUtil.ProfileLookup lookup =
+                AccountNetworkUtil.fetchProfile("tok", url, NetworkScope.of(NetworkScope.Purpose.PROFILE));
 
-        assertArrayEquals(new String[] {"Alex", "abc"}, profile);
+        assertTrue(lookup.found());
+        assertEquals("Alex", lookup.username());
+        assertEquals("abc", lookup.uuid());
         assertEquals("Bearer tok", seenAuthorization.get());
     }
 
     @Test
-    void returnsNullWhenTheTokenIsRejected() throws Exception {
+    void aRejectedTokenIsReportedAsRefusedRatherThanCollapsedToNull() throws Exception {
         String url = startServer(401, "{}");
 
-        assertNull(AccountNetworkUtil.fetchProfileFromToken("expired", url));
+        AccountNetworkUtil.ProfileLookup lookup =
+                AccountNetworkUtil.fetchProfile("expired", url, NetworkScope.of(NetworkScope.Purpose.PROFILE));
+
+        assertFalse(lookup.found());
+        assertTrue(lookup.refused());
+        assertFalse(lookup.missingProfile());
     }
 }
