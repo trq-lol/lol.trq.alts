@@ -56,12 +56,15 @@ public final class SharedVault {
     private final KeyBindingVerifier keyBindingVerifier;
 
     /**
-     * Creates a vault facade that trusts whatever member keys it is handed, without verification.
+     * Creates a vault facade that trusts whatever member keys it is handed, without verification. It
+     * installs {@link KeyBindingVerifier#trustTransport()} implicitly, and is the only place a verifier
+     * is ever chosen for the caller.
      *
      * @param scheme the key-wrap scheme (for example {@link lol.trq.alts.crypto.X25519HkdfAesGcmKeyWrap})
      * @deprecated use {@link #SharedVault(KeyWrapScheme, KeyBindingVerifier)} and choose the verifier
-     *     deliberately. This constructor behaves as if {@link KeyBindingVerifier#trustTransport()} had
-     *     been passed, which lets a hostile server substitute a member's keys.
+     *     deliberately. This constructor behaves exactly as if {@link KeyBindingVerifier#trustTransport()}
+     *     had been passed, which lets a hostile server substitute a member's keys and receive the
+     *     repository data key.
      */
     @Deprecated(since = "0.12.0")
     public SharedVault(KeyWrapScheme scheme) {
@@ -456,17 +459,18 @@ public final class SharedVault {
 
     /**
      * Wraps {@code dataKey} to a member only after the verifier has vouched for the keys. The verifier
-     * takes a {@link MemberEntry}, which cannot exist without a wrapped key, so a candidate is built
-     * first and discarded unless verification passes; nothing leaves this method otherwise.
+     * runs first, on the claimed keys and their signature alone, and the data key is then wrapped to
+     * the keys it returned: no wrap to an unverified key is ever computed, not even one to discard.
      */
     private MemberEntry verifiedEntry(String repoId, MemberPublicKey claimed, String keyBindingSig, RepoDataKey dataKey)
             throws CryptoException, VaultException {
-        MemberEntry candidate = unverifiedEntry(claimed, dataKey).withKeyBindingSig(keyBindingSig);
-        MemberPublicKey verified = keyBindingVerifier.verify(repoId, candidate);
+        MemberPublicKey verified = keyBindingVerifier.verify(repoId, claimed, keyBindingSig);
         if (verified == null) {
             throw new VaultException("key-binding verifier returned no keys for member " + claimed.ed25519PublicKey());
         }
-        return verified.equals(claimed) ? candidate : unverifiedEntry(verified, dataKey);
+        MemberEntry entry = unverifiedEntry(verified, dataKey);
+        // The signature covers the claimed pair, so it stays on the entry only when that is the pair used.
+        return verified.equals(claimed) ? entry.withKeyBindingSig(keyBindingSig) : entry;
     }
 
     private MemberEntry unverifiedEntry(MemberPublicKey member, RepoDataKey dataKey) throws CryptoException {

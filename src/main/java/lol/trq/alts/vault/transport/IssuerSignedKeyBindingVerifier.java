@@ -52,22 +52,29 @@ public final class IssuerSignedKeyBindingVerifier implements KeyBindingVerifier 
     @Override
     public MemberPublicKey verify(String repoId, MemberEntry entry) throws VaultException {
         Objects.requireNonNull(entry, "entry");
-        String sig = entry.keyBindingSig();
-        if (sig == null || sig.isBlank()) {
-            throw new VaultException("member " + entry.ed25519PublicKey() + " has no key-binding signature to verify");
+        return verify(
+                repoId, new MemberPublicKey(entry.ed25519PublicKey(), entry.x25519PublicKey()), entry.keyBindingSig());
+    }
+
+    @Override
+    public MemberPublicKey verify(String repoId, MemberPublicKey claimed, String keyBindingSig) throws VaultException {
+        Objects.requireNonNull(claimed, "claimed");
+        if (keyBindingSig == null || keyBindingSig.isBlank()) {
+            throw new VaultException(
+                    "member " + claimed.ed25519PublicKey() + " has no key-binding signature to verify");
         }
-        byte[] message = bindingMessage(entry.ed25519PublicKey(), entry.x25519PublicKey());
+        byte[] message = bindingMessage(claimed.ed25519PublicKey(), claimed.x25519PublicKey());
         byte[] signature;
         try {
-            signature = Base64.getDecoder().decode(sig);
+            signature = Base64.getDecoder().decode(keyBindingSig);
         } catch (IllegalArgumentException e) {
-            throw new VaultException("member " + entry.ed25519PublicKey() + " key-binding signature is not Base64");
+            throw new VaultException("member " + claimed.ed25519PublicKey() + " key-binding signature is not Base64");
         }
         if (!Ed25519.verify(issuerKey, message, signature)) {
             throw new VaultException(
-                    "key-binding signature failed verification for member " + entry.ed25519PublicKey());
+                    "key-binding signature failed verification for member " + claimed.ed25519PublicKey());
         }
-        return new MemberPublicKey(entry.ed25519PublicKey(), entry.x25519PublicKey());
+        return claimed;
     }
 
     /**
