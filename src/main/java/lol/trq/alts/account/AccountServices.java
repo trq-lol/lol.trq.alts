@@ -23,6 +23,7 @@ public final class AccountServices {
     private final SkinService skin;
     private final CapeService cape;
     private final PlayerAttributesService attributes;
+    private final CertificateService certificates;
 
     private AccountServices(String token, String accountUuid, AccountEndpoints endpoints) {
         AccountHttp http = new AccountHttp(token, accountUuid);
@@ -32,6 +33,7 @@ public final class AccountServices {
         this.skin = new SkinServiceImpl(http, endpoints, GSON);
         this.cape = new CapeServiceImpl(http, endpoints, GSON, this.profile);
         this.attributes = new PlayerAttributesServiceImpl(http, endpoints);
+        this.certificates = new CertificateServiceImpl(http, endpoints);
     }
 
     /**
@@ -118,5 +120,15 @@ public final class AccountServices {
      */
     public PlayerAttributesService attributes() {
         return attributes;
+    }
+
+    /**
+     * Returns the certificate service, which issues the account's chat-signing key pair.
+     *
+     * @return the certificate service
+     * @since 0.12.0
+     */
+    public CertificateService certificates() {
+        return certificates;
     }
 }
