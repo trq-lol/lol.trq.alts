@@ -11,6 +11,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
@@ -47,6 +48,9 @@ public class AltLoginServiceImpl implements AltLoginService {
 
     // Replaced in tests so a device-code login's polling does not wait out real intervals.
     DeviceCodeTiming deviceCodeTiming = DeviceCodeTiming.STANDARD;
+
+    // Replaced in tests so the browser login can be driven without launching a real browser.
+    Consumer<String> browser = MicrosoftAuthUtil::openBrowser;
 
     /**
      * Creates a login service that installs resolved sessions through the given injector.
@@ -159,7 +163,7 @@ public class AltLoginServiceImpl implements AltLoginService {
             return CompletableFuture.completedFuture(AltLoginCallback.LoginResult.failure(
                     "Microsoft login not configured", FailureReason.NOT_CONFIGURED));
         }
-        return interactive(MicrosoftAuthUtil.authenticate(microsoftAuth), "Microsoft Auth", mode);
+        return interactive(MicrosoftAuthUtil.authenticate(microsoftAuth, browser), "Microsoft Auth", mode);
     }
 
     /**

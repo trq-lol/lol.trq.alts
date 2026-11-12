@@ -4,81 +4,103 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.function.Consumer;
+import lol.trq.alts.auth.AltLoginCallback.FailureReason;
 import lol.trq.alts.auth.MicrosoftAuthConfig;
 import lol.trq.alts.auth.MicrosoftAuthUtil;
 
 /**
  * A temporary local HTTP server that captures the authorization code returned by Microsoft's OAuth2
- * redirect. Listens on a loopback address and shuts itself down after capturing the code or timing
- * out. The client id, scope, authorize endpoint, and callback path all come from the host-supplied
+ * redirect. Listens on the loopback address only and shuts itself down as soon as the code future
+ * completes, however it completes: with the code, with a failure, on the timeout, or by cancellation.
+ * The client id, scope, authorize endpoint, and callback path all come from the host-supplied
  * {@link MicrosoftAuthConfig}.
+ *
+ * <p>Any page open in the user's browser can send a request to a loopback port, so a request is only
+ * allowed to decide the outcome when it carries the {@code state} this login generated. Everything else
+ * is answered {@code 400} and ignored, and the server keeps waiting for the real redirect.
  *
  * @author trq
  * @since 0.1.0
  */
 public class MicrosoftCallbackServer {
 
-    private static final Pattern CODE_PATTERN = Pattern.compile("code=([^&]+)");
-    private static final Pattern STATE_PATTERN = Pattern.compile("state=([^&]+)");
-
     /** Ports to attempt binding, in order of preference. */
     private static final int[] PORTS = {59125, 25585, 25575, 25565, 0};
 
+    /** How long the user has to finish signing in before the login is abandoned. */
+    private static final long TIMEOUT_MINUTES = 5;
+
     private final String expectedState;
     private final MicrosoftAuthConfig config;
+    private final String codeChallenge;
+    private final Consumer<String> browser;
     private final CompletableFuture<String> codeFuture = new CompletableFuture<>();
-    private HttpServer server;
+    private volatile HttpServer server;
     private int boundPort;
 
     /**
      * Initializes a new callback server with the expected state parameter and the host's auth config.
+     * The authorization request carries no PKCE challenge; prefer
+     * {@link #MicrosoftCallbackServer(String, MicrosoftAuthConfig, String, Consumer)}.
      *
      * @param state the state string generated during auth initiation, verified against CSRF
      * @param config the host's Microsoft authentication configuration (client id, scope, endpoints)
      */
     public MicrosoftCallbackServer(String state, MicrosoftAuthConfig config) {
-        this.expectedState = state;
+        this(state, config, null, MicrosoftAuthUtil::openBrowser);
+    }
+
+    /**
+     * Initializes a new callback server whose authorization request carries a PKCE challenge.
+     *
+     * @param state the state string generated during auth initiation, verified against CSRF
+     * @param config the host's Microsoft authentication configuration (client id, scope, endpoints)
+     * @param codeChallenge the {@code S256} PKCE challenge to send, or {@code null} to send none
+     * @param browser what opens the authorization address for the user
+     * @since 0.12.0
+     */
+    public MicrosoftCallbackServer(
+            String state, MicrosoftAuthConfig config, String codeChallenge, Consumer<String> browser) {
+        this.expectedState = Objects.requireNonNull(state, "state");
         this.config = Objects.requireNonNull(config, "config");
+        this.codeChallenge = codeChallenge;
+        this.browser = Objects.requireNonNull(browser, "browser");
     }
 
     /**
      * Binds the server to an available port, starts listening for the redirect, and opens the user's
      * browser to the Microsoft login page.
      *
+     * <p>Cancelling the returned future stops the server and releases the port.
+     *
      * @return a future that completes with the captured authorization code
      */
     public CompletableFuture<String> start() {
+        // Registered before anything can complete the future, and run off the completing thread: the
+        // completion usually happens on the server's own dispatcher, which must not be asked to stop
+        // itself before it has finished writing the response.
+        codeFuture.whenCompleteAsync((code, failure) -> stop());
         try {
             bindToAvailablePort();
             server.createContext(config.redirectPath(), this::handleCallback);
             server.setExecutor(null);
             server.start();
 
-            String authUrl = String.format(
-                    "%s?client_id=%s&response_type=code&scope=%s&redirect_uri=%s&prompt=select_account&state=%s",
-                    config.authorizeUrl(),
-                    URLEncoder.encode(config.clientId(), StandardCharsets.UTF_8),
-                    URLEncoder.encode(config.scope(), StandardCharsets.UTF_8),
-                    URLEncoder.encode(redirectUri(), StandardCharsets.UTF_8),
-                    expectedState);
-
-            MicrosoftAuthUtil.openBrowser(authUrl);
-
-            CompletableFuture.delayedExecutor(5, TimeUnit.MINUTES).execute(() -> {
-                if (!codeFuture.isDone()) {
-                    codeFuture.completeExceptionally(new Exception("Authentication timeout"));
-                    stop();
-                }
-            });
+            // The timer is cancelled as soon as the future completes, so nothing outlives the login.
+            codeFuture.orTimeout(TIMEOUT_MINUTES, TimeUnit.MINUTES);
+            browser.accept(authorizationUrl());
         } catch (Exception e) {
             codeFuture.completeExceptionally(e);
         }
@@ -86,16 +108,41 @@ public class MicrosoftCallbackServer {
     }
 
     /**
-     * Attempts to bind the server to the first available port in {@link #PORTS}.
+     * Builds the address the user signs in at. Only meaningful once the server is bound, since the
+     * redirect it names carries the bound port.
+     *
+     * @return the authorization URL
+     * @since 0.12.0
+     */
+    public String authorizationUrl() {
+        StringBuilder url = new StringBuilder(config.authorizeUrl())
+                .append("?client_id=")
+                .append(encode(config.clientId()))
+                .append("&response_type=code&scope=")
+                .append(encode(config.scope()))
+                .append("&redirect_uri=")
+                .append(encode(redirectUri()))
+                .append("&prompt=select_account&state=")
+                .append(encode(expectedState));
+        if (codeChallenge != null) {
+            url.append("&code_challenge=").append(encode(codeChallenge)).append("&code_challenge_method=S256");
+        }
+        return url.toString();
+    }
+
+    /**
+     * Attempts to bind the server to the first available port in {@link #PORTS}, on the loopback
+     * address explicitly so the listener is never reachable from another machine.
      *
      * @throws IOException if the server cannot bind to any of the specified ports
      */
     private void bindToAvailablePort() throws IOException {
-        server = HttpServer.create();
+        HttpServer created = HttpServer.create();
         for (int port : PORTS) {
             try {
-                server.bind(new InetSocketAddress("localhost", port), 0);
-                boundPort = server.getAddress().getPort();
+                created.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 0);
+                boundPort = created.getAddress().getPort();
+                server = created;
                 return;
             } catch (IOException ignored) {
             }
@@ -104,45 +151,94 @@ public class MicrosoftCallbackServer {
     }
 
     /**
-     * Handles the HTTP callback request. Validates the origin and query parameters before completing
-     * the future.
+     * Handles a request to the callback path. Only a request carrying this login's {@code state} may
+     * complete the future; anything else is refused and ignored.
      *
      * @param exchange the HTTP exchange object
      * @throws IOException if stream writing fails
      */
     private void handleCallback(HttpExchange exchange) throws IOException {
-        String query = exchange.getRequestURI().getQuery();
-
         // Security check: only allow requests originating from the local machine
         if (!exchange.getRemoteAddress().getAddress().isLoopbackAddress()) {
             exchange.close();
             return;
         }
 
-        try {
-            if (query == null) throw new Exception("Empty query");
+        Map<String, String> params = parseQuery(exchange.getRequestURI().getRawQuery());
 
-            Matcher codeMatcher = CODE_PATTERN.matcher(query);
-            Matcher stateMatcher = STATE_PATTERN.matcher(query);
-
-            if (!codeMatcher.find() || !stateMatcher.find()) throw new Exception("Invalid params");
-
-            // The captures are still percent-encoded, because the raw query is matched rather than a
-            // parsed one. Decoding here is what makes the code the credential the token endpoint expects:
-            // the exchange encodes every parameter it sends, so handing it an encoded code would escape
-            // the escapes and redeem a value the service never issued.
-            String code = URLDecoder.decode(codeMatcher.group(1), StandardCharsets.UTF_8);
-            String state = URLDecoder.decode(stateMatcher.group(1), StandardCharsets.UTF_8);
-
-            // Verify state to ensure the response matches the request sent by the client
-            if (!expectedState.equals(state)) throw new Exception("State mismatch");
-
-            codeFuture.complete(code);
-            sendResponse(exchange, 200, "Authentication Successful. You may close this tab.");
-        } catch (Exception e) {
-            codeFuture.completeExceptionally(e);
+        // Without the state this is not the redirect this login asked for. It must not be allowed to
+        // fail the login either: any web page can send a request here, and one that could end a pending
+        // sign-in just by guessing the port would be a denial of service against it.
+        if (!stateMatches(params.get("state"))) {
             sendResponse(exchange, 400, "Authentication Failed.");
+            return;
         }
+
+        if (params.containsKey("error")) {
+            // A stated refusal, vouched for by the state. The error text itself is kept out of the
+            // message: it is service-supplied and of no use to a host branching on the reason.
+            boolean declined = "access_denied".equals(params.get("error"));
+            sendResponse(exchange, 400, "Authentication Failed.");
+            codeFuture.completeExceptionally(new MicrosoftAuthUtil.AuthFlowException(
+                    declined ? "Sign-in was declined" : "Authorization was refused",
+                    declined ? FailureReason.DECLINED : FailureReason.UNKNOWN));
+            return;
+        }
+
+        String code = params.get("code");
+        if (code == null || code.isEmpty()) {
+            sendResponse(exchange, 400, "Authentication Failed.");
+            return;
+        }
+
+        sendResponse(exchange, 200, "Authentication Successful. You may close this tab.");
+        codeFuture.complete(code);
+    }
+
+    /**
+     * Compares a received state against the expected one in constant time.
+     *
+     * @param received the state the request carried, or {@code null}
+     * @return true if it is this login's state
+     */
+    private boolean stateMatches(String received) {
+        return received != null
+                && MessageDigest.isEqual(
+                        received.getBytes(StandardCharsets.UTF_8), expectedState.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Splits a raw query string into decoded parameters. Each name is matched whole, so
+     * {@code error_code=} is never mistaken for {@code code=}, and each value is decoded exactly once,
+     * which is what makes the code the credential the token endpoint expects. The first occurrence of a
+     * repeated name wins.
+     *
+     * <p>Package-private so the parsing can be tested without a server.
+     *
+     * @param rawQuery the undecoded query string, or {@code null}
+     * @return the decoded parameters, empty when there is no query
+     */
+    static Map<String, String> parseQuery(String rawQuery) {
+        Map<String, String> params = new LinkedHashMap<>();
+        if (rawQuery == null || rawQuery.isEmpty()) {
+            return params;
+        }
+        for (String pair : rawQuery.split("&")) {
+            if (pair.isEmpty()) {
+                continue;
+            }
+            int equals = pair.indexOf('=');
+            String name = equals == -1 ? pair : pair.substring(0, equals);
+            String value = equals == -1 ? "" : pair.substring(equals + 1);
+            try {
+                params.putIfAbsent(
+                        URLDecoder.decode(name, StandardCharsets.UTF_8),
+                        URLDecoder.decode(value, StandardCharsets.UTF_8));
+            } catch (IllegalArgumentException malformedEscape) {
+                // A pair that does not decode is not one the service sent; skip it.
+            }
+        }
+        return params;
     }
 
     /**
@@ -175,8 +271,15 @@ public class MicrosoftCallbackServer {
         return "http://localhost:" + boundPort + config.redirectPath();
     }
 
-    /** Forcefully stops the HTTP server. */
+    /** Forcefully stops the HTTP server, releasing its port. Safe to call more than once. */
     public void stop() {
-        if (server != null) server.stop(0);
+        HttpServer running = server;
+        if (running != null) {
+            running.stop(0);
+        }
+    }
+
+    private static String encode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 }

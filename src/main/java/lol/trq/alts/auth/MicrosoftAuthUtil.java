@@ -17,6 +17,7 @@ import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
 import lol.trq.alts.net.HttpUtil;
@@ -53,18 +54,26 @@ public final class MicrosoftAuthUtil {
      * Initiates the full asynchronous authentication flow. Starts a local callback server, opens the
      * browser, and chains the authentication steps.
      *
+     * <p>Cancelling the returned future shuts the callback server down and releases its port.
+     *
      * @param config the host's Microsoft authentication configuration (client id, scope, endpoints)
      * @return a future containing the final {@link MinecraftProfile} on success
      */
     public static CompletableFuture<MinecraftProfile> authenticate(MicrosoftAuthConfig config) {
+        return authenticate(config, MicrosoftAuthUtil::openBrowser);
+    }
+
+    // Exists so the interactive flow can be driven in tests without launching a real browser.
+    static CompletableFuture<MinecraftProfile> authenticate(MicrosoftAuthConfig config, Consumer<String> browser) {
         Objects.requireNonNull(config, "config");
         String state = generateState();
-        MicrosoftCallbackServer server = new MicrosoftCallbackServer(state, config);
+        MicrosoftCallbackServer server = new MicrosoftCallbackServer(state, config, null, browser);
 
-        return server.start()
-                .thenCompose(code -> exchangeCodeForToken(config, code, server.redirectUri()))
-                .thenCompose(tokens -> completeFrom(config, tokens, NO_ACCOUNT))
-                .whenComplete((profile, error) -> server.stop());
+        CompletableFuture<String> code = server.start();
+        CompletableFuture<MinecraftProfile> chain = code.thenCompose(
+                        received -> exchangeCodeForToken(config, received, server.redirectUri()))
+                .thenCompose(tokens -> completeFrom(config, tokens, NO_ACCOUNT));
+        return cancelling(chain, code);
     }
 
     /**
