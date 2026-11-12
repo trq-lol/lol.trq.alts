@@ -51,10 +51,15 @@ public final class VaultIdentity {
     public static VaultIdentity create(char[] passphrase) throws CryptoException {
         var ed = Ed25519.newKeyPair();
         var x = X25519.newKeyPair();
-        byte[] material = concat(Ed25519.encodePrivateKey(ed.getPrivate()), X25519.encodePrivateKey(x.getPrivate()));
         byte[] salt = Pbkdf2.newSalt();
         SecretKey mk = Pbkdf2.deriveKey(passphrase, salt, Pbkdf2.VAULT_ITERATIONS);
-        String wrapped = seal(mk, PASSPHRASE_AAD, material);
+        byte[] material = material(ed.getPrivate(), x.getPrivate());
+        String wrapped;
+        try {
+            wrapped = seal(mk, PASSPHRASE_AAD, material);
+        } finally {
+            Arrays.fill(material, (byte) 0);
+        }
         Base64.Encoder b64 = Base64.getEncoder();
         WrappedIdentity stored = new WrappedIdentity(
                 b64.encodeToString(Ed25519.encodePublicKey(ed.getPublic())),
@@ -64,7 +69,6 @@ public final class VaultIdentity {
                 wrapped,
                 null,
                 null);
-        Arrays.fill(material, (byte) 0);
         return new VaultIdentity(ed.getPublic(), ed.getPrivate(), x.getPublic(), x.getPrivate(), stored);
     }
 
@@ -109,11 +113,15 @@ public final class VaultIdentity {
      * @throws CryptoException if sealing fails
      */
     public WrappedIdentity withRecovery(String recoveryCode) throws CryptoException {
-        byte[] material = concat(Ed25519.encodePrivateKey(edPrivate), X25519.encodePrivateKey(xPrivate));
         byte[] salt = Pbkdf2.newSalt();
         SecretKey rk = RecoveryCode.deriveKey(recoveryCode, salt);
-        String recoveryWrapped = seal(rk, RECOVERY_AAD, material);
-        Arrays.fill(material, (byte) 0);
+        byte[] material = material(edPrivate, xPrivate);
+        String recoveryWrapped;
+        try {
+            recoveryWrapped = seal(rk, RECOVERY_AAD, material);
+        } finally {
+            Arrays.fill(material, (byte) 0);
+        }
         return new WrappedIdentity(
                 stored.ed25519PublicKey(),
                 stored.x25519PublicKey(),
@@ -184,22 +192,42 @@ public final class VaultIdentity {
     }
 
     private static VaultIdentity fromMaterial(byte[] material, WrappedIdentity stored) throws CryptoException {
-        if (material.length != MATERIAL_BYTES) {
-            throw new CryptoException("identity material must be " + MATERIAL_BYTES + " bytes");
+        byte[] edSeed = null;
+        byte[] xScalar = null;
+        try {
+            if (material.length != MATERIAL_BYTES) {
+                throw new CryptoException("identity material must be " + MATERIAL_BYTES + " bytes");
+            }
+            edSeed = Arrays.copyOfRange(material, 0, Ed25519.KEY_BYTES);
+            xScalar = Arrays.copyOfRange(material, Ed25519.KEY_BYTES, MATERIAL_BYTES);
+            PublicKey edPublic = Ed25519.decodePublicKey(Base64.getDecoder().decode(stored.ed25519PublicKey()));
+            PrivateKey edPrivate = Ed25519.decodePrivateKey(edSeed);
+            PublicKey xPublic = X25519.decodePublicKey(Base64.getDecoder().decode(stored.x25519PublicKey()));
+            PrivateKey xPrivate = X25519.decodePrivateKey(xScalar);
+            return new VaultIdentity(edPublic, edPrivate, xPublic, xPrivate, stored);
+        } finally {
+            Arrays.fill(material, (byte) 0);
+            if (edSeed != null) {
+                Arrays.fill(edSeed, (byte) 0);
+            }
+            if (xScalar != null) {
+                Arrays.fill(xScalar, (byte) 0);
+            }
         }
-        byte[] edSeed = Arrays.copyOfRange(material, 0, Ed25519.KEY_BYTES);
-        byte[] xScalar = Arrays.copyOfRange(material, Ed25519.KEY_BYTES, MATERIAL_BYTES);
-        Base64.Decoder b64 = Base64.getDecoder();
-        VaultIdentity identity = new VaultIdentity(
-                Ed25519.decodePublicKey(b64.decode(stored.ed25519PublicKey())),
-                Ed25519.decodePrivateKey(edSeed),
-                X25519.decodePublicKey(b64.decode(stored.x25519PublicKey())),
-                X25519.decodePrivateKey(xScalar),
-                stored);
-        Arrays.fill(material, (byte) 0);
-        Arrays.fill(edSeed, (byte) 0);
-        Arrays.fill(xScalar, (byte) 0);
-        return identity;
+    }
+
+    private static byte[] material(PrivateKey edPrivate, PrivateKey xPrivate) throws CryptoException {
+        byte[] edSeed = Ed25519.encodePrivateKey(edPrivate);
+        byte[] xScalar = null;
+        try {
+            xScalar = X25519.encodePrivateKey(xPrivate);
+            return concat(edSeed, xScalar);
+        } finally {
+            Arrays.fill(edSeed, (byte) 0);
+            if (xScalar != null) {
+                Arrays.fill(xScalar, (byte) 0);
+            }
+        }
     }
 
     private static String seal(SecretKey key, byte[] aad, byte[] plaintext) throws CryptoException {

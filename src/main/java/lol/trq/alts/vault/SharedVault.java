@@ -6,6 +6,7 @@ import com.google.gson.annotations.SerializedName;
 import java.nio.charset.StandardCharsets;
 import java.security.PublicKey;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
@@ -185,7 +186,12 @@ public final class SharedVault {
         byte[] ciphertext = Base64.getDecoder().decode(env.ciphertext());
         byte[] aad = PayloadCipher.aad(env.repoId(), env.payloadVersion(), env.keyEpoch());
         byte[] plaintext = PayloadCipher.decrypt(ctx.dataKey().secretKey(), iv, aad, ciphertext);
-        VaultPayload payload = GSON.fromJson(new String(plaintext, StandardCharsets.UTF_8), VaultPayload.class);
+        VaultPayload payload;
+        try {
+            payload = GSON.fromJson(new String(plaintext, StandardCharsets.UTF_8), VaultPayload.class);
+        } finally {
+            Arrays.fill(plaintext, (byte) 0);
+        }
         return payload == null || payload.alts() == null
                 ? new ArrayList<>()
                 : applyPolicy(payload.alts(), ctx.shareRefreshTokens());
@@ -257,7 +263,13 @@ public final class SharedVault {
         String json = GSON.toJson(new VaultPayload(applyPolicy(alts, shareRefreshTokens), version));
         byte[] iv = PayloadCipher.newIv();
         byte[] aad = PayloadCipher.aad(repoId, version, epoch);
-        byte[] ciphertext = PayloadCipher.encrypt(dataKey.secretKey(), iv, aad, json.getBytes(StandardCharsets.UTF_8));
+        byte[] plaintext = json.getBytes(StandardCharsets.UTF_8);
+        byte[] ciphertext;
+        try {
+            ciphertext = PayloadCipher.encrypt(dataKey.secretKey(), iv, aad, plaintext);
+        } finally {
+            Arrays.fill(plaintext, (byte) 0);
+        }
         Base64.Encoder b64 = Base64.getEncoder();
         return new EncryptedEnvelope(repoId, version, epoch, b64.encodeToString(iv), b64.encodeToString(ciphertext));
     }

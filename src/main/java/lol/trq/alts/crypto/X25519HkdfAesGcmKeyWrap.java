@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.security.PrivateKey;
 import java.security.PublicKey;
+import java.util.Arrays;
 import java.util.Base64;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
@@ -41,12 +42,23 @@ public final class X25519HkdfAesGcmKeyWrap implements KeyWrapScheme {
         KeyPair ephemeral = X25519.newKeyPair();
         byte[] ephemeralRaw = X25519.encodePublicKey(ephemeral.getPublic());
         byte[] sharedSecret = X25519.agree(ephemeral.getPrivate(), recipientPublicKey);
-        SecretKey kek = Hkdf.deriveKey(sharedSecret, ephemeralRaw, HKDF_INFO, KEK_BYTES);
-        byte[] iv = PayloadCipher.newIv();
-        byte[] ciphertext = PayloadCipher.encrypt(kek, iv, HKDF_INFO, dataKey.getEncoded());
-        Base64.Encoder b64 = Base64.getEncoder();
-        return new WrappedKey(
-                SCHEME_ID, b64.encodeToString(ephemeralRaw), b64.encodeToString(iv), b64.encodeToString(ciphertext));
+        byte[] dataKeyBytes = dataKey.getEncoded();
+        try {
+            SecretKey kek = Hkdf.deriveKey(sharedSecret, ephemeralRaw, HKDF_INFO, KEK_BYTES);
+            byte[] iv = PayloadCipher.newIv();
+            byte[] ciphertext = PayloadCipher.encrypt(kek, iv, HKDF_INFO, dataKeyBytes);
+            Base64.Encoder b64 = Base64.getEncoder();
+            return new WrappedKey(
+                    SCHEME_ID,
+                    b64.encodeToString(ephemeralRaw),
+                    b64.encodeToString(iv),
+                    b64.encodeToString(ciphertext));
+        } finally {
+            Arrays.fill(sharedSecret, (byte) 0);
+            if (dataKeyBytes != null) {
+                Arrays.fill(dataKeyBytes, (byte) 0);
+            }
+        }
     }
 
     @Override
@@ -60,8 +72,16 @@ public final class X25519HkdfAesGcmKeyWrap implements KeyWrapScheme {
         byte[] ciphertext = b64.decode(blob.ciphertext());
         PublicKey ephemeralPublic = X25519.decodePublicKey(ephemeralRaw);
         byte[] sharedSecret = X25519.agree(recipientPrivateKey, ephemeralPublic);
-        SecretKey kek = Hkdf.deriveKey(sharedSecret, ephemeralRaw, HKDF_INFO, KEK_BYTES);
-        byte[] dataKeyBytes = PayloadCipher.decrypt(kek, iv, HKDF_INFO, ciphertext);
-        return new SecretKeySpec(dataKeyBytes, "AES");
+        byte[] dataKeyBytes = null;
+        try {
+            SecretKey kek = Hkdf.deriveKey(sharedSecret, ephemeralRaw, HKDF_INFO, KEK_BYTES);
+            dataKeyBytes = PayloadCipher.decrypt(kek, iv, HKDF_INFO, ciphertext);
+            return new SecretKeySpec(dataKeyBytes, "AES");
+        } finally {
+            Arrays.fill(sharedSecret, (byte) 0);
+            if (dataKeyBytes != null) {
+                Arrays.fill(dataKeyBytes, (byte) 0);
+            }
+        }
     }
 }

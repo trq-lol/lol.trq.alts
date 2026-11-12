@@ -2,7 +2,7 @@ package lol.trq.alts.crypto;
 
 import java.security.SecureRandom;
 import java.security.spec.InvalidKeySpecException;
-import java.security.spec.KeySpec;
+import java.util.Arrays;
 import javax.crypto.SecretKey;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
@@ -32,7 +32,9 @@ public final class Pbkdf2 {
     private Pbkdf2() {}
 
     /**
-     * Derives a 256-bit AES key from a passphrase and salt.
+     * Derives a 256-bit AES key from a passphrase and salt. The passphrase copy held by the key
+     * specification and the intermediate key bytes are cleared before returning; the caller still owns
+     * (and should clear) {@code passphrase} itself.
      *
      * @param passphrase the passphrase characters
      * @param salt the per-derivation salt
@@ -41,12 +43,19 @@ public final class Pbkdf2 {
      * @throws CryptoException if key derivation fails
      */
     public static SecretKey deriveKey(char[] passphrase, byte[] salt, int iterations) throws CryptoException {
-        KeySpec spec = new PBEKeySpec(passphrase, salt, iterations, KEY_BITS);
+        PBEKeySpec spec = new PBEKeySpec(passphrase, salt, iterations, KEY_BITS);
+        byte[] derived = null;
         try {
             SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
-            return new SecretKeySpec(factory.generateSecret(spec).getEncoded(), "AES");
+            derived = factory.generateSecret(spec).getEncoded();
+            return new SecretKeySpec(derived, "AES");
         } catch (java.security.NoSuchAlgorithmException | InvalidKeySpecException e) {
             throw new CryptoException("PBKDF2 derivation failed", e);
+        } finally {
+            spec.clearPassword();
+            if (derived != null) {
+                Arrays.fill(derived, (byte) 0);
+            }
         }
     }
 
