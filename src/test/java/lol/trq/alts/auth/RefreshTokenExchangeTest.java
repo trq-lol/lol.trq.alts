@@ -219,7 +219,7 @@ class RefreshTokenExchangeTest {
         MicrosoftAuthConfig config = startServer(HOSTILE_CLIENT_ID);
 
         CompletableFuture<?> exchange =
-                MicrosoftAuthUtil.exchangeCodeForToken(config, "auth-code", "http://127.0.0.1/callback");
+                MicrosoftAuthUtil.exchangeCodeForToken(config, "auth-code", "http://127.0.0.1/callback", "verifier");
         exchange.get();
 
         String body = tokenRequestBody.get();

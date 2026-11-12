@@ -9,8 +9,11 @@ import java.io.Serial;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -52,7 +55,9 @@ public final class MicrosoftAuthUtil {
 
     /**
      * Initiates the full asynchronous authentication flow. Starts a local callback server, opens the
-     * browser, and chains the authentication steps.
+     * browser, and chains the authentication steps. The authorization-code grant is protected with PKCE
+     * ({@code S256}), so a code intercepted on its way to the loopback redirect cannot be redeemed by
+     * anything that does not also hold the verifier generated here.
      *
      * <p>Cancelling the returned future shuts the callback server down and releases its port.
      *
@@ -67,11 +72,12 @@ public final class MicrosoftAuthUtil {
     static CompletableFuture<MinecraftProfile> authenticate(MicrosoftAuthConfig config, Consumer<String> browser) {
         Objects.requireNonNull(config, "config");
         String state = generateState();
-        MicrosoftCallbackServer server = new MicrosoftCallbackServer(state, config, null, browser);
+        String verifier = generateCodeVerifier();
+        MicrosoftCallbackServer server = new MicrosoftCallbackServer(state, config, codeChallenge(verifier), browser);
 
         CompletableFuture<String> code = server.start();
         CompletableFuture<MinecraftProfile> chain = code.thenCompose(
-                        received -> exchangeCodeForToken(config, received, server.redirectUri()))
+                        received -> exchangeCodeForToken(config, received, server.redirectUri(), verifier))
                 .thenCompose(tokens -> completeFrom(config, tokens, NO_ACCOUNT));
         return cancelling(chain, code);
     }
@@ -469,19 +475,48 @@ public final class MicrosoftAuthUtil {
     }
 
     /**
+     * Generates a PKCE code verifier: 32 random bytes, which Base64url-encode to the 43 unreserved
+     * characters the specification sets as the minimum length.
+     *
+     * @return the verifier
+     */
+    private static String generateCodeVerifier() {
+        byte[] bytes = new byte[32];
+        new SecureRandom().nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    /**
+     * Derives the {@code S256} PKCE challenge for a verifier.
+     *
+     * @param verifier the code verifier
+     * @return the Base64url SHA-256 digest of the verifier, unpadded
+     */
+    static String codeChallenge(String verifier) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(StandardCharsets.US_ASCII));
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
+        } catch (NoSuchAlgorithmException impossible) {
+            // SHA-256 is one of the algorithms every Java platform is required to provide.
+            throw new IllegalStateException(impossible);
+        }
+    }
+
+    /**
      * Step 1: exchanges the OAuth2 authorization code for Microsoft access and refresh tokens.
      *
      * @param config the host's Microsoft authentication configuration
      * @param code the authorization code received from the callback server
      * @param redirectUri the URI where the code was received
+     * @param codeVerifier the PKCE verifier whose challenge the authorization request carried
      * @return a future containing the raw Microsoft tokens
      */
     static CompletableFuture<MsTokens> exchangeCodeForToken(
-            MicrosoftAuthConfig config, String code, String redirectUri) {
+            MicrosoftAuthConfig config, String code, String redirectUri, String codeVerifier) {
         return CompletableFuture.supplyAsync(() -> {
             String body = "client_id=" + encode(config.clientId()) + "&code=" + encode(code)
                     + "&grant_type=authorization_code&redirect_uri=" + encode(redirectUri) + "&scope="
-                    + encode(config.scope());
+                    + encode(config.scope()) + "&code_verifier=" + encode(codeVerifier);
             JsonObject json = send(
                             "Token exchange",
                             () -> HttpUtil.postFormForStatus(config.tokenUrl(), null, body, NO_ACCOUNT))
