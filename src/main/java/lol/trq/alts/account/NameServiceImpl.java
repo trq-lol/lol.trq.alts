@@ -1,6 +1,7 @@
 package lol.trq.alts.account;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.time.Duration;
 import java.time.Instant;
@@ -52,8 +53,13 @@ final class NameServiceImpl implements NameService {
     @Override
     public NameEligibility eligibility() throws AccountException {
         JsonObject body = http.get(endpoints.nameChangeInfo(), NetworkScope.Purpose.PROFILE);
-        boolean allowed =
-                body.has("nameChangeAllowed") && body.get("nameChangeAllowed").getAsBoolean();
+        // Read as a boolean only when it is one: a JSON null, or any other shape, means the service did
+        // not say the change is allowed, which is not the same as the request having failed.
+        JsonElement flag = body.get("nameChangeAllowed");
+        boolean allowed = flag != null
+                && flag.isJsonPrimitive()
+                && flag.getAsJsonPrimitive().isBoolean()
+                && flag.getAsBoolean();
         return new NameEligibility(
                 allowed,
                 parseInstant(AccountHttp.string(body, "createdAt")),

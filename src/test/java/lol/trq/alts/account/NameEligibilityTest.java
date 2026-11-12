@@ -71,6 +71,18 @@ class NameEligibilityTest {
     }
 
     @Test
+    void aFlagTheServiceLeftNullOrMalformedMeansNotAllowedRatherThanAFailure() throws Exception {
+        for (String flag : new String[] {"null", "\"yes\"", "1", "{}", "[]"}) {
+            server.canned(200, "{\"createdAt\":\"2020-01-01T00:00:00Z\",\"nameChangeAllowed\":" + flag + "}");
+
+            NameEligibility eligibility = server.services().name().eligibility();
+
+            assertFalse(eligibility.nameChangeAllowed(), "only a stated true allows a change; got " + flag);
+            assertEquals(Instant.parse("2020-01-01T00:00:00Z"), eligibility.createdAt(), "the rest is still read");
+        }
+    }
+
+    @Test
     void eligibilityFailuresCarryTheirStatus() {
         server.canned(401, "{}");
         assertTrue(assertThrows(
