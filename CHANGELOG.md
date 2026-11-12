@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-12
+
 Device-code login, a wider account surface, a host-supplied store key, and a hardening pass over the
 transport, the stores, the sign-in routes and the shared vault. Several defaults changed on the way, so
 read the upgrade notes first.
