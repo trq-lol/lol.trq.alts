@@ -9,6 +9,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
+import lol.trq.alts.net.IoExecutor;
 
 /**
  * A lazy, non-blocking, per-key value cache. {@link #get(Object)} never blocks: on a cache miss it
@@ -39,9 +40,9 @@ import java.util.function.LongSupplier;
  * that looks up an ever-growing set of keys holds a fixed amount rather than all of them for the life of
  * the process.
  *
- * <p>The {@code loader} runs on the common {@link java.util.concurrent.ForkJoinPool} via
- * {@link CompletableFuture#supplyAsync}; it must be thread-safe and should return {@code null} (or
- * throw) to signal failure.
+ * <p>The {@code loader} runs on {@link IoExecutor#executor()} — a virtual thread per fetch unless the
+ * host bound its own executor — so it may block. It must be thread-safe and should return {@code null}
+ * (or throw) to signal failure.
  *
  * @param <K> the lookup key (e.g. a player UUID string)
  * @param <V> the cached value (e.g. a stats record)
@@ -169,9 +170,9 @@ public final class AsyncCache<K, V> {
     private void fetch(K key, Entry marker) {
         CompletableFuture<V> loading;
         try {
-            loading = CompletableFuture.supplyAsync(() -> loader.apply(key));
+            loading = CompletableFuture.supplyAsync(() -> loader.apply(key), IoExecutor.executor());
         } catch (RuntimeException rejected) {
-            // The pool refused the task. Resolve the marker anyway, or the key would stay pending forever.
+            // The executor refused the task. Resolve the marker anyway, or the key would stay pending forever.
             entries.replace(key, marker, marker.failed(clock.getAsLong()));
             return;
         }

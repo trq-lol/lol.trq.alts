@@ -21,6 +21,7 @@ import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.model.SessionData;
+import lol.trq.alts.net.IoExecutor;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.spi.DeviceCodePrompt;
 import lol.trq.alts.spi.SessionInjector;
@@ -92,41 +93,43 @@ public class AltLoginServiceImpl implements AltLoginService {
      */
     @Override
     public CompletableFuture<AltLoginCallback.LoginResult> loginSession(String sessionToken, LoginMode mode) {
-        return CompletableFuture.supplyAsync(() -> {
-            if (sessionToken == null || sessionToken.isBlank()) {
-                return AltLoginCallback.LoginResult.failure("Token empty", FailureReason.INVALID_TOKEN);
-            }
+        return CompletableFuture.supplyAsync(
+                () -> {
+                    if (sessionToken == null || sessionToken.isBlank()) {
+                        return AltLoginCallback.LoginResult.failure("Token empty", FailureReason.INVALID_TOKEN);
+                    }
 
-            String cleanToken = cleanToken(sessionToken);
+                    String cleanToken = cleanToken(sessionToken);
 
-            // Optimization: try to extract identity from the JWT payload without a network request.
-            // Only when nothing is being saved: the payload is unsigned text anyone can write, so it is
-            // good enough to try a session with but not to store an identity on, and in ADD mode it
-            // would be merged over whatever account the store already holds under the UUID it claims.
-            // Saving therefore always goes through the profile lookup below, which asks the service who
-            // the token really belongs to.
-            if (mode != LoginMode.ADD && cleanToken.startsWith("eyJ")) {
-                Optional<AltLoginCallback.LoginResult> fastResult = attemptFastJwtLogin(cleanToken, mode);
-                if (fastResult.isPresent()) return fastResult.get();
-            }
+                    // Optimization: try to extract identity from the JWT payload without a network request.
+                    // Only when nothing is being saved: the payload is unsigned text anyone can write, so it is
+                    // good enough to try a session with but not to store an identity on, and in ADD mode it
+                    // would be merged over whatever account the store already holds under the UUID it claims.
+                    // Saving therefore always goes through the profile lookup below, which asks the service who
+                    // the token really belongs to.
+                    if (mode != LoginMode.ADD && cleanToken.startsWith("eyJ")) {
+                        Optional<AltLoginCallback.LoginResult> fastResult = attemptFastJwtLogin(cleanToken, mode);
+                        if (fastResult.isPresent()) return fastResult.get();
+                    }
 
-            // Fallback: perform an API request to validate the token and get profile data. A refusal, an
-            // account with no Minecraft profile, and an unreachable service are three different answers
-            // with three different remedies, so they are classified apart rather than collapsed.
-            AccountNetworkUtil.ProfileLookup profile;
-            try {
-                profile = AccountNetworkUtil.fetchProfile(
-                        cleanToken, profileUrl(), NetworkScope.of(NetworkScope.Purpose.PROFILE));
-            } catch (Exception unreachable) {
-                return AltLoginCallback.LoginResult.failure(
-                        "Login failed: " + unreachable.getMessage(), FailureReason.NETWORK);
-            }
-            if (profile.found()) {
-                return finalizeLogin(profile.username(), profile.uuid(), cleanToken, AccountType.SESSION, mode);
-            }
-            return AltLoginCallback.LoginResult.failure(
-                    AltAccountServiceImpl.messageFor(profile), AltAccountServiceImpl.reasonFor(profile));
-        });
+                    // Fallback: perform an API request to validate the token and get profile data. A refusal, an
+                    // account with no Minecraft profile, and an unreachable service are three different answers
+                    // with three different remedies, so they are classified apart rather than collapsed.
+                    AccountNetworkUtil.ProfileLookup profile;
+                    try {
+                        profile = AccountNetworkUtil.fetchProfile(
+                                cleanToken, profileUrl(), NetworkScope.of(NetworkScope.Purpose.PROFILE));
+                    } catch (Exception unreachable) {
+                        return AltLoginCallback.LoginResult.failure(
+                                "Login failed: " + unreachable.getMessage(), FailureReason.NETWORK);
+                    }
+                    if (profile.found()) {
+                        return finalizeLogin(profile.username(), profile.uuid(), cleanToken, AccountType.SESSION, mode);
+                    }
+                    return AltLoginCallback.LoginResult.failure(
+                            AltAccountServiceImpl.messageFor(profile), AltAccountServiceImpl.reasonFor(profile));
+                },
+                IoExecutor.executor());
     }
 
     /**
@@ -138,21 +141,25 @@ public class AltLoginServiceImpl implements AltLoginService {
      */
     @Override
     public CompletableFuture<AltLoginCallback.LoginResult> loginOffline(String name, LoginMode mode) {
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                String cleanName =
-                        name == null ? "" : NOT_USERNAME.matcher(name.trim()).replaceAll("");
-                if (cleanName.isEmpty() || cleanName.length() > 16) {
-                    return AltLoginCallback.LoginResult.failure(
-                            "Invalid username length (1-16 chars)", FailureReason.INVALID_TOKEN);
-                }
+        return CompletableFuture.supplyAsync(
+                () -> {
+                    try {
+                        String cleanName = name == null
+                                ? ""
+                                : NOT_USERNAME.matcher(name.trim()).replaceAll("");
+                        if (cleanName.isEmpty() || cleanName.length() > 16) {
+                            return AltLoginCallback.LoginResult.failure(
+                                    "Invalid username length (1-16 chars)", FailureReason.INVALID_TOKEN);
+                        }
 
-                UUID uuid = UUID.nameUUIDFromBytes(("OfflinePlayer:" + cleanName).getBytes(StandardCharsets.UTF_8));
-                return finalizeLogin(cleanName, uuid.toString(), "", AccountType.OFFLINE, mode);
-            } catch (Exception e) {
-                return AltLoginCallback.LoginResult.failure("Error: " + e.getMessage(), FailureReason.UNKNOWN);
-            }
-        });
+                        UUID uuid =
+                                UUID.nameUUIDFromBytes(("OfflinePlayer:" + cleanName).getBytes(StandardCharsets.UTF_8));
+                        return finalizeLogin(cleanName, uuid.toString(), "", AccountType.OFFLINE, mode);
+                    } catch (Exception e) {
+                        return AltLoginCallback.LoginResult.failure("Error: " + e.getMessage(), FailureReason.UNKNOWN);
+                    }
+                },
+                IoExecutor.executor());
     }
 
     /**
@@ -268,18 +275,21 @@ public class AltLoginServiceImpl implements AltLoginService {
      */
     @Override
     public CompletableFuture<AltLoginCallback.LoginResult> loginCookie(String cookieData, LoginMode mode) {
-        return CompletableFuture.supplyAsync(() -> {
-            if (cookieData == null || cookieData.isBlank()) {
-                return AltLoginCallback.LoginResult.failure("Cookie data empty", FailureReason.INVALID_TOKEN);
-            }
-            MinecraftProfile profile;
-            try {
-                profile = CookieAuthUtil.authenticate(cookieData, microsoftAuth, null);
-            } catch (Exception e) {
-                return classifiedFailure("Cookie Auth", e);
-            }
-            return finalizeLogin(profile.username(), profile.uuid(), profile.accessToken(), AccountType.COOKIE, mode);
-        });
+        return CompletableFuture.supplyAsync(
+                () -> {
+                    if (cookieData == null || cookieData.isBlank()) {
+                        return AltLoginCallback.LoginResult.failure("Cookie data empty", FailureReason.INVALID_TOKEN);
+                    }
+                    MinecraftProfile profile;
+                    try {
+                        profile = CookieAuthUtil.authenticate(cookieData, microsoftAuth, null);
+                    } catch (Exception e) {
+                        return classifiedFailure("Cookie Auth", e);
+                    }
+                    return finalizeLogin(
+                            profile.username(), profile.uuid(), profile.accessToken(), AccountType.COOKIE, mode);
+                },
+                IoExecutor.executor());
     }
 
     /**
@@ -298,14 +308,17 @@ public class AltLoginServiceImpl implements AltLoginService {
             return CompletableFuture.completedFuture(
                     AltLoginCallback.LoginResult.failure("No cookie file given", FailureReason.INVALID_TOKEN));
         }
-        return CompletableFuture.supplyAsync(() -> {
-                    try {
-                        return CookieFile.read(file);
-                    } catch (IOException e) {
-                        // Not a network failure: the file is the credential, and it could not be read.
-                        throw new AuthFlowException(describe(e, "could not be read"), FailureReason.INVALID_TOKEN, e);
-                    }
-                })
+        return CompletableFuture.supplyAsync(
+                        () -> {
+                            try {
+                                return CookieFile.read(file);
+                            } catch (IOException e) {
+                                // Not a network failure: the file is the credential, and it could not be read.
+                                throw new AuthFlowException(
+                                        describe(e, "could not be read"), FailureReason.INVALID_TOKEN, e);
+                            }
+                        },
+                        IoExecutor.executor())
                 .thenCompose(cookieData -> loginCookie(cookieData, mode))
                 .exceptionally(failure -> classifiedFailure("Cookie file", failure));
     }

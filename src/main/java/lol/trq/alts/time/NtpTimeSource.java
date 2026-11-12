@@ -11,6 +11,7 @@ import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
+import lol.trq.alts.net.IoExecutor;
 
 /**
  * A {@link TimeSource} corrected against an NTP server.
@@ -25,7 +26,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * offset — pure arithmetic — because it is read inside the final spin of a scheduled claim, where a DNS
  * lookup or a socket timeout turns a twenty-millisecond approach into seconds and misses the target.
  * Measurement happens off to the side: a {@code now()} that finds the offset due for a re-measure starts
- * one on the common pool and returns at once with what it already has. A failed measurement keeps the
+ * one on the library executor and returns at once with what it already has. A failed measurement keeps the
  * last good offset (or zero, if none was ever obtained) and is retried on a growing backoff rather than
  * on every call — a claim should fire on a slightly-off clock rather than not at all. A caller that
  * wants the correction in hand before it schedules anything calls {@link #sync()} first, which does
@@ -200,28 +201,30 @@ public final class NtpTimeSource implements TimeSource {
         return Duration.ofMillis(offsetMillis);
     }
 
-    /** Starts a measurement on the common pool unless one is already queued, running, or held by {@link #sync()}. */
+    /** Starts a measurement on the library executor unless one is already queued, running, or held by {@link #sync()}. */
     private void syncInBackground() {
         if (!backgroundQueued.compareAndSet(false, true)) {
             return;
         }
         try {
-            CompletableFuture.runAsync(() -> {
-                try {
-                    if (measuring.tryLock()) {
+            CompletableFuture.runAsync(
+                    () -> {
                         try {
-                            // Re-checked under the lock: a sync() that just finished already did this work.
-                            if (System.nanoTime() - nextSyncNanos >= 0) {
-                                measureAndRecord();
+                            if (measuring.tryLock()) {
+                                try {
+                                    // Re-checked under the lock: a sync() that just finished already did this work.
+                                    if (System.nanoTime() - nextSyncNanos >= 0) {
+                                        measureAndRecord();
+                                    }
+                                } finally {
+                                    measuring.unlock();
+                                }
                             }
                         } finally {
-                            measuring.unlock();
+                            backgroundQueued.set(false);
                         }
-                    }
-                } finally {
-                    backgroundQueued.set(false);
-                }
-            });
+                    },
+                    IoExecutor.executor());
         } catch (RuntimeException rejected) {
             backgroundQueued.set(false);
         }

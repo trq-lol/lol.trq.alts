@@ -14,12 +14,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import lol.trq.alts.net.HttpUtil;
+import lol.trq.alts.net.IoExecutor;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.time.TimeSource;
 
 /**
  * Concrete {@link NameService}. The reads and the single change are ordinary bearer calls; the scheduled
- * claim borrows the bulk runner's structural concurrency — worker chains over the common pool, first
+ * claim borrows the bulk runner's structural concurrency — worker chains over the library executor, first
  * success cancels the rest, no executor created — and adds a two-phase wait that sleeps coarsely then
  * spins briefly, because a scheduler sleep overshoots a millisecond target.
  *
@@ -153,8 +154,9 @@ final class NameServiceImpl implements NameService {
         if (run.stopped() || run.opts.timeSource().now().isAfter(run.deadline)) {
             return CompletableFuture.completedFuture(null);
         }
-        // Re-checked on the pool thread: a run stopped while this attempt sat queued must not fire it.
-        return CompletableFuture.supplyAsync(() -> run.stopped() ? null : attemptChange(run.name))
+        // Re-checked on the worker thread: a run stopped while this attempt sat queued must not fire it.
+        return CompletableFuture.supplyAsync(
+                        () -> run.stopped() ? null : attemptChange(run.name), IoExecutor.executor())
                 .thenCompose(result -> {
                     if (result == null) {
                         return CompletableFuture.completedFuture((Void) null);
@@ -210,12 +212,14 @@ final class NameServiceImpl implements NameService {
             return CompletableFuture.completedFuture(null);
         }
         if (remaining <= SPIN_THRESHOLD_MILLIS) {
-            return CompletableFuture.supplyAsync(() -> {
-                while (!stopped.getAsBoolean() && clock.now().isBefore(target)) {
-                    Thread.onSpinWait();
-                }
-                return null;
-            });
+            return CompletableFuture.supplyAsync(
+                    () -> {
+                        while (!stopped.getAsBoolean() && clock.now().isBefore(target)) {
+                            Thread.onSpinWait();
+                        }
+                        return null;
+                    },
+                    IoExecutor.executor());
         }
         long sleep = remaining - SPIN_THRESHOLD_MILLIS;
         return delay(Duration.ofMillis(sleep)).thenCompose(ignored -> waitUntil(target, clock, stopped));
@@ -227,7 +231,8 @@ final class NameServiceImpl implements NameService {
             return CompletableFuture.completedFuture(null);
         }
         return CompletableFuture.supplyAsync(
-                        () -> null, CompletableFuture.delayedExecutor(millis, TimeUnit.MILLISECONDS))
+                        () -> null,
+                        CompletableFuture.delayedExecutor(millis, TimeUnit.MILLISECONDS, IoExecutor.executor()))
                 .thenApply(ignored -> null);
     }
 

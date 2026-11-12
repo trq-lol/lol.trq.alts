@@ -24,14 +24,16 @@ import lol.trq.alts.auth.AltLoginService;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.net.Backoff;
+import lol.trq.alts.net.IoExecutor;
 import lol.trq.alts.store.AltStore;
 
 /**
  * Concrete {@link BulkOperations}.
  *
  * <p>No executor is created. The concurrency bound is structural: that many worker chains each pull the
- * next entry off a shared cursor and recurse, so everything runs on the common pool where the rest of the
- * library's async work already runs, and a host is never surprised by threads it did not ask for.
+ * next entry off a shared cursor and recurse, so everything runs on {@link IoExecutor#executor()} where the
+ * rest of the library's blocking work already runs, and a host is never surprised by threads it did not
+ * ask for.
  *
  * @author trq
  * @since 0.9.0
@@ -115,7 +117,7 @@ public final class BulkOperationsImpl implements BulkOperations {
                 options,
                 progress,
                 index -> items.get(index).username(),
-                index -> CompletableFuture.supplyAsync(() -> entitlementsOf(items.get(index)))));
+                index -> CompletableFuture.supplyAsync(() -> entitlementsOf(items.get(index)), IoExecutor.executor())));
     }
 
     /**
@@ -308,7 +310,8 @@ public final class BulkOperationsImpl implements BulkOperations {
             return CompletableFuture.completedFuture(null);
         }
         return CompletableFuture.supplyAsync(
-                        () -> null, CompletableFuture.delayedExecutor(millis, TimeUnit.MILLISECONDS))
+                        () -> null,
+                        CompletableFuture.delayedExecutor(millis, TimeUnit.MILLISECONDS, IoExecutor.executor()))
                 .thenAccept(ignored -> {});
     }
 

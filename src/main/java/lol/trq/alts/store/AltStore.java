@@ -63,7 +63,7 @@ public final class AltStore {
     /** Guards every compound mutation, and the hand-off of its snapshot to {@link #FILE}. */
     private static final Object LOCK = new Object();
 
-    // Copy-on-write because logins resolve on the common pool while the host reads accounts() from its
+    // Copy-on-write because logins resolve on the library executor while the host reads accounts() from its
     // render thread; a plain ArrayList lets one thread's write blow up the other's iteration.
     private static final List<AltAccount> ACCOUNTS = new CopyOnWriteArrayList<>();
 

@@ -8,6 +8,7 @@ import lol.trq.alts.auth.AccountStatus.State;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
+import lol.trq.alts.net.IoExecutor;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.store.AltStore;
 
@@ -59,7 +60,7 @@ public class AltAccountServiceImpl implements AltAccountService {
                     FailureReason.INVALID_TOKEN,
                     "No stored session token"));
         }
-        return CompletableFuture.supplyAsync(() -> validate(account));
+        return CompletableFuture.supplyAsync(() -> validate(account), IoExecutor.executor());
     }
 
     @Override
@@ -79,21 +80,22 @@ public class AltAccountServiceImpl implements AltAccountService {
             // A live token on an account that cannot be renewed is taken at its word, so refreshing is
             // no more expensive than logging in was.
             return expired
-                    ? CompletableFuture.supplyAsync(() -> validate(account))
+                    ? CompletableFuture.supplyAsync(() -> validate(account), IoExecutor.executor())
                     : CompletableFuture.completedFuture(AccountStatus.valid(account));
         }
         if (expired) {
             return renew(account);
         }
-        return CompletableFuture.supplyAsync(() -> validate(account)).thenCompose(status -> {
-            // Only a refused token is worth a renewal. An unreachable service, or an account with no
-            // profile, says nothing about the credential -- and the token endpoint rotates the refresh
-            // token on every redemption, so renewing on those spends a rotation to fix something else.
-            if (status.state() != State.EXPIRED) {
-                return CompletableFuture.completedFuture(status);
-            }
-            return renew(account);
-        });
+        return CompletableFuture.supplyAsync(() -> validate(account), IoExecutor.executor())
+                .thenCompose(status -> {
+                    // Only a refused token is worth a renewal. An unreachable service, or an account with no
+                    // profile, says nothing about the credential -- and the token endpoint rotates the refresh
+                    // token on every redemption, so renewing on those spends a rotation to fix something else.
+                    if (status.state() != State.EXPIRED) {
+                        return CompletableFuture.completedFuture(status);
+                    }
+                    return renew(account);
+                });
     }
 
     /**

@@ -91,7 +91,7 @@ public class MicrosoftCallbackServer {
         // Registered before anything can complete the future, and run off the completing thread: the
         // completion usually happens on the server's own dispatcher, which must not be asked to stop
         // itself before it has finished writing the response.
-        codeFuture.whenCompleteAsync((code, failure) -> stop());
+        codeFuture.whenCompleteAsync((code, failure) -> stop(), IoExecutor.executor());
         try {
             bindToAvailablePort();
             server.createContext(config.redirectPath(), this::handleCallback);
