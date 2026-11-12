@@ -279,9 +279,11 @@ public final class GettingStartedExample {
      *
      * @param dataDir the directory the encrypted account file lives in
      * @param keystore wherever the host keeps a real secret: an OS keystore entry, a hardware-backed key
+     * @param upgradeLaunch true on the one launch that first installs the key over existing files
      * @return the constructed runtime
      */
-    public static AltsRuntime<MyHandle> buildRuntimeWithHostKey(Path dataDir, HostKeystore keystore) {
+    public static AltsRuntime<MyHandle> buildRuntimeWithHostKey(
+            Path dataDir, HostKeystore keystore, boolean upgradeLaunch) {
         // The same bytes every time, and at least StoreKeyProvider.MIN_LENGTH of them. A provider that
         // throws leaves the stores unreadable and unwritable rather than falling back to the weaker key.
         StoreKeyProvider storeKey = () -> keystore.loadOrCreate("alts-store-key", 32);
@@ -291,8 +293,11 @@ public final class GettingStartedExample {
                 .vaultDirectory(() -> dataDir)
                 .mainThread(Runnable::run)
                 .toastSink((level, title, description, durationMs) -> show(level, title, description))
-                // Files written before the provider was installed still load, and are rewritten under it.
                 .storeKeyProvider(storeKey)
+                // Off by default, and on for the upgrade launch only: it lets files written before the
+                // provider was installed load once and be resealed under it. Left on, it would keep
+                // accepting the machine-derived key, which is the key the provider exists to replace.
+                .migrateFromMachineKey(upgradeLaunch)
                 .build();
     }
 
