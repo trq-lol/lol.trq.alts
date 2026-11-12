@@ -50,4 +50,31 @@ class KeyWrapSchemeTest {
 
         assertThrows(CryptoException.class, () -> scheme.unwrap(forged, recipient.getPrivate()));
     }
+
+    @Test
+    void unwrapReportsMalformedBase64AsACryptoException() throws Exception {
+        KeyWrapScheme scheme = new X25519HkdfAesGcmKeyWrap();
+        KeyPair recipient = X25519.newKeyPair();
+        WrappedKey blob = scheme.wrap(aesKey(), recipient.getPublic());
+        String id = blob.schemeId();
+
+        assertThrows(
+                CryptoException.class,
+                () -> scheme.unwrap(
+                        new WrappedKey(id, "not base64!", blob.iv(), blob.ciphertext()), recipient.getPrivate()));
+        assertThrows(
+                CryptoException.class,
+                () -> scheme.unwrap(
+                        new WrappedKey(id, blob.ephemeralPublicKey(), "***", blob.ciphertext()),
+                        recipient.getPrivate()));
+        assertThrows(
+                CryptoException.class,
+                () -> scheme.unwrap(
+                        new WrappedKey(id, blob.ephemeralPublicKey(), blob.iv(), "***"), recipient.getPrivate()));
+        // A well-formed but wrong-length ephemeral key is rejected the same way.
+        assertThrows(
+                CryptoException.class,
+                () -> scheme.unwrap(
+                        new WrappedKey(id, "c2hvcnQ=", blob.iv(), blob.ciphertext()), recipient.getPrivate()));
+    }
 }

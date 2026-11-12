@@ -75,14 +75,16 @@ public final class VaultIdentity {
     /**
      * Unlocks a stored identity with its passphrase.
      *
+     * <p>The stored record is treated as untrusted: its iteration count must lie within
+     * {@link Pbkdf2#MIN_ITERATIONS} and {@link Pbkdf2#MAX_ITERATIONS}.
+     *
      * @param stored the stored identity
      * @param passphrase the passphrase used at creation
      * @return the unlocked identity
-     * @throws CryptoException if the passphrase is wrong or the material is corrupt
+     * @throws CryptoException if the passphrase is wrong, or the record is malformed or out of range
      */
     public static VaultIdentity unlock(WrappedIdentity stored, char[] passphrase) throws CryptoException {
-        SecretKey mk =
-                Pbkdf2.deriveKey(passphrase, Base64.getDecoder().decode(stored.kdfSalt()), stored.kdfIterations());
+        SecretKey mk = Pbkdf2.deriveKey(passphrase, decode(stored.kdfSalt(), "kdf salt"), stored.kdfIterations());
         byte[] material = open(mk, PASSPHRASE_AAD, stored.wrappedPrivateMaterial());
         return fromMaterial(material, stored);
     }
@@ -93,13 +95,13 @@ public final class VaultIdentity {
      * @param stored the stored identity (must carry a recovery sealing)
      * @param recoveryCode the recovery code shown at recovery setup
      * @return the unlocked identity
-     * @throws CryptoException if no recovery sealing exists or the code is wrong
+     * @throws CryptoException if no recovery sealing exists, the code is wrong, or the record is malformed
      */
     public static VaultIdentity unlockWithRecovery(WrappedIdentity stored, String recoveryCode) throws CryptoException {
         if (!stored.hasRecovery()) {
             throw new CryptoException("identity has no recovery sealing");
         }
-        SecretKey rk = RecoveryCode.deriveKey(recoveryCode, Base64.getDecoder().decode(stored.recoverySalt()));
+        SecretKey rk = RecoveryCode.deriveKey(recoveryCode, decode(stored.recoverySalt(), "recovery salt"));
         byte[] material = open(rk, RECOVERY_AAD, stored.recoveryWrappedPrivateMaterial());
         return fromMaterial(material, stored);
     }
@@ -200,9 +202,9 @@ public final class VaultIdentity {
             }
             edSeed = Arrays.copyOfRange(material, 0, Ed25519.KEY_BYTES);
             xScalar = Arrays.copyOfRange(material, Ed25519.KEY_BYTES, MATERIAL_BYTES);
-            PublicKey edPublic = Ed25519.decodePublicKey(Base64.getDecoder().decode(stored.ed25519PublicKey()));
+            PublicKey edPublic = Ed25519.decodePublicKey(decode(stored.ed25519PublicKey(), "Ed25519 public key"));
             PrivateKey edPrivate = Ed25519.decodePrivateKey(edSeed);
-            PublicKey xPublic = X25519.decodePublicKey(Base64.getDecoder().decode(stored.x25519PublicKey()));
+            PublicKey xPublic = X25519.decodePublicKey(decode(stored.x25519PublicKey(), "X25519 public key"));
             PrivateKey xPrivate = X25519.decodePrivateKey(xScalar);
             return new VaultIdentity(edPublic, edPrivate, xPublic, xPrivate, stored);
         } finally {
@@ -230,6 +232,17 @@ public final class VaultIdentity {
         }
     }
 
+    private static byte[] decode(String base64, String what) throws CryptoException {
+        if (base64 == null) {
+            throw new CryptoException("stored identity " + what + " is missing");
+        }
+        try {
+            return Base64.getDecoder().decode(base64);
+        } catch (IllegalArgumentException e) {
+            throw new CryptoException("stored identity " + what + " is not Base64", e);
+        }
+    }
+
     private static String seal(SecretKey key, byte[] aad, byte[] plaintext) throws CryptoException {
         byte[] iv = PayloadCipher.newIv();
         byte[] ct = PayloadCipher.encrypt(key, iv, aad, plaintext);
@@ -237,7 +250,7 @@ public final class VaultIdentity {
     }
 
     private static byte[] open(SecretKey key, byte[] aad, String sealedB64) throws CryptoException {
-        byte[] sealed = Base64.getDecoder().decode(sealedB64);
+        byte[] sealed = decode(sealedB64, "sealed private material");
         if (sealed.length <= PayloadCipher.IV_BYTES) {
             throw new CryptoException("sealed material too short");
         }

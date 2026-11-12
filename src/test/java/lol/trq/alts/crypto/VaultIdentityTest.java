@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import org.junit.jupiter.api.Test;
 
 /** Create / unlock / recovery round-trips for the vault identity. */
@@ -77,5 +78,71 @@ class VaultIdentityTest {
         assertNotEquals(
                 VaultIdentity.create("pw".toCharArray()).identityId(),
                 VaultIdentity.create("pw".toCharArray()).identityId());
+    }
+
+    private static String flipFirstByte(String base64) {
+        byte[] raw = Base64.getDecoder().decode(base64);
+        raw[0] ^= 0x01;
+        return Base64.getEncoder().encodeToString(raw);
+    }
+
+    private static WrappedIdentity with(WrappedIdentity s, String ed, String x, String salt, int iterations) {
+        return new WrappedIdentity(
+                ed,
+                x,
+                salt,
+                iterations,
+                s.wrappedPrivateMaterial(),
+                s.recoverySalt(),
+                s.recoveryWrappedPrivateMaterial());
+    }
+
+    @Test
+    void unlockRejectsAnOutOfRangeIterationCount() throws Exception {
+        WrappedIdentity stored = VaultIdentity.create("pw".toCharArray()).export();
+
+        for (int iterations :
+                new int[] {0, -1, 1, Pbkdf2.MIN_ITERATIONS - 1, Pbkdf2.MAX_ITERATIONS + 1, Integer.MAX_VALUE}) {
+            WrappedIdentity tampered =
+                    with(stored, stored.ed25519PublicKey(), stored.x25519PublicKey(), stored.kdfSalt(), iterations);
+            assertThrows(CryptoException.class, () -> VaultIdentity.unlock(tampered, "pw".toCharArray()));
+        }
+    }
+
+    @Test
+    void unlockReportsMalformedBase64AsACryptoException() throws Exception {
+        WrappedIdentity s = VaultIdentity.create("pw".toCharArray()).withRecovery("recovery-code");
+        char[] pw = "pw".toCharArray();
+
+        assertThrows(
+                CryptoException.class,
+                () -> VaultIdentity.unlock(
+                        with(s, s.ed25519PublicKey(), s.x25519PublicKey(), "not base64!", s.kdfIterations()), pw));
+        assertThrows(
+                CryptoException.class,
+                () -> VaultIdentity.unlock(
+                        with(s, s.ed25519PublicKey(), s.x25519PublicKey(), "", s.kdfIterations()), pw));
+        assertThrows(
+                CryptoException.class,
+                () -> VaultIdentity.unlock(
+                        with(s, "not base64!", s.x25519PublicKey(), s.kdfSalt(), s.kdfIterations()), pw));
+        assertThrows(
+                CryptoException.class,
+                () -> VaultIdentity.unlock(
+                        with(s, s.ed25519PublicKey(), "not base64!", s.kdfSalt(), s.kdfIterations()), pw));
+        WrappedIdentity badMaterial = new WrappedIdentity(
+                s.ed25519PublicKey(), s.x25519PublicKey(), s.kdfSalt(), s.kdfIterations(), "***", "***", "***");
+        assertThrows(CryptoException.class, () -> VaultIdentity.unlock(badMaterial, pw));
+        assertThrows(CryptoException.class, () -> VaultIdentity.unlockWithRecovery(badMaterial, "recovery-code"));
+        // A flipped byte in a well-formed sealing is still an authentication failure, not a crash.
+        WrappedIdentity flipped = new WrappedIdentity(
+                s.ed25519PublicKey(),
+                s.x25519PublicKey(),
+                s.kdfSalt(),
+                s.kdfIterations(),
+                flipFirstByte(s.wrappedPrivateMaterial()),
+                null,
+                null);
+        assertThrows(CryptoException.class, () -> VaultIdentity.unlock(flipped, pw));
     }
 }

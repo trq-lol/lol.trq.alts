@@ -21,6 +21,22 @@ public final class Pbkdf2 {
     /** Iteration count for passphrase-derived vault keys. High by design — these guard a private key. */
     public static final int VAULT_ITERATIONS = 600_000;
 
+    /**
+     * The lowest iteration count {@link #deriveKey} accepts. A stored record names its own count, so the
+     * floor keeps a tampered or corrupt record from asking for a derivation too cheap to mean anything.
+     *
+     * @since 0.12.0
+     */
+    public static final int MIN_ITERATIONS = 10_000;
+
+    /**
+     * The highest iteration count {@link #deriveKey} accepts. A stored or served record names its own
+     * count, so the ceiling keeps a hostile one from pinning a core for hours.
+     *
+     * @since 0.12.0
+     */
+    public static final int MAX_ITERATIONS = 10_000_000;
+
     /** Derived key length, in bits. */
     public static final int KEY_BITS = 256;
 
@@ -37,12 +53,23 @@ public final class Pbkdf2 {
      * (and should clear) {@code passphrase} itself.
      *
      * @param passphrase the passphrase characters
-     * @param salt the per-derivation salt
-     * @param iterations the PBKDF2 iteration count (use {@link #VAULT_ITERATIONS})
+     * @param salt the per-derivation salt (non-empty)
+     * @param iterations the PBKDF2 iteration count, within {@link #MIN_ITERATIONS} and
+     *     {@link #MAX_ITERATIONS} (use {@link #VAULT_ITERATIONS})
      * @return an AES secret key
-     * @throws CryptoException if key derivation fails
+     * @throws CryptoException if an argument is out of range or key derivation fails
      */
     public static SecretKey deriveKey(char[] passphrase, byte[] salt, int iterations) throws CryptoException {
+        if (passphrase == null) {
+            throw new CryptoException("PBKDF2 passphrase is missing");
+        }
+        if (salt == null || salt.length == 0) {
+            throw new CryptoException("PBKDF2 salt is empty");
+        }
+        if (iterations < MIN_ITERATIONS || iterations > MAX_ITERATIONS) {
+            throw new CryptoException("PBKDF2 iteration count out of range [" + MIN_ITERATIONS + ", " + MAX_ITERATIONS
+                    + "]: " + iterations);
+        }
         PBEKeySpec spec = new PBEKeySpec(passphrase, salt, iterations, KEY_BITS);
         byte[] derived = null;
         try {

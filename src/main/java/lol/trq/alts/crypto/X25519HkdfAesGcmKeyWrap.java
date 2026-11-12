@@ -44,6 +44,9 @@ public final class X25519HkdfAesGcmKeyWrap implements KeyWrapScheme {
         byte[] sharedSecret = X25519.agree(ephemeral.getPrivate(), recipientPublicKey);
         byte[] dataKeyBytes = dataKey.getEncoded();
         try {
+            if (dataKeyBytes == null) {
+                throw new CryptoException("data key is not extractable");
+            }
             SecretKey kek = Hkdf.deriveKey(sharedSecret, ephemeralRaw, HKDF_INFO, KEK_BYTES);
             byte[] iv = PayloadCipher.newIv();
             byte[] ciphertext = PayloadCipher.encrypt(kek, iv, HKDF_INFO, dataKeyBytes);
@@ -66,22 +69,35 @@ public final class X25519HkdfAesGcmKeyWrap implements KeyWrapScheme {
         if (!SCHEME_ID.equals(blob.schemeId())) {
             throw new CryptoException("unknown key-wrap scheme: " + blob.schemeId());
         }
-        Base64.Decoder b64 = Base64.getDecoder();
-        byte[] ephemeralRaw = b64.decode(blob.ephemeralPublicKey());
-        byte[] iv = b64.decode(blob.iv());
-        byte[] ciphertext = b64.decode(blob.ciphertext());
+        byte[] ephemeralRaw = decode(blob.ephemeralPublicKey(), "ephemeral public key");
+        byte[] iv = decode(blob.iv(), "iv");
+        byte[] ciphertext = decode(blob.ciphertext(), "ciphertext");
         PublicKey ephemeralPublic = X25519.decodePublicKey(ephemeralRaw);
         byte[] sharedSecret = X25519.agree(recipientPrivateKey, ephemeralPublic);
         byte[] dataKeyBytes = null;
         try {
             SecretKey kek = Hkdf.deriveKey(sharedSecret, ephemeralRaw, HKDF_INFO, KEK_BYTES);
             dataKeyBytes = PayloadCipher.decrypt(kek, iv, HKDF_INFO, ciphertext);
+            if (dataKeyBytes.length == 0) {
+                throw new CryptoException("wrapped key is empty");
+            }
             return new SecretKeySpec(dataKeyBytes, "AES");
         } finally {
             Arrays.fill(sharedSecret, (byte) 0);
             if (dataKeyBytes != null) {
                 Arrays.fill(dataKeyBytes, (byte) 0);
             }
+        }
+    }
+
+    private static byte[] decode(String base64, String what) throws CryptoException {
+        if (base64 == null) {
+            throw new CryptoException("wrapped key " + what + " is missing");
+        }
+        try {
+            return Base64.getDecoder().decode(base64);
+        } catch (IllegalArgumentException e) {
+            throw new CryptoException("wrapped key " + what + " is not Base64", e);
         }
     }
 }
