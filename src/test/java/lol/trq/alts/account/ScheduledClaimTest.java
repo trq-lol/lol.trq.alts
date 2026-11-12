@@ -1,5 +1,6 @@
 package lol.trq.alts.account;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -10,6 +11,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import lol.trq.alts.net.HttpUtil;
@@ -110,5 +112,111 @@ class ScheduledClaimTest {
         assertFalse(result.claimed());
         assertTrue(elapsed < 1_000, "a terminal failure ends the run rather than filling the window: " + elapsed);
         assertTrue(changeCalls.get() <= 2, "a change that can never land is not retried for the window");
+        assertEquals(ClaimResult.StopReason.TERMINAL_FAILURE, result.stopReason());
+        assertFalse(result.rateLimited(), "a dead token is not a rate limit");
+    }
+
+    /**
+     * The regression this guards: a 429 was just another refusal, so three workers a few milliseconds
+     * apart kept sending for the whole window to a service that had asked to be left alone.
+     */
+    @Test
+    void aRateLimitStopsEveryWorkerAndIsReportedAsOne() throws Exception {
+        Instant target = Instant.now();
+        status.set(429);
+
+        ClaimOptions options = new ClaimOptions(Duration.ZERO, Duration.ofSeconds(5), Duration.ofMillis(2), 3, null);
+        long start = System.currentTimeMillis();
+        ClaimResult result = name().claimAt("Wanted", target, options).get();
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertFalse(result.claimed(), "a rate limit is not a claim");
+        assertEquals(ClaimResult.StopReason.RATE_LIMITED, result.stopReason());
+        assertTrue(result.rateLimited());
+        assertEquals(NameChangeResult.Outcome.RATE_LIMITED, result.finalResult().outcome());
+        assertTrue(elapsed < 1_000, "the run stops at the limit rather than filling the window: " + elapsed);
+        // Each of the three workers may already have an attempt on the wire when the first 429 lands.
+        assertTrue(changeCalls.get() <= 3, "no worker keeps sending after the limit, saw " + changeCalls.get());
+        assertEquals(changeCalls.get(), result.attempts());
+
+        int after = changeCalls.get();
+        Thread.sleep(150);
+        assertEquals(after, changeCalls.get(), "nothing is sent once the run has stopped");
+    }
+
+    @Test
+    void aRunThatExhaustsItsWindowSaysSo() throws Exception {
+        Instant target = Instant.now();
+        status.set(403); // unavailable: worth retrying until the window closes
+
+        ClaimOptions options = new ClaimOptions(Duration.ZERO, Duration.ofMillis(150), Duration.ofMillis(10), 1, null);
+        ClaimResult result = name().claimAt("Wanted", target, options).get();
+
+        assertFalse(result.claimed());
+        assertEquals(ClaimResult.StopReason.WINDOW_ELAPSED, result.stopReason());
+        assertFalse(result.rateLimited());
+        assertTrue(result.attempts() > 1, "an ordinary refusal is retried across the window");
+    }
+
+    @Test
+    void aSuccessfulClaimReportsClaimedAsItsStopReason() throws Exception {
+        status.set(200);
+
+        ClaimResult result = name().claimAt(
+                        "Wanted",
+                        Instant.now(),
+                        new ClaimOptions(Duration.ZERO, Duration.ofSeconds(2), Duration.ofMillis(5), 1, null))
+                .get();
+
+        assertTrue(result.claimed());
+        assertEquals(ClaimResult.StopReason.CLAIMED, result.stopReason());
+    }
+
+    @Test
+    void cancellingBeforeTheTargetMeansNoAttemptIsEverSent() throws Exception {
+        status.set(200);
+        Instant target = Instant.now().plusMillis(300);
+
+        ClaimOptions options = new ClaimOptions(Duration.ZERO, Duration.ofSeconds(2), Duration.ofMillis(5), 3, null);
+        CompletableFuture<ClaimResult> claim = name().claimAt("Wanted", target, options);
+        Thread.sleep(50);
+        assertTrue(claim.cancel(true));
+
+        Thread.sleep(600); // well past the target and into what would have been the window
+        assertTrue(claim.isCancelled());
+        assertEquals(0, changeCalls.get(), "a cancelled claim must not fire when its target arrives");
+    }
+
+    @Test
+    void cancellingMidBurstStopsTheWorkers() throws Exception {
+        status.set(403); // keeps every worker retrying until told to stop
+
+        ClaimOptions options = new ClaimOptions(Duration.ZERO, Duration.ofSeconds(10), Duration.ofMillis(5), 3, null);
+        CompletableFuture<ClaimResult> claim = name().claimAt("Wanted", Instant.now(), options);
+        for (int i = 0; i < 200 && changeCalls.get() < 3; i++) {
+            Thread.sleep(5);
+        }
+        assertTrue(changeCalls.get() >= 3, "the burst is under way before it is cancelled");
+
+        claim.cancel(true);
+        Thread.sleep(100); // lets any attempt already on the wire land
+        int settled = changeCalls.get();
+        Thread.sleep(300);
+
+        assertEquals(settled, changeCalls.get(), "no attempt starts after cancellation");
+    }
+
+    @Test
+    void aResultBuiltWithoutAStopReasonInfersOne() {
+        NameChangeResult limited =
+                new NameChangeResult(NameChangeResult.Outcome.RATE_LIMITED, null, "slow down", Duration.ofSeconds(1));
+        NameChangeResult refused = new NameChangeResult(NameChangeResult.Outcome.UNAUTHORIZED, null, "no", null);
+        NameChangeResult taken = new NameChangeResult(NameChangeResult.Outcome.UNAVAILABLE, null, "taken", null);
+
+        assertEquals(ClaimResult.StopReason.CLAIMED, new ClaimResult(true, 1, null).stopReason());
+        assertEquals(ClaimResult.StopReason.RATE_LIMITED, new ClaimResult(false, 1, limited).stopReason());
+        assertEquals(ClaimResult.StopReason.TERMINAL_FAILURE, new ClaimResult(false, 1, refused).stopReason());
+        assertEquals(ClaimResult.StopReason.WINDOW_ELAPSED, new ClaimResult(false, 9, taken).stopReason());
+        assertEquals(ClaimResult.StopReason.UNKNOWN, new ClaimResult(false, 0, null).stopReason());
     }
 }

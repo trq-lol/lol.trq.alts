@@ -5,11 +5,14 @@ import com.google.gson.JsonObject;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import lol.trq.alts.net.HttpUtil;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.time.TimeSource;
@@ -41,7 +44,7 @@ final class NameServiceImpl implements NameService {
     @Override
     public NameAvailability checkAvailability(String name) throws AccountException {
         JsonObject body = http.get(endpoints.nameAvailability(name), NetworkScope.Purpose.PROFILE);
-        return NameAvailability.from(body.has("status") ? body.get("status").getAsString() : null);
+        return NameAvailability.from(AccountHttp.string(body, "status"));
     }
 
     @Override
@@ -113,58 +116,71 @@ final class NameServiceImpl implements NameService {
     public CompletableFuture<ClaimResult> claimAt(String name, Instant target, ClaimOptions options) {
         ClaimOptions opts = options == null ? ClaimOptions.defaults() : options;
         Instant begin = target.minus(opts.leadTime());
-        Instant deadline = target.plus(opts.window());
+        ClaimRun run = new ClaimRun(name, target.plus(opts.window()), opts);
 
-        AtomicBoolean claimed = new AtomicBoolean();
-        // Distinct from claimed: a terminal failure (dead token, no entitlement) stops the run without
-        // the name having been claimed, so the two must not share a flag.
-        AtomicBoolean stop = new AtomicBoolean();
-        AtomicInteger attempts = new AtomicInteger();
-        AtomicReference<NameChangeResult> last = new AtomicReference<>();
+        // The future handed back is one this method owns rather than the tail of the chain below, so
+        // that completing it from outside — a cancel() — is observable here and stops the run. A
+        // dependent future would swallow the cancellation and leave the workers firing.
+        CompletableFuture<ClaimResult> result = new CompletableFuture<>();
+        result.whenComplete((ignored, failure) -> run.stop(ClaimResult.StopReason.CANCELLED, null));
 
-        return waitUntil(begin, opts.timeSource()).thenCompose(ignored -> {
-            java.util.List<CompletableFuture<Void>> workers = new java.util.ArrayList<>(opts.concurrency());
-            for (int i = 0; i < opts.concurrency(); i++) {
-                workers.add(worker(name, deadline, opts, claimed, stop, attempts, last));
-            }
-            return CompletableFuture.allOf(workers.toArray(CompletableFuture[]::new))
-                    .thenApply(done -> new ClaimResult(claimed.get(), attempts.get(), last.get()));
-        });
+        waitUntil(begin, opts.timeSource(), run::stopped)
+                .thenCompose(ignored -> {
+                    List<CompletableFuture<Void>> workers = new ArrayList<>(opts.concurrency());
+                    for (int i = 0; i < opts.concurrency(); i++) {
+                        workers.add(worker(run));
+                    }
+                    return CompletableFuture.allOf(workers.toArray(CompletableFuture[]::new));
+                })
+                .whenComplete((ignored, failure) -> {
+                    if (failure != null) {
+                        result.completeExceptionally(failure);
+                    } else {
+                        result.complete(run.result());
+                    }
+                });
+        return result;
     }
 
     /**
      * One attempt chain: try the change, and if it neither ended the run nor ran out of time, wait the
      * spacing and try again.
+     *
+     * @param run the claim this chain belongs to
+     * @return a future completing when this chain has stopped
      */
-    private CompletableFuture<Void> worker(
-            String name,
-            Instant deadline,
-            ClaimOptions opts,
-            AtomicBoolean claimed,
-            AtomicBoolean stop,
-            AtomicInteger attempts,
-            AtomicReference<NameChangeResult> last) {
-        if (stop.get() || opts.timeSource().now().isAfter(deadline)) {
+    private CompletableFuture<Void> worker(ClaimRun run) {
+        if (run.stopped() || run.opts.timeSource().now().isAfter(run.deadline)) {
             return CompletableFuture.completedFuture(null);
         }
-        return CompletableFuture.supplyAsync(() -> attemptChange(name)).thenCompose(result -> {
-            attempts.incrementAndGet();
-            last.set(result);
-            if (result.success()) {
-                claimed.set(true);
-                stop.set(true);
-                return CompletableFuture.completedFuture((Void) null);
-            }
-            // A dead token or an unentitled account will never succeed; stop the whole run rather than
-            // hammer a change that cannot land. The name was not claimed, so only `stop` is set.
-            if (result.outcome() == NameChangeResult.Outcome.UNAUTHORIZED
-                    || result.outcome() == NameChangeResult.Outcome.NOT_ENTITLED) {
-                stop.set(true);
-                return CompletableFuture.completedFuture((Void) null);
-            }
-            return delay(opts.attemptSpacing())
-                    .thenCompose(ignored -> worker(name, deadline, opts, claimed, stop, attempts, last));
-        });
+        // Re-checked on the pool thread: a run stopped while this attempt sat queued must not fire it.
+        return CompletableFuture.supplyAsync(() -> run.stopped() ? null : attemptChange(run.name))
+                .thenCompose(result -> {
+                    if (result == null) {
+                        return CompletableFuture.completedFuture((Void) null);
+                    }
+                    run.attempts.incrementAndGet();
+                    run.last.set(result);
+                    if (result.success()) {
+                        run.claimed(result);
+                        return CompletableFuture.completedFuture((Void) null);
+                    }
+                    // A dead token or an unentitled account will never succeed; stop the whole run
+                    // rather than hammer a change that cannot land. The name was not claimed.
+                    if (result.outcome() == NameChangeResult.Outcome.UNAUTHORIZED
+                            || result.outcome() == NameChangeResult.Outcome.NOT_ENTITLED) {
+                        run.stop(ClaimResult.StopReason.TERMINAL_FAILURE, result);
+                        return CompletableFuture.completedFuture((Void) null);
+                    }
+                    // The service has asked to be left alone. Several workers a few milliseconds apart
+                    // for the rest of the window is the opposite of that, and it is how an address
+                    // turns a short limit into a long one — so one stated limit ends every chain.
+                    if (result.outcome() == NameChangeResult.Outcome.RATE_LIMITED) {
+                        run.stop(ClaimResult.StopReason.RATE_LIMITED, result);
+                        return CompletableFuture.completedFuture((Void) null);
+                    }
+                    return delay(run.opts.attemptSpacing()).thenCompose(ignored -> worker(run));
+                });
     }
 
     /**
@@ -182,23 +198,27 @@ final class NameServiceImpl implements NameService {
     /**
      * Waits until {@code target}, sleeping coarsely down to {@link #SPIN_THRESHOLD_MILLIS} and then
      * spinning the final stretch, because a scheduler sleep overshoots a millisecond deadline. The spin
-     * is bounded by that threshold so it never becomes a core-pinning busy loop.
+     * is bounded by that threshold so it never becomes a core-pinning busy loop, and both phases give up
+     * as soon as the run is stopped.
      */
-    private static CompletableFuture<Void> waitUntil(Instant target, TimeSource clock) {
+    private static CompletableFuture<Void> waitUntil(Instant target, TimeSource clock, BooleanSupplier stopped) {
+        if (stopped.getAsBoolean()) {
+            return CompletableFuture.completedFuture(null);
+        }
         long remaining = Duration.between(clock.now(), target).toMillis();
         if (remaining <= 0) {
             return CompletableFuture.completedFuture(null);
         }
         if (remaining <= SPIN_THRESHOLD_MILLIS) {
             return CompletableFuture.supplyAsync(() -> {
-                while (clock.now().isBefore(target)) {
+                while (!stopped.getAsBoolean() && clock.now().isBefore(target)) {
                     Thread.onSpinWait();
                 }
                 return null;
             });
         }
         long sleep = remaining - SPIN_THRESHOLD_MILLIS;
-        return delay(Duration.ofMillis(sleep)).thenCompose(ignored -> waitUntil(target, clock));
+        return delay(Duration.ofMillis(sleep)).thenCompose(ignored -> waitUntil(target, clock, stopped));
     }
 
     private static CompletableFuture<Void> delay(Duration duration) {
@@ -219,6 +239,70 @@ final class NameServiceImpl implements NameService {
             return Instant.parse(value);
         } catch (DateTimeParseException notIso) {
             return null;
+        }
+    }
+
+    /**
+     * The shared state of one scheduled claim.
+     *
+     * <p>"The name was claimed" and "the run stopped" are kept apart, and so is why it stopped: a
+     * terminal failure, a rate limit, and a cancellation each end the run without the name having been
+     * claimed, and a success that lands while another chain is reporting a refusal is still a success.
+     */
+    private static final class ClaimRun {
+
+        final String name;
+        final Instant deadline;
+        final ClaimOptions opts;
+
+        final AtomicInteger attempts = new AtomicInteger();
+        final AtomicReference<NameChangeResult> last = new AtomicReference<>();
+
+        private final AtomicBoolean claimed = new AtomicBoolean();
+        private final AtomicReference<ClaimResult.StopReason> stopReason = new AtomicReference<>();
+        private final AtomicReference<NameChangeResult> deciding = new AtomicReference<>();
+        private final AtomicReference<NameChangeResult> winning = new AtomicReference<>();
+
+        ClaimRun(String name, Instant deadline, ClaimOptions opts) {
+            this.name = name;
+            this.deadline = deadline;
+            this.opts = opts;
+        }
+
+        boolean stopped() {
+            return stopReason.get() != null;
+        }
+
+        /** Records the winning change and stops the run. */
+        void claimed(NameChangeResult result) {
+            winning.compareAndSet(null, result);
+            claimed.set(true);
+            stopReason.compareAndSet(null, ClaimResult.StopReason.CLAIMED);
+        }
+
+        /**
+         * Stops the run for a reason other than success. The first reason given is the one reported.
+         *
+         * @param reason why the run is stopping
+         * @param result the change result that caused it, or null when none did
+         */
+        void stop(ClaimResult.StopReason reason, NameChangeResult result) {
+            if (stopReason.compareAndSet(null, reason) && result != null) {
+                deciding.set(result);
+            }
+        }
+
+        ClaimResult result() {
+            if (claimed.get()) {
+                return new ClaimResult(true, attempts.get(), winning.get(), ClaimResult.StopReason.CLAIMED);
+            }
+            ClaimResult.StopReason reason = stopReason.get();
+            NameChangeResult decisive = deciding.get();
+            return new ClaimResult(
+                    false,
+                    attempts.get(),
+                    decisive != null ? decisive : last.get(),
+                    reason == null ? ClaimResult.StopReason.WINDOW_ELAPSED : reason);
         }
     }
 }

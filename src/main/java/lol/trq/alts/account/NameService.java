@@ -50,6 +50,12 @@ public interface NameService {
      * wherever names are listed and passes it here. Correct the clock through
      * {@link ClaimOptions#timeSource()} if the target is millisecond-critical.
      *
+     * <p>The run ends early, without the name, in three cases, and {@link ClaimResult#stopReason()} says
+     * which: an attempt that no retry can fix (a refused token, an account with nothing to rename); the
+     * service answering 429, at which point every worker stops rather than keep sending to a service
+     * that asked to be left alone; and cancellation. Cancelling the returned future stops the run — no
+     * further attempt is started, though one already on the wire is not recalled.
+     *
      * @param name the name to claim
      * @param target when the name becomes available
      * @param options how to pace the burst
