@@ -192,6 +192,53 @@ class DeviceCodeLoginTest {
     }
 
     @Test
+    void anAdvertisedIntervalCannotParkTheLogin() throws Exception {
+        chain.body(
+                "/devicecode",
+                "{\"device_code\":\"secret-device-code\",\"user_code\":\"ABCD-EFGH\","
+                        + "\"verification_uri\":\"https://verify.example/device\",\"expires_in\":900,"
+                        + "\"interval\":9223372036854775807}");
+        chain.deviceTokenSuccess();
+
+        LoginResult result = login(LoginMode.DIRECT);
+
+        assertTrue(result.success(), "the first poll must still happen within the longest interval allowed");
+    }
+
+    @Test
+    void anAdvertisedLifetimeIsHeldToHalfAnHour() throws Exception {
+        chain.body(
+                "/devicecode",
+                "{\"device_code\":\"secret-device-code\",\"user_code\":\"ABCD-EFGH\","
+                        + "\"verification_uri\":\"https://verify.example/device\","
+                        + "\"expires_in\":9223372036854775807,\"interval\":1}");
+        chain.deviceTokenSuccess();
+        Instant before = Instant.now();
+
+        LoginResult result = login(LoginMode.DIRECT);
+
+        assertTrue(result.success(), result.message());
+        Instant latest = before.plusMillis(DeviceCodeTiming.MAX_LIFETIME_SECONDS * SECOND_MILLIS + 10_000L);
+        assertTrue(shownExpiry.get().isAfter(before), "the expiry shown must not have overflowed into the past");
+        assertTrue(shownExpiry.get().isBefore(latest), "nor may it run past the longest lifetime allowed");
+    }
+
+    @Test
+    void advertisedTimingsAreClampedAndDefaulted() {
+        assertEquals(DeviceCodeTiming.DEFAULT_INTERVAL_SECONDS, DeviceCodeTiming.intervalSeconds(0));
+        assertEquals(DeviceCodeTiming.DEFAULT_INTERVAL_SECONDS, DeviceCodeTiming.intervalSeconds(-5));
+        assertEquals(1, DeviceCodeTiming.intervalSeconds(1));
+        assertEquals(5, DeviceCodeTiming.intervalSeconds(5));
+        assertEquals(60, DeviceCodeTiming.intervalSeconds(61));
+        assertEquals(60, DeviceCodeTiming.intervalSeconds(Long.MAX_VALUE));
+
+        assertEquals(DeviceCodeTiming.DEFAULT_LIFETIME_SECONDS, DeviceCodeTiming.lifetimeSeconds(0));
+        assertEquals(300, DeviceCodeTiming.lifetimeSeconds(300));
+        assertEquals(1800, DeviceCodeTiming.lifetimeSeconds(1801));
+        assertEquals(1800, DeviceCodeTiming.lifetimeSeconds(Long.MAX_VALUE));
+    }
+
+    @Test
     void anUnrecognisedCodeIsARejectedCredential() throws Exception {
         chain.deviceTokenError("bad_verification_code");
 

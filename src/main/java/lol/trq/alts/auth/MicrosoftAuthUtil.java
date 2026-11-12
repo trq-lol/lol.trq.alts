@@ -208,8 +208,11 @@ public final class MicrosoftAuthUtil {
             throw unexpected("Device code request", null);
         }
 
-        long lifetimeSeconds = issued.expiresIn() > 0 ? issued.expiresIn() : DeviceCodeTiming.DEFAULT_LIFETIME_SECONDS;
-        long intervalSeconds = issued.interval() > 0 ? issued.interval() : DeviceCodeTiming.DEFAULT_INTERVAL_SECONDS;
+        // Both numbers are the service's to state and neither is taken on trust: unbounded, an interval
+        // would park the login for as long as the response cared to say, and either would overflow once
+        // multiplied out.
+        long lifetimeSeconds = DeviceCodeTiming.lifetimeSeconds(issued.expiresIn());
+        long intervalSeconds = DeviceCodeTiming.intervalSeconds(issued.interval());
         long lifetimeMillis = lifetimeSeconds * timing.secondMillis();
 
         // A cancellation that landed while the request was in flight: do not show a code nobody is
@@ -229,6 +232,7 @@ public final class MicrosoftAuthUtil {
                         issued.deviceCode(),
                         System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(lifetimeMillis),
                         intervalSeconds * timing.secondMillis(),
+                        DeviceCodeTiming.MAX_INTERVAL_SECONDS * timing.secondMillis(),
                         timing.slowDownMillis(),
                         tokens)
                 .schedule();
@@ -244,6 +248,7 @@ public final class MicrosoftAuthUtil {
         private final MicrosoftAuthConfig config;
         private final String deviceCode;
         private final long deadlineNanos;
+        private final long maxIntervalMillis;
         private final long slowDownMillis;
         private final CompletableFuture<MsTokens> tokens;
         private long intervalMillis;
@@ -254,12 +259,14 @@ public final class MicrosoftAuthUtil {
                 String deviceCode,
                 long deadlineNanos,
                 long intervalMillis,
+                long maxIntervalMillis,
                 long slowDownMillis,
                 CompletableFuture<MsTokens> tokens) {
             this.config = config;
             this.deviceCode = deviceCode;
             this.deadlineNanos = deadlineNanos;
             this.intervalMillis = intervalMillis;
+            this.maxIntervalMillis = maxIntervalMillis;
             this.slowDownMillis = slowDownMillis;
             this.tokens = tokens;
         }
@@ -330,7 +337,9 @@ public final class MicrosoftAuthUtil {
         }
 
         private void slowDown() {
-            intervalMillis += slowDownMillis;
+            // Capped like the advertised interval: a service that answers slow_down every time must not
+            // be able to stretch the gap between polls without limit.
+            intervalMillis = Math.min(maxIntervalMillis, intervalMillis + Math.max(0L, slowDownMillis));
             again();
         }
 
@@ -361,6 +370,43 @@ public final class MicrosoftAuthUtil {
 
         /** The code lifetime assumed when the service advertises none. */
         static final long DEFAULT_LIFETIME_SECONDS = 900L;
+
+        /** The shortest gap between polls, whatever the service advertises. */
+        static final long MIN_INTERVAL_SECONDS = 1L;
+
+        /** The longest gap between polls, whatever the service advertises or asks for later. */
+        static final long MAX_INTERVAL_SECONDS = 60L;
+
+        /** The longest a code is waited on, whatever lifetime the service advertises: thirty minutes. */
+        static final long MAX_LIFETIME_SECONDS = 1800L;
+
+        /**
+         * Returns the polling interval to use for an advertised one.
+         *
+         * @param advertised the {@code interval} the service sent, in seconds; zero or less when absent
+         * @return the default when none was advertised, otherwise the advertised value held within
+         *     {@link #MIN_INTERVAL_SECONDS} and {@link #MAX_INTERVAL_SECONDS}
+         */
+        static long intervalSeconds(long advertised) {
+            if (advertised <= 0) {
+                return DEFAULT_INTERVAL_SECONDS;
+            }
+            return Math.max(MIN_INTERVAL_SECONDS, Math.min(MAX_INTERVAL_SECONDS, advertised));
+        }
+
+        /**
+         * Returns how long to wait on a code for an advertised lifetime.
+         *
+         * @param advertised the {@code expires_in} the service sent, in seconds; zero or less when absent
+         * @return the default when none was advertised, otherwise the advertised value, at most
+         *     {@link #MAX_LIFETIME_SECONDS}
+         */
+        static long lifetimeSeconds(long advertised) {
+            if (advertised <= 0) {
+                return DEFAULT_LIFETIME_SECONDS;
+            }
+            return Math.min(MAX_LIFETIME_SECONDS, advertised);
+        }
     }
 
     /**
