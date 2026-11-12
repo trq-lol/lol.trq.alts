@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import lol.trq.alts.crypto.CryptoException;
 import lol.trq.alts.crypto.KeyWrapScheme;
@@ -18,6 +19,7 @@ import lol.trq.alts.crypto.VaultIdentity;
 import lol.trq.alts.crypto.X25519;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.vault.transport.EncryptedEnvelope;
+import lol.trq.alts.vault.transport.KeyBindingVerifier;
 import lol.trq.alts.vault.transport.MemberEntry;
 import lol.trq.alts.vault.transport.VaultManifest;
 
@@ -26,8 +28,15 @@ import lol.trq.alts.vault.transport.VaultManifest;
  * client-side cryptography over plain DTOs — it creates and opens repositories, wraps the data key to
  * members, and encrypts/decrypts the alt payload. Moving those DTOs to and from a server is a separate
  * concern handled by a {@link lol.trq.alts.vault.transport.VaultTransport}; this class never touches
- * the network, which keeps it trivially unit-testable and keeps the zero-knowledge guarantee provable:
- * the server only ever sees what these methods emit.
+ * the network, which keeps it trivially unit-testable: the server only ever sees what these methods
+ * emit.
+ *
+ * <p>What that buys is confidentiality against a server that stores and relays faithfully, and against
+ * anyone observing the network. It does not, on its own, defend against a server that actively
+ * substitutes keys: nothing in the current protocol signs a wrapped data key, a manifest, or an
+ * envelope. One local defence narrows that gap: a {@link KeyBindingVerifier} is consulted before the
+ * data key is wrapped to any other member's keys, so a host that supplies a real verifier cannot be
+ * tricked into wrapping to keys the server swapped in.
  *
  * <p>The payload carries {@link AltAccount}s — the credential plus shareable account state
  * (last-used activity and observed-ban status, so members coordinate and avoid handing each other a
@@ -42,14 +51,37 @@ public final class SharedVault {
     private static final Gson GSON = new GsonBuilder().create();
 
     private final KeyWrapScheme scheme;
+    private final KeyBindingVerifier keyBindingVerifier;
 
     /**
-     * Creates a vault facade over the given key-wrap scheme.
+     * Creates a vault facade that trusts whatever member keys it is handed, without verification.
      *
      * @param scheme the key-wrap scheme (for example {@link lol.trq.alts.crypto.X25519HkdfAesGcmKeyWrap})
+     * @deprecated use {@link #SharedVault(KeyWrapScheme, KeyBindingVerifier)} and choose the verifier
+     *     deliberately. This constructor behaves as if {@link KeyBindingVerifier#trustTransport()} had
+     *     been passed, which lets a hostile server substitute a member's keys.
      */
+    @Deprecated(since = "0.12.0")
     public SharedVault(KeyWrapScheme scheme) {
-        this.scheme = scheme;
+        this(scheme, KeyBindingVerifier.trustTransport());
+    }
+
+    /**
+     * Creates a vault facade over the given key-wrap scheme, verifying every other member's public keys
+     * through {@code keyBindingVerifier} before the data key is wrapped to them.
+     *
+     * <p>Pass a real verifier (for example
+     * {@link lol.trq.alts.vault.transport.IssuerSignedKeyBindingVerifier}) whenever member keys reach
+     * the host through a server it does not fully trust. Passing
+     * {@link KeyBindingVerifier#trustTransport()} is an explicit decision to accept served keys as-is.
+     *
+     * @param scheme the key-wrap scheme (for example {@link lol.trq.alts.crypto.X25519HkdfAesGcmKeyWrap})
+     * @param keyBindingVerifier the check run on a member's keys before wrapping to them
+     * @since 0.12.0
+     */
+    public SharedVault(KeyWrapScheme scheme, KeyBindingVerifier keyBindingVerifier) {
+        this.scheme = Objects.requireNonNull(scheme, "scheme");
+        this.keyBindingVerifier = Objects.requireNonNull(keyBindingVerifier, "keyBindingVerifier");
     }
 
     /**
@@ -101,7 +133,7 @@ public final class SharedVault {
             throws CryptoException {
         String repoId = UUID.randomUUID().toString();
         RepoDataKey dataKey = RepoDataKey.generate();
-        MemberEntry creatorEntry = memberEntry(creator.identityId(), creator.keyAgreementPublicKey(), dataKey);
+        MemberEntry creatorEntry = selfEntry(creator, dataKey, null);
         long version = 1L;
         VaultManifest manifest = new VaultManifest(
                 repoId, scheme.schemeId(), dataKey.epoch(), version, List.of(creatorEntry), shareRefreshTokens);
@@ -133,19 +165,42 @@ public final class SharedVault {
 
     /**
      * Builds a member entry for a prospective member, wrapping the current data key to their X25519 key.
+     * The configured {@link KeyBindingVerifier} is run with no key-binding signature, so this only
+     * succeeds for a verifier that needs none.
      *
      * @param ctx the working context
      * @param member the prospective member's public keys
      * @return the member entry to upload
-     * @throws CryptoException if wrapping fails
+     * @throws CryptoException if wrapping fails, or the verifier refuses the keys
+     * @deprecated use {@link #addMember(RepoContext, MemberPublicKey, String)}, which carries the
+     *     key-binding signature to the verifier and reports a refusal as a {@link VaultException}
      */
+    @Deprecated(since = "0.12.0")
     public MemberEntry addMember(RepoContext ctx, MemberPublicKey member) throws CryptoException {
-        PublicKey recipient = X25519.decodePublicKey(Base64.getDecoder().decode(member.x25519PublicKey()));
-        return new MemberEntry(
-                member.ed25519PublicKey(),
-                member.x25519PublicKey(),
-                ctx.dataKey().wrapTo(scheme, recipient),
-                ctx.dataKey().epoch());
+        try {
+            return addMember(ctx, member, null);
+        } catch (VaultException e) {
+            throw new CryptoException("member keys were not verified: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Builds a member entry for a prospective member: verifies their public keys through the configured
+     * {@link KeyBindingVerifier}, then wraps the current data key to the verified X25519 key.
+     *
+     * @param ctx the working context
+     * @param member the prospective member's public keys, as claimed
+     * @param keyBindingSig the issuer signature binding those keys to the identity, Base64, or
+     *     {@code null} when none was published
+     * @return the member entry to upload, carrying {@code keyBindingSig}
+     * @throws CryptoException if a key is malformed or wrapping fails
+     * @throws VaultException if the verifier refuses the keys
+     * @since 0.12.0
+     */
+    public MemberEntry addMember(RepoContext ctx, MemberPublicKey member, String keyBindingSig)
+            throws CryptoException, VaultException {
+        Objects.requireNonNull(member, "member");
+        return verifiedEntry(ctx.repoId(), member, keyBindingSig, ctx.dataKey());
     }
 
     /**
@@ -199,28 +254,145 @@ public final class SharedVault {
 
     /**
      * Rotates the data key to a fresh one at the next epoch, re-encrypts the payload, and re-wraps the
-     * new key to {@code remainingMembers}. Use after a membership change so a departed member's old
-     * wrapped key cannot decrypt anything new.
+     * new key to {@code remainingMembers}. The configured {@link KeyBindingVerifier} is run on every
+     * member other than the caller with no key-binding signature, so this only succeeds for a verifier
+     * that needs none.
      *
      * @param ctx the working context
      * @param currentAlts the alts to carry into the new epoch
      * @param remainingMembers the members who retain access
      * @return the rotation result
-     * @throws CryptoException if key generation, wrapping, or encryption fails
+     * @throws CryptoException if key generation, wrapping, or encryption fails, or the verifier refuses
+     *     a member's keys
+     * @deprecated use {@link #rotateKey(RepoContext, List, VaultManifest)}, which verifies each served
+     *     member entry with its key-binding signature and keeps that signature on the re-wrapped roster
      */
+    @Deprecated(since = "0.12.0")
     public RotationResult rotateKey(
             RepoContext ctx, List<AltAccount> currentAlts, List<MemberPublicKey> remainingMembers)
             throws CryptoException {
+        List<Claim> claimed = new ArrayList<>(remainingMembers.size());
+        for (MemberPublicKey member : remainingMembers) {
+            if (member == null) {
+                throw new CryptoException("member list contains a null entry");
+            }
+            claimed.add(new Claim(member, null));
+        }
+        try {
+            return rotate(ctx, currentAlts, claimed);
+        } catch (VaultException e) {
+            throw new CryptoException("member keys were not verified: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Rotates the data key to a fresh one at the next epoch, re-encrypts the payload, and re-wraps the
+     * new key to every member of {@code roster}. Each entry other than the caller's own is verified
+     * through the configured {@link KeyBindingVerifier} first, using the key-binding signature the entry
+     * carries; the caller's own entry must name the caller's real X25519 key. Signatures are carried
+     * over to the re-wrapped entries.
+     *
+     * @param ctx the working context
+     * @param currentAlts the alts to carry into the new epoch
+     * @param roster the manifest whose members retain access (the caller must be among them)
+     * @return the rotation result
+     * @throws CryptoException if key generation, wrapping, or encryption fails
+     * @throws VaultException if the roster belongs to another repository, omits the caller, is
+     *     malformed, or holds a member whose keys the verifier refuses
+     * @since 0.12.0
+     */
+    public RotationResult rotateKey(RepoContext ctx, List<AltAccount> currentAlts, VaultManifest roster)
+            throws CryptoException, VaultException {
+        return rotate(ctx, currentAlts, rosterOf(ctx, roster, null));
+    }
+
+    /**
+     * Removes a member: rotates the key to exactly the members in {@code remainingMembers} (which must
+     * exclude the removed member). Equivalent to the deprecated list-based {@code rotateKey}.
+     *
+     * @param ctx the working context
+     * @param currentAlts the alts to carry forward
+     * @param remainingMembers the members who retain access (excluding the removed one)
+     * @return the rotation result
+     * @throws CryptoException if rotation fails, or the verifier refuses a member's keys
+     * @deprecated use {@link #removeMember(RepoContext, List, VaultManifest, String)}
+     */
+    @Deprecated(since = "0.12.0")
+    public RotationResult removeMember(
+            RepoContext ctx, List<AltAccount> currentAlts, List<MemberPublicKey> remainingMembers)
+            throws CryptoException {
+        return rotateKey(ctx, currentAlts, remainingMembers);
+    }
+
+    /**
+     * Removes a member: rotates the key to every member of {@code roster} except
+     * {@code removedMemberId}, verifying the others exactly as
+     * {@link #rotateKey(RepoContext, List, VaultManifest)} does.
+     *
+     * @param ctx the working context
+     * @param currentAlts the alts to carry forward
+     * @param roster the current manifest, still listing the member being removed
+     * @param removedMemberId the Ed25519 identity (member id) to drop
+     * @return the rotation result
+     * @throws CryptoException if rotation fails
+     * @throws VaultException if the roster belongs to another repository, does not list the removed
+     *     member, would remove the caller, is malformed, or holds a member whose keys the verifier refuses
+     * @since 0.12.0
+     */
+    public RotationResult removeMember(
+            RepoContext ctx, List<AltAccount> currentAlts, VaultManifest roster, String removedMemberId)
+            throws CryptoException, VaultException {
+        Objects.requireNonNull(removedMemberId, "removedMemberId");
+        if (removedMemberId.equals(ctx.identity().identityId())) {
+            throw new VaultException("a member cannot remove itself by rotating the key");
+        }
+        if (roster.findMember(removedMemberId) == null) {
+            throw new VaultException("member to remove is not in the roster");
+        }
+        return rotate(ctx, currentAlts, rosterOf(ctx, roster, removedMemberId));
+    }
+
+    private List<Claim> rosterOf(RepoContext ctx, VaultManifest roster, String excludedMemberId)
+            throws CryptoException, VaultException {
+        if (!roster.repoId().equals(ctx.repoId())) {
+            throw new VaultException("roster repo id does not match context");
+        }
+        String selfId = ctx.identity().identityId();
+        List<Claim> kept = new ArrayList<>(roster.members().size());
+        boolean self = false;
+        for (MemberEntry entry : roster.members()) {
+            if (entry == null) {
+                throw new VaultException("roster contains a null member entry");
+            }
+            if (entry.ed25519PublicKey().equals(excludedMemberId)) {
+                continue;
+            }
+            self |= entry.ed25519PublicKey().equals(selfId);
+            kept.add(new Claim(
+                    new MemberPublicKey(entry.ed25519PublicKey(), entry.x25519PublicKey()), entry.keyBindingSig()));
+        }
+        if (!self) {
+            throw new VaultException("roster does not list the rotating member");
+        }
+        return kept;
+    }
+
+    private RotationResult rotate(RepoContext ctx, List<AltAccount> currentAlts, List<Claim> claimed)
+            throws CryptoException, VaultException {
         long newEpoch = ctx.dataKey().epoch() + 1;
         RepoDataKey newDataKey = RepoDataKey.generate(newEpoch);
-        List<MemberEntry> rewrapped = new ArrayList<>(remainingMembers.size());
-        for (MemberPublicKey member : remainingMembers) {
-            PublicKey recipient = X25519.decodePublicKey(Base64.getDecoder().decode(member.x25519PublicKey()));
-            rewrapped.add(new MemberEntry(
-                    member.ed25519PublicKey(),
-                    member.x25519PublicKey(),
-                    newDataKey.wrapTo(scheme, recipient),
-                    newEpoch));
+        String selfId = ctx.identity().identityId();
+        List<MemberEntry> rewrapped = new ArrayList<>(claimed.size());
+        for (Claim claim : claimed) {
+            if (claim.keys().ed25519PublicKey().equals(selfId)) {
+                String ownKey = encodeKey(ctx.identity().keyAgreementPublicKey());
+                if (!ownKey.equals(claim.keys().x25519PublicKey())) {
+                    throw new VaultException("roster lists a different X25519 key for the rotating member");
+                }
+                rewrapped.add(selfEntry(ctx.identity(), newDataKey, claim.keyBindingSig()));
+            } else {
+                rewrapped.add(verifiedEntry(ctx.repoId(), claim.keys(), claim.keyBindingSig(), newDataKey));
+            }
         }
         long newVersion = ctx.payloadVersion() + 1;
         RepoContext newCtx =
@@ -231,25 +403,44 @@ public final class SharedVault {
     }
 
     /**
-     * Removes a member: rotates the key to exactly the members in {@code remainingMembers} (which must
-     * exclude the removed member). Equivalent to {@link #rotateKey} with the departed member dropped.
-     *
-     * @param ctx the working context
-     * @param currentAlts the alts to carry forward
-     * @param remainingMembers the members who retain access (excluding the removed one)
-     * @return the rotation result
-     * @throws CryptoException if rotation fails
+     * Wraps {@code dataKey} to a member only after the verifier has vouched for the keys. The verifier
+     * takes a {@link MemberEntry}, which cannot exist without a wrapped key, so a candidate is built
+     * first and discarded unless verification passes; nothing leaves this method otherwise.
      */
-    public RotationResult removeMember(
-            RepoContext ctx, List<AltAccount> currentAlts, List<MemberPublicKey> remainingMembers)
-            throws CryptoException {
-        return rotateKey(ctx, currentAlts, remainingMembers);
+    private MemberEntry verifiedEntry(String repoId, MemberPublicKey claimed, String keyBindingSig, RepoDataKey dataKey)
+            throws CryptoException, VaultException {
+        MemberEntry candidate = unverifiedEntry(claimed, dataKey).withKeyBindingSig(keyBindingSig);
+        MemberPublicKey verified = keyBindingVerifier.verify(repoId, candidate);
+        if (verified == null) {
+            throw new VaultException("key-binding verifier returned no keys for member " + claimed.ed25519PublicKey());
+        }
+        return verified.equals(claimed) ? candidate : unverifiedEntry(verified, dataKey);
     }
 
-    private MemberEntry memberEntry(String ed25519Id, PublicKey x25519Public, RepoDataKey dataKey)
+    private MemberEntry unverifiedEntry(MemberPublicKey member, RepoDataKey dataKey) throws CryptoException {
+        byte[] raw;
+        try {
+            raw = Base64.getDecoder().decode(member.x25519PublicKey());
+        } catch (IllegalArgumentException e) {
+            throw new CryptoException("member X25519 public key is not Base64", e);
+        }
+        PublicKey recipient = X25519.decodePublicKey(raw);
+        return new MemberEntry(
+                member.ed25519PublicKey(),
+                member.x25519PublicKey(),
+                dataKey.wrapTo(scheme, recipient),
+                dataKey.epoch());
+    }
+
+    private MemberEntry selfEntry(VaultIdentity identity, RepoDataKey dataKey, String keyBindingSig)
             throws CryptoException {
-        String x25519B64 = Base64.getEncoder().encodeToString(X25519.encodePublicKey(x25519Public));
-        return new MemberEntry(ed25519Id, x25519B64, dataKey.wrapTo(scheme, x25519Public), dataKey.epoch());
+        PublicKey own = identity.keyAgreementPublicKey();
+        return new MemberEntry(
+                identity.identityId(), encodeKey(own), dataKey.wrapTo(scheme, own), dataKey.epoch(), keyBindingSig);
+    }
+
+    private static String encodeKey(PublicKey x25519Public) throws CryptoException {
+        return Base64.getEncoder().encodeToString(X25519.encodePublicKey(x25519Public));
     }
 
     private EncryptedEnvelope encrypt(
@@ -286,6 +477,15 @@ public final class SharedVault {
         }
         return copy;
     }
+
+    /**
+     * A member's public keys as claimed by whoever supplied them, with the key-binding signature (if
+     * any) that is meant to vouch for them.
+     *
+     * @param keys the claimed public keys
+     * @param keyBindingSig the issuer signature over them, Base64, or null
+     */
+    private record Claim(MemberPublicKey keys, String keyBindingSig) {}
 
     /**
      * The plaintext payload structure encrypted into an envelope: the alts plus a redundant version
