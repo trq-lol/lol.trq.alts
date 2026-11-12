@@ -10,10 +10,16 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.Proxy;
 import java.net.URI;
+import java.net.URLConnection;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLSocketFactory;
 import lol.trq.alts.spi.ProxyProvider;
 
 /**
@@ -35,7 +41,20 @@ public final class HttpUtil {
     /** How long to wait for response bytes before giving the request up. */
     private static final int READ_TIMEOUT_MILLIS = 30_000;
 
+    /** How many proxy identities keep a tunnel factory, and with it a set of reusable connections. */
+    static final int MAX_TUNNEL_FACTORIES = 64;
+
+    private static final Map<TunnelIdentity, ProxyTunnelSocketFactory> TUNNEL_FACTORIES =
+            new LinkedHashMap<>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<TunnelIdentity, ProxyTunnelSocketFactory> eldest) {
+                    return size() > MAX_TUNNEL_FACTORIES;
+                }
+            };
+
     private static volatile ProxyProvider proxyProvider;
+
+    private static volatile SSLSocketFactory tlsOverride;
 
     private HttpUtil() {}
 
@@ -66,6 +85,7 @@ public final class HttpUtil {
      */
     public static void resetForTests() {
         proxyProvider = null;
+        tlsSocketFactoryForTests(null);
     }
 
     /**
@@ -126,17 +146,137 @@ public final class HttpUtil {
      * @throws IOException if the route cannot be resolved or the connection cannot be opened
      */
     private static HttpURLConnection open(String urlString, NetworkScope scope) throws IOException {
-        URI uri = URI.create(urlString);
-        ProxyRoute route = routeFor(scope);
-        HttpURLConnection conn = (HttpURLConnection)
-                (route.isDirect() ? uri.toURL().openConnection() : uri.toURL().openConnection(route.toProxy()));
+        return open(URI.create(urlString), routeFor(scope));
+    }
+
+    /**
+     * Opens a connection to a target over an already-resolved route.
+     *
+     * <p>An HTTPS target behind an HTTP proxy is tunnelled by {@link ProxyTunnelSocketFactory} rather
+     * than by the JDK, because the JDK cannot authenticate a {@code CONNECT} per request: it drops a
+     * {@code Proxy-Authorization} request property from the {@code CONNECT} and then sends it to the
+     * origin inside the tunnel. The connection is opened naming {@link Proxy#NO_PROXY} so that the
+     * factory's socket is the only thing deciding where it connects.
+     *
+     * <p>A plain {@code http} target behind an authenticated proxy does carry the credential as a
+     * request header, since there the proxy is the peer that reads it. Such a connection is not kept
+     * alive: the JDK pools proxied connections by proxy address alone, and a gateway that pins a session
+     * to a connection would hand the next username the previous one's exit address.
+     *
+     * @param uri the target
+     * @param route the route to take
+     * @return the configured connection
+     * @throws IOException if the target is not HTTP(S) or the connection cannot be opened
+     */
+    private static HttpURLConnection open(URI uri, ProxyRoute route) throws IOException {
+        String scheme = uri.getScheme();
+        boolean https = "https".equalsIgnoreCase(scheme);
+        if (!https && !"http".equalsIgnoreCase(scheme)) {
+            throw new IOException("unsupported URL scheme: " + scheme);
+        }
+        boolean tunnelled = https && route.kind() == ProxyRoute.Kind.HTTP;
+        URLConnection opened;
+        if (route.isDirect()) {
+            opened = uri.toURL().openConnection();
+        } else {
+            opened = uri.toURL().openConnection(tunnelled ? Proxy.NO_PROXY : route.toProxy());
+        }
+        if (!(opened instanceof HttpURLConnection conn)) {
+            throw new IOException("the JVM's URL handler for " + scheme + " is not an HTTP connection");
+        }
         applyDefaults(conn);
-        String authorization = route.authorizationHeader();
-        if (authorization != null) {
-            conn.setRequestProperty("Proxy-Authorization", authorization);
+
+        if (tunnelled) {
+            if (!(conn instanceof HttpsURLConnection secure)) {
+                // Without the socket-factory hook nothing would carry the request through the proxy.
+                throw new IOException("the JVM's https handler cannot be routed through a proxy tunnel");
+            }
+            secure.setSSLSocketFactory(tunnelFactory(route));
+        } else {
+            SSLSocketFactory tls = tlsOverride;
+            if (tls != null && conn instanceof HttpsURLConnection secure) {
+                secure.setSSLSocketFactory(tls);
+            }
+            String authorization = route.authorizationHeader();
+            if (authorization != null) {
+                conn.setRequestProperty("Proxy-Authorization", authorization);
+                conn.setRequestProperty("Connection", "close");
+            }
         }
         return conn;
     }
+
+    /**
+     * Returns the tunnel factory for a route, creating it on first use.
+     *
+     * <p>The factory instance is the reuse boundary: the JDK keys its keep-alive pool on it, so a
+     * connection is only ever reused by a request whose route has the same proxy host, port, and
+     * credential. Two routes on one gateway that differ only in username — the usual shape of a sticky
+     * session — get separate factories and therefore separate tunnels.
+     *
+     * <p>The cache is bounded and evicts the least recently used identity. An evicted factory's idle
+     * connections simply age out of the JDK's pool; a route seen again gets a new factory and a new
+     * tunnel, never another identity's.
+     *
+     * @param route an HTTP proxy route
+     * @return the factory owning that identity's tunnels
+     */
+    private static ProxyTunnelSocketFactory tunnelFactory(ProxyRoute route) {
+        TunnelIdentity identity = new TunnelIdentity(
+                route.host().toLowerCase(Locale.ROOT), route.port(), route.username(), route.authorizationHeader());
+        synchronized (TUNNEL_FACTORIES) {
+            return TUNNEL_FACTORIES.computeIfAbsent(
+                    identity,
+                    key -> new ProxyTunnelSocketFactory(
+                            route.host(), key.port(), key.authorization(), HttpUtil::tlsSocketFactory));
+        }
+    }
+
+    /**
+     * Returns the factory that layers TLS: the JVM's default for HTTPS, which is what a direct
+     * connection uses, unless a test has substituted its own.
+     *
+     * @return the TLS socket factory
+     */
+    private static SSLSocketFactory tlsSocketFactory() {
+        SSLSocketFactory tls = tlsOverride;
+        return tls != null ? tls : HttpsURLConnection.getDefaultSSLSocketFactory();
+    }
+
+    /**
+     * Substitutes the factory that layers TLS, so a test can trust a certificate it generated for a
+     * loopback origin. Package-private and test-only: production always uses the JVM's default trust,
+     * and hostname verification stays on either way.
+     *
+     * @param factory the factory to use, or null to restore the JVM default
+     */
+    static void tlsSocketFactoryForTests(SSLSocketFactory factory) {
+        tlsOverride = factory;
+        synchronized (TUNNEL_FACTORIES) {
+            TUNNEL_FACTORIES.clear();
+        }
+    }
+
+    /**
+     * Returns how many route identities currently own a tunnel factory.
+     *
+     * @return the size of the factory cache
+     */
+    static int tunnelFactoryCount() {
+        synchronized (TUNNEL_FACTORIES) {
+            return TUNNEL_FACTORIES.size();
+        }
+    }
+
+    /**
+     * What makes two routes the same for connection reuse: the proxy, and who it is being used as.
+     *
+     * @param host the proxy host, lower-cased
+     * @param port the proxy port
+     * @param username the proxy username, or null
+     * @param authorization the full credential, so a changed password is a new identity too
+     */
+    private record TunnelIdentity(String host, int port, String username, String authorization) {}
 
     /**
      * Sends a POST request with a JSON body.
