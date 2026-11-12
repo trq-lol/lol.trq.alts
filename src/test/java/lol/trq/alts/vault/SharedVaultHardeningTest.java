@@ -363,6 +363,38 @@ class SharedVaultHardeningTest {
     }
 
     @Test
+    void anObjectTheServerNeverServedIsAVaultException() throws Exception {
+        SharedVault.CreatedRepo created = trusting.createRepo(alice, alts("v1"));
+
+        assertThrows(VaultException.class, () -> trusting.openRepo(null, alice));
+        assertThrows(VaultException.class, () -> trusting.decryptPayload(created.context(), null, 0));
+        assertThrows(
+                VaultException.class, () -> trusting.rotateKey(created.context(), alts("v2"), (VaultManifest) null));
+        assertThrows(
+                VaultException.class,
+                () -> trusting.removeMember(created.context(), alts("v2"), null, bob.identityId()));
+    }
+
+    @Test
+    void aServedObjectMissingARequiredFieldNeverReachesTheVaultHalfBuilt() {
+        // The transport records refuse a null required field when they are constructed, which is where a
+        // host's JSON layer builds them; nothing downstream has to wonder whether repoId is there.
+        com.google.gson.Gson gson = new com.google.gson.Gson();
+        assertThrows(
+                RuntimeException.class,
+                () -> gson.fromJson("{\"schemeId\":\"x\",\"members\":[]}", VaultManifest.class));
+        assertThrows(
+                RuntimeException.class,
+                () -> gson.fromJson("{\"repoId\":\"r\",\"schemeId\":\"x\"}", VaultManifest.class));
+        assertThrows(
+                RuntimeException.class,
+                () -> gson.fromJson(
+                        "{\"iv\":\"AA==\",\"ciphertext\":\"AA==\"}",
+                        lol.trq.alts.vault.transport.EncryptedEnvelope.class));
+        assertThrows(RuntimeException.class, () -> gson.fromJson("{\"x25519PublicKey\":\"AA==\"}", MemberEntry.class));
+    }
+
+    @Test
     void aNullMemberEntryInAManifestDoesNotBreakLookup() throws Exception {
         SharedVault.CreatedRepo created = trusting.createRepo(alice, alts("v1"));
         List<MemberEntry> members = new ArrayList<>();

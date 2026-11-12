@@ -184,6 +184,7 @@ public final class SharedVault {
     public RepoContext openRepo(VaultManifest manifest, VaultIdentity identity, RepoPin pin)
             throws CryptoException, VaultException {
         Objects.requireNonNull(pin, "pin");
+        served(manifest, "manifest");
         if (!scheme.schemeId().equals(manifest.schemeId())) {
             throw new VaultException("manifest key-wrap scheme " + manifest.schemeId()
                     + " is not the configured scheme " + scheme.schemeId());
@@ -280,6 +281,7 @@ public final class SharedVault {
      */
     public List<AltAccount> decryptPayload(RepoContext ctx, EncryptedEnvelope env, long expectedMinVersion)
             throws CryptoException, VaultException {
+        served(env, "envelope");
         if (!env.repoId().equals(ctx.repoId())) {
             throw new VaultException("envelope repo id does not match context");
         }
@@ -401,6 +403,7 @@ public final class SharedVault {
         if (removedMemberId.equals(ctx.identity().identityId())) {
             throw new VaultException("a member cannot remove itself by rotating the key");
         }
+        served(roster, "roster");
         if (roster.findMember(removedMemberId) == null) {
             throw new VaultException("member to remove is not in the roster");
         }
@@ -409,6 +412,7 @@ public final class SharedVault {
 
     private List<Claim> rosterOf(RepoContext ctx, VaultManifest roster, String excludedMemberId)
             throws CryptoException, VaultException {
+        served(roster, "roster");
         if (!roster.repoId().equals(ctx.repoId())) {
             throw new VaultException("roster repo id does not match context");
         }
@@ -497,6 +501,21 @@ public final class SharedVault {
 
     private static String encodeKey(PublicKey x25519Public) throws CryptoException {
         return Base64.getEncoder().encodeToString(X25519.encodePublicKey(x25519Public));
+    }
+
+    /**
+     * Refuses an object the transport was supposed to serve and did not. A transport that maps a
+     * missing or empty response to null is an ordinary thing for a server to cause, so it is reported
+     * as the checked exception a caller already handles rather than as a NullPointerException.
+     *
+     * @param dto what the transport returned
+     * @param what its name, for the message
+     * @throws VaultException if the transport returned nothing
+     */
+    private static void served(Object dto, String what) throws VaultException {
+        if (dto == null) {
+            throw new VaultException("no " + what + " was served");
+        }
     }
 
     private static byte[] decodeEnvelope(String base64, String what) throws VaultException {
