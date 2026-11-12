@@ -3,15 +3,12 @@ package lol.trq.alts.store;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import lol.trq.alts.spi.StoreKeyProvider;
 import lol.trq.alts.spi.VaultDirectoryProvider;
 
 /**
@@ -28,6 +25,9 @@ import lol.trq.alts.spi.VaultDirectoryProvider;
  * <p>This store is deliberately split from the account store: accounts may be shared into a
  * multi-member repository, but secrets stay local to one user.
  *
+ * <p>Persistence follows the account store's rules: a write replaces the file in one step, writes are
+ * serialized, and a failure is reported on {@link #saveError()} rather than thrown.
+ *
  * @author trq
  * @since 0.2.0
  */
@@ -36,34 +36,27 @@ public final class SecretStore {
     /** Gson keyed purely on {@link SerializedName}, the house serialization convention. */
     private static final Gson GSON = new GsonBuilder().create();
 
-    /** Default filename for the encrypted secret data; the host may override via {@link #configure}. */
-    private static final String DEFAULT_FILE_NAME = "secrets.dat";
+    /** The encrypted file, with the neutral default name and key binding a host may override. */
+    private static final StoreFile FILE = new StoreFile("secrets.dat", "lol.trq.alts.secrets");
 
-    /** Default key-binding constant; the host may override via {@link #configure}. */
-    private static final String DEFAULT_KEY_BINDING = "lol.trq.alts.secrets";
-
-    /** Suffix given to a secret file that could not be read, so a failed load never costs the data. */
-    private static final String UNREADABLE_SUFFIX = ".unreadable";
+    /** Guards each mutation together with the hand-off of its snapshot to {@link #FILE}. */
+    private static final Object LOCK = new Object();
 
     // Concurrent because a host reads secrets from its render thread while background work writes them.
     /** Arbitrary host key/value secrets, persisted as a single encrypted file. */
     private static final Map<String, String> SECRETS = new ConcurrentHashMap<>();
 
-    private static volatile String fileName = DEFAULT_FILE_NAME;
-    private static volatile String keyBinding = DEFAULT_KEY_BINDING;
-    private static volatile VaultDirectoryProvider directoryProvider;
-    private static volatile String loadError;
-
     private SecretStore() {}
 
     /**
      * Binds the host directory provider. Called once by {@code AltsRuntime.Builder#build()} before any
-     * load or save.
+     * load or save. As with {@link AltStore#bind}, binding starts from synchronous writes and the
+     * machine-derived key.
      *
      * @param provider the host-supplied vault directory provider
      */
     public static void bind(VaultDirectoryProvider provider) {
-        directoryProvider = Objects.requireNonNull(provider, "VaultDirectoryProvider");
+        FILE.bind(provider);
     }
 
     /**
@@ -74,12 +67,29 @@ public final class SecretStore {
      * @param storeKeyBinding the key-binding constant, or null/blank to keep the default
      */
     public static void configure(String storeFileName, String storeKeyBinding) {
-        if (storeFileName != null && !storeFileName.isBlank()) {
-            fileName = storeFileName;
-        }
-        if (storeKeyBinding != null && !storeKeyBinding.isBlank()) {
-            keyBinding = storeKeyBinding;
-        }
+        FILE.configure(storeFileName, storeKeyBinding);
+    }
+
+    /**
+     * Installs a host key provider, so the file is sealed under the host's secret instead of the
+     * machine-derived default. See {@link AltStore#keyProvider(StoreKeyProvider)}.
+     *
+     * @param provider the host key provider, or null for the machine-derived default
+     * @since 0.12.0
+     */
+    public static void keyProvider(StoreKeyProvider provider) {
+        FILE.keyProvider(provider);
+    }
+
+    /**
+     * Sets how long mutations are gathered for before one write covers them all. See
+     * {@link AltStore#writeDelay(Duration)}.
+     *
+     * @param delay the coalescing window; null, zero, or negative writes synchronously inside the mutator
+     * @since 0.12.0
+     */
+    public static void writeDelay(Duration delay) {
+        FILE.writeDelay(delay);
     }
 
     /**
@@ -99,12 +109,14 @@ public final class SecretStore {
      * @param value the value to store, or null/blank to remove the key
      */
     public static void put(String key, String value) {
-        if (value == null || value.isBlank()) {
-            SECRETS.remove(key);
-        } else {
-            SECRETS.put(key, value);
+        synchronized (LOCK) {
+            if (value == null || value.isBlank()) {
+                SECRETS.remove(key);
+            } else {
+                SECRETS.put(key, value);
+            }
+            scheduleSave();
         }
-        save();
     }
 
     /**
@@ -124,44 +136,57 @@ public final class SecretStore {
      * @param key the secret key to clear
      */
     public static void clear(String key) {
-        if (SECRETS.remove(key) != null) {
-            save();
+        synchronized (LOCK) {
+            if (SECRETS.remove(key) != null) {
+                scheduleSave();
+            }
         }
     }
 
     /**
      * Returns why the last {@link #load()} could not read an existing secret file, if it could not. As
      * with the account store, an unreadable file is not an empty one: while this is set, {@link #save()}
-     * preserves the file rather than overwriting it.
+     * preserves the file rather than overwriting it. The description carries no filesystem path.
      *
      * @return the failure description, or empty when the last load succeeded or found no file
      * @since 0.7.0
      */
     public static Optional<String> loadError() {
-        return Optional.ofNullable(loadError);
+        return Optional.ofNullable(FILE.loadError());
     }
 
     /**
-     * Encrypts and persists the current secrets to disk under the hardware-bound key. Does nothing when
-     * an unreadable file is present and could not be copied aside — see {@link #loadError()}.
+     * Returns why the most recent write did not reach the disk, if it did not. The write is retried by
+     * the next mutation, {@link #save()}, or {@link #flush()}, and a success clears this. The
+     * description carries no filesystem path.
+     *
+     * @return the failure description, or empty when the last write succeeded
+     * @since 0.12.0
+     */
+    public static Optional<String> saveError() {
+        return Optional.ofNullable(FILE.saveError());
+    }
+
+    /**
+     * Encrypts the current secrets and writes them to disk before returning, replacing the file in one
+     * step. A failure is reported on {@link #saveError()}. Does not overwrite a file the last
+     * {@link #load()} could not read unless it was first copied aside — see {@link #loadError()}.
      */
     public static void save() {
-        try {
-            File directory = directory();
-            if (!directory.exists()) {
-                directory.mkdirs();
-            }
-            if (!preserveUnreadable(directory)) {
-                return;
-            }
-
-            SecretData data = new SecretData(new LinkedHashMap<>(SECRETS));
-            String json = GSON.toJson(data);
-            String encrypted = EncryptionUtil.encrypt(json, EncryptionUtil.getHardwareKey(keyBinding));
-            Files.writeString(new File(directory, fileName).toPath(), encrypted);
-        } catch (Exception ignored) {
-            // Exceptions are ignored for production stability
+        synchronized (LOCK) {
+            scheduleSave();
         }
+        FILE.flush();
+    }
+
+    /**
+     * Writes any state still waiting on {@link #writeDelay(Duration)} and returns once it is on disk. A
+     * no-op when nothing is waiting.
+     *
+     * @since 0.12.0
+     */
+    public static void flush() {
+        FILE.flush();
     }
 
     /**
@@ -170,81 +195,35 @@ public final class SecretStore {
      * {@link #loadError()}.
      */
     public static void load() {
-        File file;
-        try {
-            file = new File(directory(), fileName);
-            if (!file.exists()) {
-                loadError = null;
-                return;
-            }
-        } catch (Exception unavailable) {
-            loadError = describe(unavailable);
-            return;
-        }
-
-        try {
-            String encrypted = Files.readString(file.toPath());
-            String json = EncryptionUtil.decrypt(encrypted, EncryptionUtil.getHardwareKey(keyBinding));
-
-            SecretData loaded = GSON.fromJson(json, SecretData.class);
-
-            if (loaded != null) {
+        synchronized (LOCK) {
+            StoreFile.LoadOutcome outcome = FILE.load(json -> {
+                SecretData loaded = GSON.fromJson(json, SecretData.class);
+                if (loaded == null) {
+                    return;
+                }
                 SECRETS.clear();
                 if (loaded.secrets() != null) {
-                    SECRETS.putAll(loaded.secrets());
+                    // A null key or value cannot live in the map, and one of them must not cost the rest.
+                    loaded.secrets().forEach((key, value) -> {
+                        if (key != null && value != null) {
+                            SECRETS.put(key, value);
+                        }
+                    });
                 }
+            });
+            if (outcome == StoreFile.LoadOutcome.MIGRATED) {
+                scheduleSave();
             }
-            loadError = null;
-        } catch (Exception unreadable) {
-            loadError = describe(unreadable);
         }
     }
 
     /**
-     * Copies an unreadable secret file aside so the next {@link #save()} cannot destroy it, once.
-     *
-     * @param directory the store directory
-     * @return true when saving may proceed, false when the unreadable file could not be preserved
+     * Hands a snapshot of the secrets to the file. Must be called with {@link #LOCK} held, so snapshots
+     * reach the file in the order the mutations happened.
      */
-    private static boolean preserveUnreadable(File directory) {
-        if (loadError == null) {
-            return true;
-        }
-        Path source = new File(directory, fileName).toPath();
-        if (!Files.exists(source)) {
-            return true;
-        }
-        Path backup = new File(directory, fileName + UNREADABLE_SUFFIX).toPath();
-        if (Files.exists(backup)) {
-            return true;
-        }
-        try {
-            Files.copy(source, backup);
-            return true;
-        } catch (IOException unwritable) {
-            return false;
-        }
-    }
-
-    /**
-     * Renders a failure as a short description, falling back to the type when it carries no message.
-     *
-     * @param failure the failure to describe
-     * @return a one-line description
-     */
-    private static String describe(Throwable failure) {
-        String message = failure.getMessage();
-        return message != null && !message.isBlank()
-                ? failure.getClass().getSimpleName() + ": " + message
-                : failure.getClass().getSimpleName();
-    }
-
-    private static File directory() {
-        if (directoryProvider == null) {
-            throw new IllegalStateException(
-                    "SecretStore not bound — call AltsRuntime.Builder.build() during host initialization");
-        }
-        return directoryProvider.vaultDirectory().toFile();
+    private static void scheduleSave() {
+        Map<String, String> snapshot = new LinkedHashMap<>(SECRETS);
+        FILE.submit(() -> GSON.toJson(new SecretData(snapshot)));
     }
 
     /**

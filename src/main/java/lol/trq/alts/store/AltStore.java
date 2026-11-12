@@ -6,17 +6,18 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.annotations.SerializedName;
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.UnaryOperator;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.BanInfo;
+import lol.trq.alts.spi.StoreKeyProvider;
 import lol.trq.alts.spi.VaultDirectoryProvider;
 
 /**
@@ -36,32 +37,38 @@ import lol.trq.alts.spi.VaultDirectoryProvider;
  * {@link lol.trq.alts.vault.SharedVault}). A purely local account is unaffected — its refresh token
  * never leaves this file.
  *
+ * <p>Every mutator here is atomic with respect to the others and to a save, and a save replaces the
+ * file in one step, so neither a concurrent login nor a crash can leave a half-written store. A write
+ * that fails is reported on {@link #saveError()}; nothing here throws at a caller for an I/O failure.
+ *
  * @author trq
  * @since 0.1.0
  */
 public final class AltStore {
 
+    /**
+     * How long a burst of mutations is gathered for before one write covers them, once
+     * {@code AltsRuntime.Builder#build()} has turned coalescing on. See {@link #writeDelay(Duration)}.
+     *
+     * @since 0.12.0
+     */
+    public static final Duration DEFAULT_WRITE_DELAY = StoreFile.DEFAULT_WRITE_DELAY;
+
     /** Gson keyed purely on {@link SerializedName}, the house serialization convention. */
     private static final Gson GSON = new GsonBuilder().create();
 
-    /** Default filename for the encrypted account data; the host may override via {@link #configure}. */
-    private static final String DEFAULT_FILE_NAME = "accounts.dat";
+    /** The encrypted file, with the neutral default name and key binding a host may override. */
+    private static final StoreFile FILE = new StoreFile("accounts.dat", "lol.trq.alts");
 
-    /** Default key-binding constant; the host may override via {@link #configure}. */
-    private static final String DEFAULT_KEY_BINDING = "lol.trq.alts";
-
-    /** Suffix given to a store file that could not be read, so a failed load never costs the data. */
-    private static final String UNREADABLE_SUFFIX = ".unreadable";
+    /** Guards every compound mutation, and the hand-off of its snapshot to {@link #FILE}. */
+    private static final Object LOCK = new Object();
 
     // Copy-on-write because logins resolve on the common pool while the host reads accounts() from its
     // render thread; a plain ArrayList lets one thread's write blow up the other's iteration.
     private static final List<AltAccount> ACCOUNTS = new CopyOnWriteArrayList<>();
 
-    private static volatile String fileName = DEFAULT_FILE_NAME;
-    private static volatile String keyBinding = DEFAULT_KEY_BINDING;
-    private static volatile VaultDirectoryProvider directoryProvider;
     private static volatile AltAccount currentAccount = null;
-    private static volatile String loadError;
+    private static volatile String loadWarning;
 
     private AltStore() {}
 
@@ -69,10 +76,15 @@ public final class AltStore {
      * Binds the host directory provider. Called once by {@code AltsRuntime.Builder#build()} before any
      * load or save.
      *
+     * <p>Binding starts from the defaults: writes are synchronous and the key is machine-derived until
+     * {@link #writeDelay(Duration)} and {@link #keyProvider(StoreKeyProvider)} are called after it, which
+     * the runtime builder does. Code that binds the store directly — a test, mostly — therefore gets a
+     * file that is on disk the moment a mutator returns.
+     *
      * @param provider the host-supplied vault directory provider
      */
     public static void bind(VaultDirectoryProvider provider) {
-        directoryProvider = Objects.requireNonNull(provider, "VaultDirectoryProvider");
+        FILE.bind(provider);
     }
 
     /**
@@ -84,12 +96,35 @@ public final class AltStore {
      * @param storeKeyBinding the key-binding constant, or null/blank to keep the default
      */
     public static void configure(String storeFileName, String storeKeyBinding) {
-        if (storeFileName != null && !storeFileName.isBlank()) {
-            fileName = storeFileName;
-        }
-        if (storeKeyBinding != null && !storeKeyBinding.isBlank()) {
-            keyBinding = storeKeyBinding;
-        }
+        FILE.configure(storeFileName, storeKeyBinding);
+    }
+
+    /**
+     * Installs a host key provider, so the file is sealed under the host's secret instead of the
+     * machine-derived default. Call after {@link #bind} and before {@link #load()}; the runtime builder
+     * does both. A file written before the provider was installed still loads, and is rewritten under
+     * the host's key; a file written under a host key does not open without it.
+     *
+     * @param provider the host key provider, or null for the machine-derived default
+     * @since 0.12.0
+     */
+    public static void keyProvider(StoreKeyProvider provider) {
+        FILE.keyProvider(provider);
+    }
+
+    /**
+     * Sets how long mutations are gathered for before one write covers them all. With a delay, a
+     * mutator returns as soon as memory is updated and a single background daemon thread writes the
+     * file shortly after, so a burst — a bulk refresh, an import — costs one write instead of one each,
+     * and none of them on the caller's thread. Pending state is written by {@link #flush()}, by
+     * {@link #load()}, and at JVM shutdown, so a host that never flushes still loses nothing on a
+     * normal exit.
+     *
+     * @param delay the coalescing window; null, zero, or negative writes synchronously inside the mutator
+     * @since 0.12.0
+     */
+    public static void writeDelay(Duration delay) {
+        FILE.writeDelay(delay);
     }
 
     /**
@@ -103,11 +138,14 @@ public final class AltStore {
      * @param ban the observed ban record
      */
     public static void markBanned(String uuid, String serverId, BanInfo ban) {
-        ACCOUNTS.replaceAll(a -> a.uuid().equals(uuid) ? a.withBan(serverId, ban) : a);
-        if (currentAccount != null && currentAccount.uuid().equals(uuid)) {
-            currentAccount = currentAccount.withBan(serverId, ban);
+        synchronized (LOCK) {
+            replace(uuid, a -> a.withBan(serverId, ban));
+            AltAccount current = currentAccount;
+            if (matches(current, uuid)) {
+                currentAccount = current.withBan(serverId, ban);
+            }
+            scheduleSave();
         }
-        save();
     }
 
     /**
@@ -130,11 +168,42 @@ public final class AltStore {
      * unreadable file rather than overwriting it, and a host should tell the user their accounts did not
      * load instead of showing an empty list.
      *
+     * <p>The description is the file's name and a fixed phrase. It never carries a filesystem path, so
+     * it is safe to show and to log.
+     *
      * @return the failure description, or empty when the last load succeeded or found no file
      * @since 0.7.0
      */
     public static Optional<String> loadError() {
-        return Optional.ofNullable(loadError);
+        return Optional.ofNullable(FILE.loadError());
+    }
+
+    /**
+     * Returns a note about entries the last successful {@link #load()} had to leave out. A stored entry
+     * with no UUID cannot be addressed by anything here, and a second entry for a UUID already read is a
+     * duplicate; both are skipped so that one bad record does not cost the rest. Unlike
+     * {@link #loadError()} this does not mean the store failed to load — every valid account is in
+     * {@link #accounts()}.
+     *
+     * @return the note, or empty when the last load skipped nothing
+     * @since 0.12.0
+     */
+    public static Optional<String> loadWarning() {
+        return Optional.ofNullable(loadWarning);
+    }
+
+    /**
+     * Returns why the most recent write did not reach the disk, if it did not. While this is set the
+     * file is whatever the last successful write left — never a partial one — and the accounts in
+     * memory are ahead of it; the write is retried by the next mutation, {@link #save()}, or
+     * {@link #flush()}, and a success clears this. Like {@link #loadError()}, the description carries no
+     * filesystem path.
+     *
+     * @return the failure description, or empty when the last write succeeded
+     * @since 0.12.0
+     */
+    public static Optional<String> saveError() {
+        return Optional.ofNullable(FILE.saveError());
     }
 
     /**
@@ -147,20 +216,28 @@ public final class AltStore {
     }
 
     /**
-     * Marks {@code account} as the active account, stamping it as used now. If a matching-UUID entry
-     * exists in the stored list, it is replaced with the stamped copy so its last-used time stays
-     * fresh.
+     * Marks {@code account} as the active account, stamping it as used now. If the store holds an entry
+     * with the same UUID, that entry's last-used time is refreshed and persisted.
+     *
+     * <p>Only the timestamp of the stored entry changes. Its credentials are deliberately left alone: a
+     * caller restoring an earlier current account holds a copy read before some renewal rotated its
+     * tokens, and writing that copy back would put a spent refresh token on disk. Credentials reach the
+     * store through {@link #addAccount} and {@link #updateCredentials} only.
      *
      * @param account the account to make current, or null to clear
      */
     public static void useAccount(AltAccount account) {
-        if (account == null) {
-            currentAccount = null;
-            return;
+        synchronized (LOCK) {
+            if (account == null) {
+                currentAccount = null;
+                return;
+            }
+            boolean stored = replace(account.uuid(), AltAccount::usedNow);
+            currentAccount = account.usedNow();
+            if (stored) {
+                scheduleSave();
+            }
         }
-        AltAccount stamped = account.usedNow();
-        ACCOUNTS.replaceAll(a -> a.uuid().equals(stamped.uuid()) ? stamped : a);
-        currentAccount = stamped;
     }
 
     /**
@@ -180,11 +257,13 @@ public final class AltStore {
      * @since 0.6.0
      */
     public static void updateCredentials(AltAccount account) {
-        ACCOUNTS.replaceAll(a -> a.uuid().equals(account.uuid()) ? account : a);
-        if (currentAccount != null && currentAccount.uuid().equals(account.uuid())) {
-            currentAccount = account;
+        synchronized (LOCK) {
+            replace(account.uuid(), a -> account);
+            if (matches(currentAccount, account.uuid())) {
+                currentAccount = account;
+            }
+            scheduleSave();
         }
-        save();
     }
 
     /**
@@ -196,11 +275,14 @@ public final class AltStore {
      * @since 0.6.0
      */
     public static void clearRefreshToken(String uuid) {
-        ACCOUNTS.replaceAll(a -> a.uuid().equals(uuid) ? a.withTokens(a.accessToken(), null, 0L) : a);
-        if (currentAccount != null && currentAccount.uuid().equals(uuid)) {
-            currentAccount = currentAccount.withTokens(currentAccount.accessToken(), null, 0L);
+        synchronized (LOCK) {
+            replace(uuid, a -> a.withTokens(a.accessToken(), null, 0L));
+            AltAccount current = currentAccount;
+            if (matches(current, uuid)) {
+                currentAccount = current.withTokens(current.accessToken(), null, 0L);
+            }
+            scheduleSave();
         }
-        save();
     }
 
     /**
@@ -209,23 +291,20 @@ public final class AltStore {
      * replacing it, so re-authenticating an alt the user already saved refreshes its tokens without
      * discarding the observed bans, provenance, and shared attribution the store had accumulated.
      *
+     * <p>The merge happens in place and in one step: the entry keeps its position in
+     * {@link #accounts()}, a reader never sees the account missing, and two logins adding the same
+     * account at once leave one entry rather than two.
+     *
      * @param account the account to add or update
      */
     public static void addAccount(AltAccount account) {
-        AltAccount merged = account.mergedOnto(stored(account.uuid()));
-        ACCOUNTS.removeIf(a -> a.uuid().equals(merged.uuid()));
-        ACCOUNTS.add(merged);
-        save();
-    }
-
-    /**
-     * Returns the stored entry for {@code uuid}.
-     *
-     * @param uuid the dashed UUID to look up
-     * @return the stored account, or {@code null} when the store holds none for that UUID
-     */
-    private static AltAccount stored(String uuid) {
-        return ACCOUNTS.stream().filter(a -> a.uuid().equals(uuid)).findFirst().orElse(null);
+        Objects.requireNonNull(account.uuid(), "uuid");
+        synchronized (LOCK) {
+            if (!replace(account.uuid(), account::mergedOnto)) {
+                ACCOUNTS.add(account);
+            }
+            scheduleSave();
+        }
     }
 
     /**
@@ -236,124 +315,137 @@ public final class AltStore {
      * @param account the account to remove
      */
     public static void removeAccount(AltAccount account) {
-        ACCOUNTS.removeIf(a -> a.uuid().equals(account.uuid()));
-        if (currentAccount != null && currentAccount.uuid().equals(account.uuid())) {
-            currentAccount = null;
+        synchronized (LOCK) {
+            ACCOUNTS.removeIf(a -> matches(a, account.uuid()));
+            if (matches(currentAccount, account.uuid())) {
+                currentAccount = null;
+            }
+            scheduleSave();
         }
-        save();
     }
 
     /**
-     * Encrypts and persists the current accounts to disk under the hardware-bound key from
-     * {@link EncryptionUtil#getHardwareKey(String)}.
+     * Encrypts the current accounts and writes them to disk before returning, whatever
+     * {@link #writeDelay(Duration)} is set to. The mutators here persist on their own; this is for a
+     * host that edited {@link #accounts()} directly.
      *
-     * <p>Does nothing when the last {@link #load()} left an unreadable file behind that could not be
+     * <p>The file is replaced in one step, so it is always either the previous state or this one. A
+     * failure is reported on {@link #saveError()} rather than thrown.
+     *
+     * <p>Does not overwrite a file the last {@link #load()} could not read unless that file was first
      * copied aside — see {@link #loadError()}. Persisting there would write an empty store over accounts
      * that are merely unreadable, which is worse than not persisting at all.
      */
     public static void save() {
-        try {
-            File directory = directory();
-            if (!directory.exists()) {
-                directory.mkdirs();
-            }
-            if (!preserveUnreadable(directory)) {
-                return;
-            }
-
-            StorageData data = new StorageData(new ArrayList<>(ACCOUNTS));
-            String json = GSON.toJson(data);
-            String encrypted = EncryptionUtil.encrypt(json, EncryptionUtil.getHardwareKey(keyBinding));
-            Files.writeString(new File(directory, fileName).toPath(), encrypted);
-        } catch (Exception ignored) {
-            // Exceptions are ignored for production stability
+        synchronized (LOCK) {
+            scheduleSave();
         }
+        FILE.flush();
+    }
+
+    /**
+     * Writes any state still waiting on {@link #writeDelay(Duration)} and returns once it is on disk. A
+     * no-op when nothing is waiting. Worth calling before a host exits by a route that skips shutdown
+     * hooks; a normal exit flushes on its own.
+     *
+     * @since 0.12.0
+     */
+    public static void flush() {
+        FILE.flush();
     }
 
     /**
      * Loads and decrypts accounts from disk into memory, clearing existing entries first. A file that
      * exists but cannot be read leaves the in-memory list alone and records the reason on
-     * {@link #loadError()}.
+     * {@link #loadError()}. Entries that cannot be used are skipped and noted on {@link #loadWarning()}.
      */
     public static void load() {
-        File file;
-        try {
-            file = new File(directory(), fileName);
-            if (!file.exists()) {
-                loadError = null;
-                return;
-            }
-        } catch (Exception unavailable) {
-            loadError = describe(unavailable);
-            return;
-        }
-
-        try {
-            String encrypted = Files.readString(file.toPath());
-            String json = EncryptionUtil.decrypt(encrypted, EncryptionUtil.getHardwareKey(keyBinding));
-
-            JsonElement root = normalizeLegacyBans(JsonParser.parseString(json));
-            StorageData loaded = GSON.fromJson(root, StorageData.class);
-
-            if (loaded != null) {
+        synchronized (LOCK) {
+            int[] skipped = {0};
+            StoreFile.LoadOutcome outcome = FILE.load(json -> {
+                JsonElement root = normalizeLegacyBans(JsonParser.parseString(json));
+                StorageData loaded = GSON.fromJson(root, StorageData.class);
+                if (loaded == null) {
+                    return;
+                }
+                List<AltAccount> valid = usable(loaded.accounts(), skipped);
                 ACCOUNTS.clear();
-                if (loaded.accounts() != null) {
-                    ACCOUNTS.addAll(loaded.accounts());
+                ACCOUNTS.addAll(valid);
+            });
+            if (skipped[0] > 0 && outcome != StoreFile.LoadOutcome.FAILED) {
+                loadWarning = FILE.fileName() + ": skipped " + skipped[0] + " invalid or duplicate "
+                        + (skipped[0] == 1 ? "entry" : "entries");
+            } else {
+                loadWarning = null;
+            }
+            if (outcome == StoreFile.LoadOutcome.MIGRATED) {
+                scheduleSave();
+            }
+        }
+    }
+
+    /**
+     * Filters what a file held down to the entries the store can address. Every lookup here keys on the
+     * UUID, so an entry without one would make each of them throw; a repeated UUID keeps its first
+     * position and its last value, the later entry being the more recently written.
+     *
+     * @param loaded the entries as deserialized, or null
+     * @param skipped a one-element counter of the entries left out
+     * @return the usable entries, in file order
+     */
+    private static List<AltAccount> usable(List<AltAccount> loaded, int[] skipped) {
+        Map<String, AltAccount> byUuid = new LinkedHashMap<>();
+        if (loaded != null) {
+            for (AltAccount account : loaded) {
+                if (account == null || account.uuid() == null || account.uuid().isBlank()) {
+                    skipped[0]++;
+                } else if (byUuid.put(account.uuid(), account) != null) {
+                    skipped[0]++;
                 }
             }
-            loadError = null;
-        } catch (Exception unreadable) {
-            loadError = describe(unreadable);
         }
+        return new ArrayList<>(byUuid.values());
     }
 
     /**
-     * Copies an unreadable store aside so the next {@link #save()} cannot destroy it. The copy is made
-     * once — a second failure must not overwrite the first, older backup, which is the one holding the
-     * accounts.
+     * Applies {@code change} to every stored entry with the given UUID, in one step as far as a reader
+     * of {@link #accounts()} is concerned.
      *
-     * @param directory the store directory
-     * @return true when saving may proceed, false when the unreadable file could not be preserved
+     * @param uuid the dashed UUID to match
+     * @param change produces the replacement for a matching entry
+     * @return true when an entry matched
      */
-    private static boolean preserveUnreadable(File directory) {
-        if (loadError == null) {
-            return true;
-        }
-        Path source = new File(directory, fileName).toPath();
-        if (!Files.exists(source)) {
-            return true;
-        }
-        Path backup = new File(directory, fileName + UNREADABLE_SUFFIX).toPath();
-        if (Files.exists(backup)) {
-            return true;
-        }
-        try {
-            Files.copy(source, backup);
-            return true;
-        } catch (IOException unwritable) {
-            return false;
-        }
+    private static boolean replace(String uuid, UnaryOperator<AltAccount> change) {
+        boolean[] found = {false};
+        ACCOUNTS.replaceAll(a -> {
+            if (!matches(a, uuid)) {
+                return a;
+            }
+            found[0] = true;
+            return change.apply(a);
+        });
+        return found[0];
     }
 
     /**
-     * Renders a failure as a short description, falling back to the type when it carries no message.
+     * Returns whether {@code account} is the one with the given UUID, tolerating the nulls a host can
+     * put in the live list.
      *
-     * @param failure the failure to describe
-     * @return a one-line description
+     * @param account the account to test, or null
+     * @param uuid the dashed UUID to match, or null
+     * @return true when the account carries that UUID
      */
-    private static String describe(Throwable failure) {
-        String message = failure.getMessage();
-        return message != null && !message.isBlank()
-                ? failure.getClass().getSimpleName() + ": " + message
-                : failure.getClass().getSimpleName();
+    private static boolean matches(AltAccount account, String uuid) {
+        return account != null && uuid != null && uuid.equals(account.uuid());
     }
 
-    private static File directory() {
-        if (directoryProvider == null) {
-            throw new IllegalStateException(
-                    "AltStore not bound — call AltsRuntime.Builder.build() during host initialization");
-        }
-        return directoryProvider.vaultDirectory().toFile();
+    /**
+     * Hands a snapshot of the accounts to the file. Must be called with {@link #LOCK} held, so snapshots
+     * reach the file in the order the mutations happened.
+     */
+    private static void scheduleSave() {
+        List<AltAccount> snapshot = new ArrayList<>(ACCOUNTS);
+        FILE.submit(() -> GSON.toJson(new StorageData(snapshot)));
     }
 
     /**
