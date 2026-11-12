@@ -189,7 +189,7 @@ class AccountServicesTest {
     void uploadSkinSendsMultipart() throws Exception {
         canned(200, "{\"id\":\"abc\",\"name\":\"Alex\"}");
 
-        PlayerProfile profile = services().skin().upload(new byte[] {1, 2, 3}, SkinModel.CLASSIC);
+        PlayerProfile profile = services().skin().upload(SkinUploadTest.png(64, 64), SkinModel.CLASSIC);
 
         assertNotNull(profile);
         assertEquals("POST", lastMethod.get());
