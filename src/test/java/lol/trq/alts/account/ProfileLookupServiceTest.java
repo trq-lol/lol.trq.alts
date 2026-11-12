@@ -165,12 +165,35 @@ class ProfileLookupServiceTest {
     void aValueThatCannotBeANameIsAnsweredWithoutARequest() throws Exception {
         assertTrue(lookup.byName(null).isEmpty());
         assertTrue(lookup.byName("").isEmpty());
-        assertTrue(lookup.byName("ab").isEmpty());
+        assertTrue(lookup.byName("seventeen_chars_x").isEmpty());
         assertTrue(lookup.byName("../../entitlements/mcstore").isEmpty());
         assertTrue(lookup.byName("name?with=query").isEmpty());
         assertTrue(lookup.byName("has space").isEmpty());
 
         assertTrue(paths.isEmpty(), "no request is made for a name that cannot exist");
+    }
+
+    /**
+     * Names of one and two characters cannot be taken today, but accounts created before the minimum
+     * was raised still hold them. Answering "nobody has that name" without asking would be wrong.
+     */
+    @Test
+    void aLegacyNameShorterThanThreeCharactersIsLookedUp() throws Exception {
+        lookup.byName("ab");
+        lookup.byName("x");
+        lookup.byName("sixteen_chars_xx");
+
+        assertEquals(
+                List.of(
+                        "GET /minecraft/profile/lookup/name/ab",
+                        "GET /minecraft/profile/lookup/name/x",
+                        "GET /minecraft/profile/lookup/name/sixteen_chars_xx"),
+                paths,
+                "the service is the one that knows whether a short name is held");
+
+        lookup.byNames(List.of("ab", "x", "Alex"));
+
+        assertEquals(List.of(List.of("ab", "x", "Alex")), batches, "and the same in a list");
     }
 
     @Test
@@ -203,7 +226,8 @@ class ProfileLookupServiceTest {
 
     @Test
     void aListResolvesKnownNamesAndLeavesUnknownOnesOut() throws Exception {
-        List<PublicProfile> found = lookup.byNames(Arrays.asList("Steve_1", "Nobody_Here", "alex", null, "x", "ALEX"));
+        List<PublicProfile> found =
+                lookup.byNames(Arrays.asList("Steve_1", "Nobody_Here", "alex", null, "bad name", "ALEX"));
 
         assertEquals(2, found.size());
         assertEquals("Steve_1", found.get(0).name(), "results keep the order the names were given in");
@@ -219,7 +243,7 @@ class ProfileLookupServiceTest {
 
     @Test
     void aListOfInvalidNamesAloneCostsNoRequest() throws Exception {
-        assertTrue(lookup.byNames(Arrays.asList(null, "", "ab", "has space", "../x"))
+        assertTrue(lookup.byNames(Arrays.asList(null, "", "seventeen_chars_x", "has space", "../x"))
                 .isEmpty());
 
         assertTrue(paths.isEmpty());

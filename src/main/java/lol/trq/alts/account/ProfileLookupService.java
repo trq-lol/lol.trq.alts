@@ -44,8 +44,10 @@ public interface ProfileLookupService {
      * name as the player capitalised it.
      *
      * @param name the username
-     * @return the player, or empty when nobody has that name — including a name that is not a valid
-     *     username at all, which is answered without a request
+     * @return the player, or empty when nobody has that name — including a name that no player could
+     *     hold at all (empty, longer than 16 characters, or using a character outside letters, digits,
+     *     and underscore), which is answered without a request. A name of one or two characters is
+     *     looked up: none can be taken today, but accounts that predate the minimum still hold them
      * @throws AccountException if the service was rate limiting, refused, or could not be reached
      * @since 0.12.0
      */

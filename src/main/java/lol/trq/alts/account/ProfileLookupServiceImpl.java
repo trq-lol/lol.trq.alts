@@ -39,7 +39,7 @@ final class ProfileLookupServiceImpl implements ProfileLookupService {
 
     @Override
     public Optional<PublicProfile> byName(String name) throws AccountException {
-        if (!NameRules.valid(name)) {
+        if (!NameRules.lookupable(name)) {
             return Optional.empty();
         }
         return lookup(endpoints.lookupByName(name));
@@ -63,7 +63,7 @@ final class ProfileLookupServiceImpl implements ProfileLookupService {
         // answer is put back in the caller's order, which the service does not promise to keep.
         Map<String, String> wanted = new LinkedHashMap<>();
         for (String name : names) {
-            if (NameRules.valid(name)) {
+            if (NameRules.lookupable(name)) {
                 wanted.putIfAbsent(name.toLowerCase(Locale.ROOT), name);
             }
         }
