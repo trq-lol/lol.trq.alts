@@ -3,7 +3,9 @@ package lol.trq.alts.net;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Base64;
+import java.util.Objects;
 
 /**
  * How one request should reach the network: directly, or through a proxy the host names.
@@ -19,6 +21,10 @@ import java.util.Base64;
  * do it. {@link #withCredentials(String, char[])} therefore throws on a SOCKS5 route rather than
  * silently connecting unauthenticated, which would send the request from an address the host did not
  * choose. Unauthenticated SOCKS5 works; front an authenticated one with a local HTTP proxy.
+ *
+ * <p>The password is held as a private copy: the array passed in and the array {@link #password()}
+ * returns are never the one stored, so neither a caller wiping its own array nor one scribbling on the
+ * returned array changes the credential a route authenticates with.
  *
  * @param kind how to reach the network
  * @param host the proxy host, or {@code null} for {@link Kind#DIRECT}
@@ -71,7 +77,19 @@ public record ProxyRoute(Kind kind, String host, int port, String username, char
                         "authenticated SOCKS5 is not supported: the JDK reads SOCKS credentials from "
                                 + "process-global state. Front the proxy with a local HTTP proxy instead.");
             }
+            password = password == null ? null : password.clone();
         }
+    }
+
+    /**
+     * Returns a copy of the proxy password, so the caller cannot alter the stored credential.
+     *
+     * @return a fresh copy of the password, or {@code null} when unauthenticated
+     * @since 0.8.0
+     */
+    @Override
+    public char[] password() {
+        return password == null ? null : password.clone();
     }
 
     /**
@@ -122,7 +140,7 @@ public record ProxyRoute(Kind kind, String host, int port, String username, char
         if (kind == Kind.DIRECT) {
             throw new IllegalStateException("the direct route has nothing to authenticate against");
         }
-        return new ProxyRoute(kind, host, port, username, password == null ? null : password.clone());
+        return new ProxyRoute(kind, host, port, username, password);
     }
 
     /**
@@ -187,8 +205,39 @@ public record ProxyRoute(Kind kind, String host, int port, String username, char
     }
 
     /**
+     * Compares routes by value, including the password's contents. The generated {@code equals} would
+     * compare the password arrays by identity, so two routes built from the same credential would never
+     * be equal.
+     *
+     * @param other the object to compare with
+     * @return true if the other object is a route with the same kind, endpoint, and credential
+     * @since 0.12.0
+     */
+    @Override
+    public boolean equals(Object other) {
+        return other instanceof ProxyRoute route
+                && kind == route.kind
+                && port == route.port
+                && Objects.equals(host, route.host)
+                && Objects.equals(username, route.username)
+                && Arrays.equals(password, route.password);
+    }
+
+    /**
+     * Returns a hash consistent with {@link #equals(Object)}.
+     *
+     * @return the hash code
+     * @since 0.12.0
+     */
+    @Override
+    public int hashCode() {
+        return Objects.hash(kind, host, port, username, Arrays.hashCode(password));
+    }
+
+    /**
      * Returns a description carrying no credential. The generated {@code toString} would print the
      * password array, and a host logging the route it chose would write a proxy credential to its log.
+     * The username is left out as well: rotating gateways encode the session and the customer in it.
      *
      * @return a loggable description
      * @since 0.8.0

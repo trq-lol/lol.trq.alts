@@ -1,6 +1,7 @@
 package lol.trq.alts.net;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -16,6 +17,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
@@ -172,6 +174,50 @@ class ProxyRoutingTest {
         assertTrue(
                 route.toString().indexOf("hunter2") < 0,
                 "a host logging the route it chose must not log the credential: " + route);
+    }
+
+    @Test
+    void aRouteDescribesItselfWithoutItsUsernameEither() {
+        ProxyRoute route =
+                ProxyRoute.http("proxy.example", 8080).withCredentials("customer-1234-session-abcd", new char[] {'p'});
+
+        assertTrue(
+                route.toString().indexOf("customer-1234-session-abcd") < 0,
+                "a gateway username carries the session and the customer: " + route);
+    }
+
+    @Test
+    void thePasswordHandedOutIsACopy() {
+        char[] supplied = "hunter2".toCharArray();
+        ProxyRoute route = ProxyRoute.http("proxy.example", 8080).withCredentials("user", supplied);
+        String before = route.authorizationHeader();
+
+        Arrays.fill(route.password(), 'x');
+        Arrays.fill(supplied, 'y');
+
+        assertEquals(before, route.authorizationHeader(), "neither array may reach the stored credential");
+        assertEquals("hunter2", new String(route.password()));
+    }
+
+    @Test
+    void aPasswordPassedStraightToTheConstructorIsCopiedToo() {
+        char[] supplied = "hunter2".toCharArray();
+        ProxyRoute route = new ProxyRoute(ProxyRoute.Kind.HTTP, "proxy.example", 8080, "user", supplied);
+
+        Arrays.fill(supplied, 'y');
+
+        assertEquals("hunter2", new String(route.password()));
+    }
+
+    @Test
+    void routesCompareByCredentialContents() {
+        ProxyRoute first = ProxyRoute.http("proxy.example", 8080).withCredentials("user", "pass".toCharArray());
+        ProxyRoute same = ProxyRoute.http("proxy.example", 8080).withCredentials("user", "pass".toCharArray());
+        ProxyRoute other = ProxyRoute.http("proxy.example", 8080).withCredentials("user", "word".toCharArray());
+
+        assertEquals(first, same);
+        assertEquals(first.hashCode(), same.hashCode());
+        assertNotEquals(first, other, "a different password is a different route");
     }
 
     @Test
