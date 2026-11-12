@@ -8,12 +8,29 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import lol.trq.alts.model.GameStats;
+import lol.trq.alts.net.HttpUtil;
+import lol.trq.alts.net.IoExecutor;
 import lol.trq.alts.spi.StaticGameStatsSource;
+import lol.trq.alts.store.AltStore;
+import lol.trq.alts.store.SecretStore;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /** Wiring tests for the multi-server game-stats cache on {@link AltsRuntime}. */
 class AltsRuntimeGameStatsTest {
+
+    @AfterEach
+    void settleStores() {
+        // Building a runtime leaves the stores on their coalesced write delay, pointed at this test's
+        // directory. Settle and undo that, or the next class inherits a pending write to a deleted folder.
+        AltStore.flush();
+        AltStore.writeDelay(null);
+        SecretStore.flush();
+        SecretStore.writeDelay(null);
+        HttpUtil.resetForTests();
+        IoExecutor.resetForTests();
+    }
 
     private static AltsRuntime.Builder<Object> baseBuilder(Path dir) {
         return new AltsRuntime.Builder<Object>()

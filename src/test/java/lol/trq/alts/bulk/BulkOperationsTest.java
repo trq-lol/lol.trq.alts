@@ -17,6 +17,8 @@ import lol.trq.alts.auth.AltLoginCallback.LoginResult;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
+import lol.trq.alts.net.HttpUtil;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -56,6 +58,12 @@ class BulkOperationsTest {
         };
         // The import service is unused by these runs; a null-injecting login service would need a config.
         return new BulkOperationsImpl(new UnusedLoginService(), service);
+    }
+
+    /** One test here installs a proxy provider to watch the scopes; it must not outlive the test. */
+    @AfterEach
+    void resetTransport() {
+        HttpUtil.resetForTests();
     }
 
     @Test
@@ -453,7 +461,7 @@ class BulkOperationsTest {
         volatile String retryAfter;
 
         EntitlementServer() throws java.io.IOException {
-            lol.trq.alts.net.HttpUtil.bind(null);
+            HttpUtil.resetForTests();
             server = com.sun.net.httpserver.HttpServer.create(
                     new java.net.InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), 0), 0);
             server.createContext("/entitlements/mcstore", exchange -> {
@@ -504,7 +512,7 @@ class BulkOperationsTest {
         @Override
         public void close() {
             server.stop(0);
-            lol.trq.alts.net.HttpUtil.bind(null);
+            HttpUtil.resetForTests();
         }
     }
 
@@ -544,7 +552,7 @@ class BulkOperationsTest {
     void anEntitlementSweepRoutesEachRequestForItsOwnAccount() throws Exception {
         try (EntitlementServer server = new EntitlementServer()) {
             List<lol.trq.alts.net.NetworkScope> scopes = new java.util.concurrent.CopyOnWriteArrayList<>();
-            lol.trq.alts.net.HttpUtil.bind(scope -> {
+            HttpUtil.bind(scope -> {
                 scopes.add(scope);
                 return lol.trq.alts.net.ProxyRoute.direct();
             });

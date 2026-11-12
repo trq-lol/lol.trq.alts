@@ -24,6 +24,8 @@ import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.BanInfo;
 import lol.trq.alts.model.LoginMode;
+import lol.trq.alts.store.AltStore;
+import lol.trq.alts.store.SecretStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -97,6 +99,12 @@ class AccountServiceTest {
         if (server != null) {
             server.stop(0);
         }
+        // Building a runtime leaves the stores on their coalesced write delay, pointed at this test's
+        // directory. Settle and undo that, or the next class inherits a pending write to a deleted folder.
+        AltStore.flush();
+        AltStore.writeDelay(null);
+        SecretStore.flush();
+        SecretStore.writeDelay(null);
     }
 
     private static void respond(HttpExchange exchange, int status, String body) throws IOException {

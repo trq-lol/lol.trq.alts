@@ -53,7 +53,7 @@ class RefreshScopeRoutingTest {
     @AfterEach
     void tearDown() {
         // Static, so leaving it installed would route every later test through this recorder.
-        HttpUtil.bind(null);
+        HttpUtil.resetForTests();
         chain.close();
     }
 

@@ -47,7 +47,7 @@ class CookieChainTest {
     @AfterEach
     void tearDown() {
         // Static, so leaving a provider installed would route every later test through it.
-        HttpUtil.bind(null);
+        HttpUtil.resetForTests();
     }
 
     private static String landing() {

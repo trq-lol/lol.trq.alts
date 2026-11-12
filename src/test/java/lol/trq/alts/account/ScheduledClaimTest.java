@@ -36,7 +36,7 @@ class ScheduledClaimTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        HttpUtil.bind(null);
+        HttpUtil.resetForTests();
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/", exchange -> {
             if ("PUT".equals(exchange.getRequestMethod())) {

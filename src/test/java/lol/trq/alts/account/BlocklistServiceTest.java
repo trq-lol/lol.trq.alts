@@ -22,7 +22,7 @@ class BlocklistServiceTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        HttpUtil.bind(null);
+        HttpUtil.resetForTests();
         server = new LoopbackServices();
     }
 

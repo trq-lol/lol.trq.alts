@@ -23,7 +23,7 @@ class ProfileReturningMutationsTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        HttpUtil.bind(null);
+        HttpUtil.resetForTests();
         server = new LoopbackServices();
         server.canned(200, PROFILE);
     }

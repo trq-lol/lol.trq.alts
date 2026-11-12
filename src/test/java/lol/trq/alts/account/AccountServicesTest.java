@@ -38,7 +38,7 @@ class AccountServicesTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        HttpUtil.bind(null);
+        HttpUtil.resetForTests();
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/", exchange -> {
             lastMethod.set(exchange.getRequestMethod());
