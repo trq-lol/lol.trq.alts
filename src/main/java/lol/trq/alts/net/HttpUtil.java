@@ -31,6 +31,29 @@ import lol.trq.alts.spi.ProxyProvider;
  * {@link ProxyProvider} and each call resolves a {@link ProxyRoute} from its {@link NetworkScope} first.
  * The scope-less overloads are kept for compatibility and resolve as {@link NetworkScope.Purpose#AUTH}.
  *
+ * <p>It is also where the transport rules are enforced, once, for every caller:
+ *
+ * <ul>
+ *   <li>Timeouts are finite: ten seconds to connect, thirty to read.
+ *   <li>Route resolution fails closed. An installed provider that throws or names no route fails the
+ *       request, and a proxy that refuses a tunnel fails it too; nothing falls back to a direct
+ *       connection.
+ *   <li>A proxy credential is sent to the proxy and nowhere else. An HTTPS target behind an HTTP proxy
+ *       is reached through a tunnel the library opens itself, so the credential rides the
+ *       {@code CONNECT} and is never inside the TLS stream the origin reads.
+ *   <li>A kept-alive connection is only reused by the proxy identity that opened it: proxy host, port,
+ *       and credential.
+ *   <li>TLS uses the JVM's default trust with hostname verification on, tunnelled or not.
+ *   <li>Redirects are not followed, except by the binary fetch, which never carries a credential across
+ *       origins and never steps down from {@code https} to {@code http}.
+ *   <li>A JSON or text body is read up to one mebibyte; a longer one fails the request.
+ * </ul>
+ *
+ * <p>The methods here block. Run them on {@link IoExecutor#executor()} rather than the common pool.
+ *
+ * <p>Nothing here changes process-wide JVM state: no system property, default authenticator, default
+ * {@code SSLContext}, or proxy selector is installed.
+ *
  * @author trq
  * @since 0.1.0
  */
@@ -48,6 +71,9 @@ public final class HttpUtil {
      * library does not control.
      */
     static final int MAX_TEXT_BODY_BYTES = 1 << 20;
+
+    /** How many redirects one fetch follows before the chain is treated as a loop. */
+    private static final int MAX_REDIRECTS = 5;
 
     /** How much of an unwanted body is drained to keep its connection reusable before giving it up. */
     private static final int MAX_DISCARDED_BYTES = 64 * 1024;
@@ -132,9 +158,10 @@ public final class HttpUtil {
      * Applies the connection defaults every request shares. The timeouts are finite because these calls
      * run on a shared thread pool: an endpoint that accepts a connection and then goes silent would
      * otherwise hold a pooled thread for the life of the process and leave the login future to never
-     * complete. Redirects are not followed because {@code HttpURLConnection} replays the caller's
-     * request properties to the redirect target, which would send an {@code Authorization: Bearer}
-     * header to whatever host a {@code 3xx} names.
+     * complete. The JDK's own redirect following is always off, because {@code HttpURLConnection}
+     * replays the caller's request properties to the redirect target, which would send an
+     * {@code Authorization: Bearer} header to whatever host a {@code 3xx} names. The one call that does
+     * follow redirects, {@link #getBytesForStatus(String, Map, long, NetworkScope)}, does so by hand.
      *
      * @param conn the connection to configure
      */
@@ -582,9 +609,12 @@ public final class HttpUtil {
      * exactly the case where an unbounded read is a memory hazard.
      *
      * <p>Unlike every other method here this one follows redirects, because the resources it fetches are
-     * images and image hosts redirect. That is safe precisely as long as the request carries no
-     * credential to replay, so a caller that supplies an {@code Authorization} header gets the strict
-     * behaviour back automatically.
+     * images and image hosts redirect. It follows them itself, under three rules. A request carrying an
+     * {@code Authorization} header is never redirected at all, so a bearer token stays with the host it
+     * was sent to. A redirect that leaves the origin drops {@code Cookie} and any other credential
+     * header before the next hop. And a redirect from {@code https} to {@code http} is refused, as is a
+     * chain longer than five hops. A refused redirect is reported as the redirect itself: {@code null}
+     * here, the {@code 3xx} status from {@link #getBytesForStatus(String, Map, long, NetworkScope)}.
      *
      * @param urlString the target URL
      * @param headers optional HTTP headers to include in the request
@@ -649,19 +679,35 @@ public final class HttpUtil {
      */
     public static BytesResponse getBytesForStatus(
             String urlString, Map<String, String> headers, long maxBytes, NetworkScope scope) throws Exception {
-        HttpURLConnection conn = open(urlString, scope);
-        conn.setRequestMethod("GET");
-        conn.setInstanceFollowRedirects(!carriesCredential(headers));
-        applyHeaders(conn, null, headers);
+        // Resolved once: every hop of one fetch leaves from the same address.
+        ProxyRoute route = routeFor(scope);
+        boolean follow = !carriesCredential(headers);
+        URI target = URI.create(urlString);
+        Map<String, String> sending = headers;
 
-        int status = conn.getResponseCode();
-        Duration retryAfter = retryAfter(conn);
-        if (status < 200 || status >= 300) {
+        for (int hop = 0; ; hop++) {
+            HttpURLConnection conn = open(target, route);
+            conn.setRequestMethod("GET");
+            applyHeaders(conn, null, sending);
+
+            int status = conn.getResponseCode();
+            Duration retryAfter = retryAfter(conn);
+            if (status >= 200 && status < 300) {
+                try (InputStream in = conn.getInputStream()) {
+                    return new BytesResponse(status, readCapped(in, maxBytes), retryAfter);
+                }
+            }
+
+            String location = conn.getHeaderField("Location");
             discardBody(conn, status);
-            return new BytesResponse(status, null, retryAfter);
-        }
-        try (InputStream in = conn.getInputStream()) {
-            return new BytesResponse(status, readCapped(in, maxBytes), retryAfter);
+            URI next = follow && isRedirect(status) && hop < MAX_REDIRECTS ? redirectTarget(target, location) : null;
+            if (next == null) {
+                return new BytesResponse(status, null, retryAfter);
+            }
+            if (!sameOrigin(target, next)) {
+                sending = withoutCredentials(sending);
+            }
+            target = next;
         }
     }
 
@@ -676,6 +722,88 @@ public final class HttpUtil {
             return false;
         }
         return headers.keySet().stream().anyMatch(name -> name.equalsIgnoreCase("Authorization"));
+    }
+
+    /**
+     * Returns whether a status asks the client to fetch the resource from somewhere else.
+     *
+     * @param status the response status
+     * @return true for 301, 302, 303, 307, and 308
+     */
+    private static boolean isRedirect(int status) {
+        return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
+    }
+
+    /**
+     * Resolves where a redirect leads, or refuses it.
+     *
+     * <p>A redirect from {@code https} to {@code http} is refused: following it would repeat, in the
+     * clear, a request the caller made over TLS. Anything that is not HTTP at all is refused too. The
+     * upgrade from {@code http} to {@code https} is allowed.
+     *
+     * @param from the URL that answered with the redirect
+     * @param location its {@code Location} header, or null
+     * @return the URL to fetch next, or null when the redirect must not be followed
+     */
+    static URI redirectTarget(URI from, String location) {
+        if (location == null || location.isBlank()) {
+            return null;
+        }
+        URI next;
+        try {
+            next = from.resolve(location.trim());
+        } catch (IllegalArgumentException malformed) {
+            return null;
+        }
+        String scheme = next.getScheme();
+        boolean https = "https".equalsIgnoreCase(scheme);
+        if (next.getHost() == null || (!https && !"http".equalsIgnoreCase(scheme))) {
+            return null;
+        }
+        if ("https".equalsIgnoreCase(from.getScheme()) && !https) {
+            return null;
+        }
+        return next;
+    }
+
+    /**
+     * Returns whether two URLs share a scheme, host, and port.
+     *
+     * @param first one URL
+     * @param second the other
+     * @return true if a credential scoped to one is scoped to the other
+     */
+    static boolean sameOrigin(URI first, URI second) {
+        return first.getScheme().equalsIgnoreCase(second.getScheme())
+                && first.getHost() != null
+                && first.getHost().equalsIgnoreCase(second.getHost())
+                && effectivePort(first) == effectivePort(second);
+    }
+
+    private static int effectivePort(URI uri) {
+        if (uri.getPort() != -1) {
+            return uri.getPort();
+        }
+        return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
+    }
+
+    /**
+     * Returns the caller's headers without those that identify it to one particular origin, for a
+     * redirect that leaves that origin.
+     *
+     * @param headers the caller's headers, or null
+     * @return the headers safe to send elsewhere, or null when there were none
+     */
+    static Map<String, String> withoutCredentials(Map<String, String> headers) {
+        if (headers == null) {
+            return null;
+        }
+        Map<String, String> kept = new LinkedHashMap<>(headers);
+        kept.keySet()
+                .removeIf(name -> name.equalsIgnoreCase("Authorization")
+                        || name.equalsIgnoreCase("Proxy-Authorization")
+                        || name.equalsIgnoreCase("Cookie"));
+        return kept;
     }
 
     /**
