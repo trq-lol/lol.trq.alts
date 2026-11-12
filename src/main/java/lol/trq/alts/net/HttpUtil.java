@@ -72,6 +72,9 @@ public final class HttpUtil {
      */
     static final int MAX_TEXT_BODY_BYTES = 1 << 20;
 
+    /** The whole message of a refused header: it must never quote the header, which may be a token. */
+    private static final String UNSAFE_HEADER = "a request header holds a control character";
+
     /** How many redirects one fetch follows before the chain is treated as a loop. */
     private static final int MAX_REDIRECTS = 5;
 
@@ -936,11 +939,29 @@ public final class HttpUtil {
      * needs its own {@code Accept} or {@code User-Agent} — the cookie flow, which must look like a
      * browser — replaces the default rather than fighting it.
      *
+     * <p>Every caller header is checked here before the JDK sees it. The JDK refuses a value holding a
+     * line break by throwing an exception whose message quotes the whole value, and the value is
+     * usually {@code Bearer <token>}; that message then travels wherever the failure is reported. A
+     * control character anywhere in a name or a value is refused first, with a message that quotes
+     * nothing.
+     *
      * @param conn the connection to configure
      * @param contentType the Content-Type header value, or null if no body is sent
      * @param headers map of additional headers to apply
+     * @throws IllegalArgumentException if a header name or value holds a control character; the message
+     *     names neither
      */
     private static void applyHeaders(HttpURLConnection conn, String contentType, Map<String, String> headers) {
+        requireHeaderText(contentType);
+        if (headers != null) {
+            headers.forEach((name, value) -> {
+                if (name == null || name.isEmpty()) {
+                    throw new IllegalArgumentException(UNSAFE_HEADER);
+                }
+                requireHeaderText(name);
+                requireHeaderText(value);
+            });
+        }
         if (contentType != null) {
             conn.setRequestProperty("Content-Type", contentType);
         }
@@ -948,6 +969,24 @@ public final class HttpUtil {
         conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
         if (headers != null) {
             headers.forEach(conn::setRequestProperty);
+        }
+    }
+
+    /**
+     * Refuses header text that holds a control character, without repeating the text.
+     *
+     * @param text a header name or value, or null
+     * @throws IllegalArgumentException if the text holds a control character
+     */
+    private static void requireHeaderText(String text) {
+        if (text == null) {
+            return;
+        }
+        for (int index = 0; index < text.length(); index++) {
+            char character = text.charAt(index);
+            if (character < 0x20 || character == 0x7f) {
+                throw new IllegalArgumentException(UNSAFE_HEADER);
+            }
         }
     }
 

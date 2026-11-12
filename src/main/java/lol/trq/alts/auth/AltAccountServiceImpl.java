@@ -10,6 +10,7 @@ import lol.trq.alts.auth.MicrosoftAuthUtil.AuthFlowException;
 import lol.trq.alts.auth.MicrosoftAuthUtil.RefreshRejectedException;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
+import lol.trq.alts.net.FailureText;
 import lol.trq.alts.net.IoExecutor;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.store.AltStore;
@@ -115,7 +116,7 @@ public class AltAccountServiceImpl implements AltAccountService {
                     account,
                     State.UNREACHABLE,
                     FailureReason.NETWORK,
-                    "Validation failed: " + unreachable.getMessage());
+                    "Validation failed: " + FailureText.of(unreachable));
         }
         if (lookup.found()) {
             return AccountStatus.valid(correctUsername(account, lookup.username()));
@@ -177,7 +178,7 @@ public class AltAccountServiceImpl implements AltAccountService {
         Throwable cause = failure.getCause() != null ? failure.getCause() : failure;
         RefreshRejectedException rejection = cause instanceof RefreshRejectedException rejected ? rejected : null;
         boolean permanent = rejection != null && rejection.permanent();
-        String message = "Refresh: " + (cause.getMessage() != null ? cause.getMessage() : "unknown error");
+        String message = "Refresh: " + MicrosoftAuthUtil.describe(cause);
 
         if (rejection != null && rejection.rateLimited()) {
             return AccountStatus.failure(

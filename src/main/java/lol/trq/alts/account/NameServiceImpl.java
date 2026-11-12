@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
+import lol.trq.alts.net.FailureText;
 import lol.trq.alts.net.HttpUtil;
 import lol.trq.alts.net.IoExecutor;
 import lol.trq.alts.net.NetworkScope;
@@ -71,7 +72,7 @@ final class NameServiceImpl implements NameService {
                     null,
                     NetworkScope.forAccount(NetworkScope.Purpose.PROFILE, http.accountUuid(), name));
         } catch (Exception transport) {
-            throw new AccountException("PUT name change: " + transport.getMessage(), transport);
+            throw new AccountException("PUT name change: " + FailureText.of(transport), transport);
         }
         return classify(response);
     }

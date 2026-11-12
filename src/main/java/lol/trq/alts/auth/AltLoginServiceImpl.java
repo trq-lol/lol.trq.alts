@@ -21,6 +21,7 @@ import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.model.SessionData;
+import lol.trq.alts.net.FailureText;
 import lol.trq.alts.net.IoExecutor;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.spi.DeviceCodePrompt;
@@ -121,7 +122,7 @@ public class AltLoginServiceImpl implements AltLoginService {
                                 cleanToken, profileUrl(), NetworkScope.of(NetworkScope.Purpose.PROFILE));
                     } catch (Exception unreachable) {
                         return AltLoginCallback.LoginResult.failure(
-                                "Login failed: " + unreachable.getMessage(), FailureReason.NETWORK);
+                                "Login failed: " + FailureText.of(unreachable), FailureReason.NETWORK);
                     }
                     if (profile.found()) {
                         return finalizeLogin(profile.username(), profile.uuid(), cleanToken, AccountType.SESSION, mode);
@@ -249,21 +250,17 @@ public class AltLoginServiceImpl implements AltLoginService {
         if (cause instanceof TimeoutException) {
             return AltLoginCallback.LoginResult.failure(label + ": sign-in timed out", FailureReason.TIMED_OUT);
         }
+        // From here on the failure is one the library did not write, so its message is not repeated: the
+        // JDK quotes the input that offended it, and here that input is a cookie, a token, or an address
+        // carrying one.
         if (cause instanceof IllegalArgumentException) {
             // The credential text itself could not be read.
-            return AltLoginCallback.LoginResult.failure(
-                    label + ": " + describe(cause, "unreadable credential"), FailureReason.INVALID_TOKEN);
+            return AltLoginCallback.LoginResult.failure(label + ": unreadable credential", FailureReason.INVALID_TOKEN);
         }
         if (cause instanceof IOException) {
-            return AltLoginCallback.LoginResult.failure(
-                    label + ": " + describe(cause, "connection failed"), FailureReason.NETWORK);
+            return AltLoginCallback.LoginResult.failure(label + ": " + FailureText.of(cause), FailureReason.NETWORK);
         }
-        return AltLoginCallback.LoginResult.failure(
-                label + ": " + describe(cause, "unknown error"), FailureReason.UNKNOWN);
-    }
-
-    private static String describe(Throwable cause, String fallback) {
-        return cause.getMessage() != null ? cause.getMessage() : fallback;
+        return AltLoginCallback.LoginResult.failure(label + ": " + FailureText.of(cause), FailureReason.UNKNOWN);
     }
 
     /**
@@ -315,7 +312,10 @@ public class AltLoginServiceImpl implements AltLoginService {
                             } catch (IOException e) {
                                 // Not a network failure: the file is the credential, and it could not be read.
                                 throw new AuthFlowException(
-                                        describe(e, "could not be read"), FailureReason.INVALID_TOKEN, e);
+                                        // CookieFile writes its own messages: a file name and a fixed phrase.
+                                        e.getMessage() != null ? e.getMessage() : "could not be read",
+                                        FailureReason.INVALID_TOKEN,
+                                        e);
                             }
                         },
                         IoExecutor.executor())
@@ -424,7 +424,7 @@ public class AltLoginServiceImpl implements AltLoginService {
                 return classifiedFailure("Refresh", ex);
             }
             return AltLoginCallback.LoginResult.failure(
-                    "Refresh: " + describe(cause, "unknown error"), FailureReason.NETWORK);
+                    "Refresh: " + MicrosoftAuthUtil.describe(cause), FailureReason.NETWORK);
         }
         FailureReason reason;
         if (rejection.permanent()) {
@@ -434,7 +434,7 @@ public class AltLoginServiceImpl implements AltLoginService {
         } else {
             reason = FailureReason.NETWORK;
         }
-        return AltLoginCallback.LoginResult.failure("Refresh: " + describe(cause, "unknown error"), reason);
+        return AltLoginCallback.LoginResult.failure("Refresh: " + MicrosoftAuthUtil.describe(cause), reason);
     }
 
     /**
@@ -573,12 +573,32 @@ public class AltLoginServiceImpl implements AltLoginService {
         }
         if (t.contains(":")) {
             for (String part : t.split(":")) {
-                if (part.startsWith("M.")) {
-                    return part.trim();
+                if (part.strip().startsWith("M.")) {
+                    return withoutBreaks(part);
                 }
             }
         }
-        return t;
+        return withoutBreaks(t);
+    }
+
+    /**
+     * Removes every whitespace and control character from a token. No token has one, but a pasted token
+     * often does: a long value wraps in an email or a terminal and is copied with the line break in it.
+     * Left in, the break makes the request header illegal, and the token would never have worked
+     * anyway; taken out, the paste is what the user meant.
+     *
+     * @param token the token text
+     * @return the token with no whitespace or control characters anywhere in it
+     */
+    static String withoutBreaks(String token) {
+        StringBuilder kept = new StringBuilder(token.length());
+        for (int index = 0; index < token.length(); index++) {
+            char character = token.charAt(index);
+            if (!Character.isWhitespace(character) && !Character.isISOControl(character)) {
+                kept.append(character);
+            }
+        }
+        return kept.toString();
     }
 
     /**
@@ -586,13 +606,17 @@ public class AltLoginServiceImpl implements AltLoginService {
      * bearer prefix.
      *
      * @param t the raw token
-     * @return the sanitized token
+     * @return the sanitized token, with no whitespace or control characters anywhere in it
      */
     private String cleanToken(String t) {
         t = t.trim();
         if (t.contains(":")) {
-            for (String p : t.split(":")) if (p.startsWith("eyJ")) return p;
+            for (String p : t.split(":")) {
+                if (p.strip().startsWith("eyJ")) {
+                    return withoutBreaks(p);
+                }
+            }
         }
-        return t.toLowerCase(Locale.ROOT).startsWith("bearer ") ? t.substring(7).trim() : t;
+        return withoutBreaks(t.toLowerCase(Locale.ROOT).startsWith("bearer ") ? t.substring(7) : t);
     }
 }

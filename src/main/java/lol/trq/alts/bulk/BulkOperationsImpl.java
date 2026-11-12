@@ -24,6 +24,7 @@ import lol.trq.alts.auth.AltLoginService;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.net.Backoff;
+import lol.trq.alts.net.FailureText;
 import lol.trq.alts.net.IoExecutor;
 import lol.trq.alts.store.AltStore;
 
@@ -349,11 +350,10 @@ public final class BulkOperationsImpl implements BulkOperations {
         return duration != null && !duration.isZero() && !duration.isNegative();
     }
 
+    // An attempt that threw rather than returning a result failed somewhere the library did not
+    // classify, so its message is not the library's and is not repeated: see FailureText.
     private static String describe(Throwable failure) {
-        Throwable cause = failure.getCause() != null ? failure.getCause() : failure;
-        return cause.getMessage() != null
-                ? cause.getMessage()
-                : cause.getClass().getSimpleName();
+        return FailureText.of(failure);
     }
 
     /** One attempt's outcome, flattened so both surfaces feed the same runner. */

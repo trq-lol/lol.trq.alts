@@ -4,6 +4,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import lol.trq.alts.net.FailureText;
 import lol.trq.alts.net.HttpUtil;
 import lol.trq.alts.net.NetworkScope;
 
@@ -140,7 +141,7 @@ final class AccountHttp {
         try {
             return HttpUtil.sendForStatus(method, url, contentType, auth(), body, scope(purpose));
         } catch (Exception transport) {
-            throw new AccountException(method + " " + describe(url) + ": " + transport.getMessage(), transport);
+            throw new AccountException(method + " " + describe(url) + ": " + FailureText.of(transport), transport);
         }
     }
 
@@ -159,7 +160,7 @@ final class AccountHttp {
         try {
             return HttpUtil.postJsonForElement(url, auth(), json, scope(purpose));
         } catch (Exception transport) {
-            throw new AccountException("POST " + describe(url) + ": " + transport.getMessage(), transport);
+            throw new AccountException("POST " + describe(url) + ": " + FailureText.of(transport), transport);
         }
     }
 

@@ -24,6 +24,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
+import lol.trq.alts.net.FailureText;
 import lol.trq.alts.net.HttpUtil;
 import lol.trq.alts.net.IoExecutor;
 import lol.trq.alts.net.MicrosoftCallbackServer;
@@ -879,6 +880,23 @@ public final class MicrosoftAuthUtil {
 
     static AuthFlowException unexpected(String step, RuntimeException malformed) {
         return new AuthFlowException(step + " returned an unexpected response", FailureReason.UNKNOWN, malformed);
+    }
+
+    /**
+     * Describes a failed sign-in step for a message a host will see. A failure this class classified
+     * carries a message written here, from the step's name and a status, and that is used as it is. Any
+     * other failure is described by its kind only: its own message was written by the JDK or the
+     * transport, and may quote a token.
+     *
+     * @param failure the failure a step completed with
+     * @return a description safe to show and to log
+     */
+    static String describe(Throwable failure) {
+        if ((failure instanceof AuthFlowException || failure instanceof RefreshRejectedException)
+                && failure.getMessage() != null) {
+            return failure.getMessage();
+        }
+        return FailureText.of(failure);
     }
 
     private static String encode(String value) {
