@@ -1,6 +1,7 @@
 package lol.trq.alts.crypto;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.util.Arrays;
@@ -24,6 +25,8 @@ public final class VaultIdentity {
 
     private static final byte[] PASSPHRASE_AAD = "lol.trq.alts/identity-material/v1".getBytes(StandardCharsets.UTF_8);
     private static final byte[] RECOVERY_AAD = "lol.trq.alts/identity-recovery/v1".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] CONSISTENCY_PROBE =
+            "lol.trq.alts/identity-consistency/v1".getBytes(StandardCharsets.UTF_8);
     private static final int MATERIAL_BYTES = Ed25519.KEY_BYTES + X25519.KEY_BYTES;
 
     private final PublicKey edPublic;
@@ -76,12 +79,15 @@ public final class VaultIdentity {
      * Unlocks a stored identity with its passphrase.
      *
      * <p>The stored record is treated as untrusted: its iteration count must lie within
-     * {@link Pbkdf2#MIN_ITERATIONS} and {@link Pbkdf2#MAX_ITERATIONS}.
+     * {@link Pbkdf2#MIN_ITERATIONS} and {@link Pbkdf2#MAX_ITERATIONS}, and the public keys it names must
+     * be the ones that belong to the unsealed private keys. A record whose public keys were swapped
+     * after sealing, so that peers would wrap repository keys to someone else, is rejected.
      *
      * @param stored the stored identity
      * @param passphrase the passphrase used at creation
      * @return the unlocked identity
-     * @throws CryptoException if the passphrase is wrong, or the record is malformed or out of range
+     * @throws CryptoException if the passphrase is wrong, the record is malformed or out of range, or its
+     *     public keys do not match the private material
      */
     public static VaultIdentity unlock(WrappedIdentity stored, char[] passphrase) throws CryptoException {
         SecretKey mk = Pbkdf2.deriveKey(passphrase, decode(stored.kdfSalt(), "kdf salt"), stored.kdfIterations());
@@ -95,7 +101,8 @@ public final class VaultIdentity {
      * @param stored the stored identity (must carry a recovery sealing)
      * @param recoveryCode the recovery code shown at recovery setup
      * @return the unlocked identity
-     * @throws CryptoException if no recovery sealing exists, the code is wrong, or the record is malformed
+     * @throws CryptoException if no recovery sealing exists, the code is wrong, the record is malformed,
+     *     or its public keys do not match the private material
      */
     public static VaultIdentity unlockWithRecovery(WrappedIdentity stored, String recoveryCode) throws CryptoException {
         if (!stored.hasRecovery()) {
@@ -206,6 +213,7 @@ public final class VaultIdentity {
             PrivateKey edPrivate = Ed25519.decodePrivateKey(edSeed);
             PublicKey xPublic = X25519.decodePublicKey(decode(stored.x25519PublicKey(), "X25519 public key"));
             PrivateKey xPrivate = X25519.decodePrivateKey(xScalar);
+            requireConsistent(edPublic, edPrivate, xPublic, xPrivate);
             return new VaultIdentity(edPublic, edPrivate, xPublic, xPrivate, stored);
         } finally {
             Arrays.fill(material, (byte) 0);
@@ -215,6 +223,21 @@ public final class VaultIdentity {
             if (xScalar != null) {
                 Arrays.fill(xScalar, (byte) 0);
             }
+        }
+    }
+
+    /**
+     * The stored public keys sit outside the sealing, so anyone able to edit the record could replace
+     * them. Check each against the private key it claims to pair with before anything trusts it.
+     */
+    private static void requireConsistent(
+            PublicKey edPublic, PrivateKey edPrivate, PublicKey xPublic, PrivateKey xPrivate) throws CryptoException {
+        if (!Ed25519.verify(edPublic, CONSISTENCY_PROBE, Ed25519.sign(edPrivate, CONSISTENCY_PROBE))) {
+            throw new CryptoException("stored Ed25519 public key does not match the private identity key");
+        }
+        byte[] derived = X25519.encodePublicKey(X25519.derivePublicKey(xPrivate));
+        if (!MessageDigest.isEqual(derived, X25519.encodePublicKey(xPublic))) {
+            throw new CryptoException("stored X25519 public key does not match the private key-agreement key");
         }
     }
 

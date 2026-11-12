@@ -58,4 +58,13 @@ class X25519Test {
         assertFalse(Arrays.equals(
                 X25519.agree(a.getPrivate(), b.getPublic()), X25519.agree(a.getPrivate(), c.getPublic())));
     }
+
+    @Test
+    void derivesThePublicKeyFromThePrivateKey() throws Exception {
+        KeyPair kp = X25519.newKeyPair();
+
+        assertArrayEquals(
+                X25519.encodePublicKey(kp.getPublic()),
+                X25519.encodePublicKey(X25519.derivePublicKey(kp.getPrivate())));
+    }
 }

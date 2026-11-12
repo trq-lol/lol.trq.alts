@@ -124,6 +124,22 @@ public final class X25519 {
         }
     }
 
+    /**
+     * Derives the public key that belongs to a private key, by multiplying the Curve25519 base point by
+     * the private scalar. Lets a caller check that a public key it was handed really pairs with the
+     * private key it holds.
+     *
+     * @param privateKey the X25519 private key
+     * @return the matching X25519 public key
+     * @throws CryptoException if the derivation fails
+     * @since 0.12.0
+     */
+    public static PublicKey derivePublicKey(PrivateKey privateKey) throws CryptoException {
+        byte[] basePoint = new byte[KEY_BYTES];
+        basePoint[0] = 9;
+        return decodePublicKey(agree(privateKey, decodePublicKey(basePoint)));
+    }
+
     private static void requireLen(byte[] raw, String what) throws CryptoException {
         if (raw == null || raw.length != KEY_BYTES) {
             throw new CryptoException("X25519 " + what + " must be " + KEY_BYTES + " bytes");

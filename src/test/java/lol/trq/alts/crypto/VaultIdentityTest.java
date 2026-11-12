@@ -98,6 +98,31 @@ class VaultIdentityTest {
     }
 
     @Test
+    void unlockRejectsASwappedKeyAgreementPublicKey() throws Exception {
+        VaultIdentity victim = VaultIdentity.create("pw".toCharArray());
+        WrappedIdentity stored = victim.withRecovery("recovery-code");
+        // Whoever can edit the stored record (a synced backup) points the X25519 key at their own.
+        String attackerKey = Base64.getEncoder()
+                .encodeToString(X25519.encodePublicKey(X25519.newKeyPair().getPublic()));
+        WrappedIdentity tampered =
+                with(stored, stored.ed25519PublicKey(), attackerKey, stored.kdfSalt(), stored.kdfIterations());
+
+        assertThrows(CryptoException.class, () -> VaultIdentity.unlock(tampered, "pw".toCharArray()));
+        assertThrows(CryptoException.class, () -> VaultIdentity.unlockWithRecovery(tampered, "recovery-code"));
+    }
+
+    @Test
+    void unlockRejectsASwappedIdentityPublicKey() throws Exception {
+        WrappedIdentity stored = VaultIdentity.create("pw".toCharArray()).export();
+        String otherIdentity = Base64.getEncoder()
+                .encodeToString(Ed25519.encodePublicKey(Ed25519.newKeyPair().getPublic()));
+        WrappedIdentity tampered =
+                with(stored, otherIdentity, stored.x25519PublicKey(), stored.kdfSalt(), stored.kdfIterations());
+
+        assertThrows(CryptoException.class, () -> VaultIdentity.unlock(tampered, "pw".toCharArray()));
+    }
+
+    @Test
     void unlockRejectsAnOutOfRangeIterationCount() throws Exception {
         WrappedIdentity stored = VaultIdentity.create("pw".toCharArray()).export();
 
