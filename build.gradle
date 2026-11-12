@@ -61,6 +61,19 @@ tasks.named('test') {
     useJUnitPlatform()
 }
 
+tasks.named('jar') {
+    manifest {
+        // A stable module name for a consumer on the module path, rather than one derived from the
+        // jar's file name, which changes with the version and the repository that served it.
+        attributes('Automatic-Module-Name': 'lol.trq.alts')
+    }
+}
+
+// The guide inlines from the examples, so an example that leans on a deprecated API teaches it.
+tasks.named('compileExamplesJava') {
+    options.compilerArgs += ['-Xlint:deprecation', '-Werror']
+}
+
 spotless {
     java {
         // Palantir 4-space / 120-column house style.
