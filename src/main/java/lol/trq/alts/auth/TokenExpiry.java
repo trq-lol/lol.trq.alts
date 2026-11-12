@@ -2,9 +2,7 @@ package lol.trq.alts.auth;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import java.nio.charset.StandardCharsets;
 import java.time.Clock;
-import java.util.Base64;
 import lol.trq.alts.model.AltAccount;
 
 /**
@@ -40,13 +38,8 @@ public final class TokenExpiry {
             return 0L;
         }
         try {
-            String[] parts = token.split("\\.");
-            if (parts.length < 2) {
-                return 0L;
-            }
-            byte[] decoded = Base64.getUrlDecoder().decode(padded(parts[1]));
-            JsonObject payload = JsonParser.parseString(new String(decoded, StandardCharsets.UTF_8))
-                    .getAsJsonObject();
+            JsonObject payload =
+                    JsonParser.parseString(AuthFormats.jwtPayload(token)).getAsJsonObject();
             return payload.has("exp") ? payload.get("exp").getAsLong() * 1000L : 0L;
         } catch (Exception unreadable) {
             return 0L;
@@ -67,10 +60,5 @@ public final class TokenExpiry {
             return true;
         }
         return clock.millis() >= expiry - SKEW_MILLIS;
-    }
-
-    private static String padded(String base64Url) {
-        int padding = (4 - base64Url.length() % 4) % 4;
-        return base64Url + "=".repeat(padding);
     }
 }
