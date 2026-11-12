@@ -8,6 +8,7 @@ import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.net.Socket;
 import java.net.SocketAddress;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.function.Supplier;
 import javax.net.ssl.SSLParameters;
@@ -230,8 +231,10 @@ final class ProxyTunnelSocketFactory extends SSLSocketFactory {
             int budget = timeout > 0 ? timeout : DEFAULT_HANDSHAKE_TIMEOUT_MILLIS;
             long deadline = System.nanoTime() + budget * 1_000_000L;
             try {
+                // One budget covers the connect and the whole CONNECT exchange: each read below is
+                // given only what is left of it, so a proxy that is slow to accept and then slow to
+                // answer cannot spend the budget twice.
                 super.connect(new InetSocketAddress(proxyHost, proxyPort), budget);
-                setSoTimeout(budget);
                 handshake(authority, deadline);
                 setSoTimeout(0);
                 established = true;
@@ -260,7 +263,7 @@ final class ProxyTunnelSocketFactory extends SSLSocketFactory {
             out.write(request.toString().getBytes(StandardCharsets.ISO_8859_1));
             out.flush();
 
-            int status = statusOf(readHead(getInputStream(), deadline));
+            int status = statusOf(readHead(this, deadline));
             if (status < 200 || status >= 300) {
                 throw new IOException("proxy refused the tunnel with status " + status);
             }
@@ -269,24 +272,34 @@ final class ProxyTunnelSocketFactory extends SSLSocketFactory {
 
     /**
      * Reads a response head up to and including its blank line, one byte at a time so nothing belonging
-     * to the TLS stream that follows is consumed.
+     * to the TLS stream that follows is consumed. Before every read the socket's timeout is set to what
+     * remains until the deadline, so no single read can outlast it.
      *
-     * @param in the proxy's stream
+     * @param socket the socket connected to the proxy
      * @param deadline the {@link System#nanoTime()} instant the handshake must finish by
      * @return the head, without the terminating blank line
      * @throws IOException if the stream ends, runs long, or runs past the deadline
      */
-    private static String readHead(InputStream in, long deadline) throws IOException {
+    private static String readHead(Socket socket, long deadline) throws IOException {
+        InputStream in = socket.getInputStream();
         StringBuilder head = new StringBuilder(128);
         int matched = 0;
         while (matched < 4) {
             if (head.length() >= MAX_RESPONSE_HEAD_BYTES) {
                 throw new IOException("proxy sent an oversized response to CONNECT");
             }
-            if (System.nanoTime() - deadline > 0) {
+            long remainingNanos = deadline - System.nanoTime();
+            if (remainingNanos <= 0) {
                 throw new IOException("proxy did not answer CONNECT in time");
             }
-            int b = in.read();
+            // Rounded up, and never zero: a zero timeout means wait forever.
+            socket.setSoTimeout((int) Math.max(1L, (remainingNanos + 999_999L) / 1_000_000L));
+            int b;
+            try {
+                b = in.read();
+            } catch (SocketTimeoutException outOfTime) {
+                throw new IOException("proxy did not answer CONNECT in time");
+            }
             if (b < 0) {
                 throw new IOException("proxy closed the connection during CONNECT");
             }
@@ -298,23 +311,33 @@ final class ProxyTunnelSocketFactory extends SSLSocketFactory {
     }
 
     /**
-     * Parses the status code out of a response head.
+     * Parses the status code out of a response head. The code is exactly three ASCII digits, as the
+     * protocol defines it: no sign, no fourth digit, and none of the other digits a lenient number
+     * parser accepts, so nothing that is not a status can be read as a success.
      *
      * @param head the response head
      * @return the status code
      * @throws IOException if the head does not start with an HTTP status line
      */
-    private static int statusOf(String head) throws IOException {
+    static int statusOf(String head) throws IOException {
         int lineEnd = head.indexOf("\r\n");
         String line = lineEnd < 0 ? head : head.substring(0, lineEnd);
         String[] parts = line.split(" ", 3);
         if (parts.length < 2 || !parts[0].startsWith("HTTP/1.")) {
             throw new IOException("proxy answered CONNECT with something that is not HTTP");
         }
-        try {
-            return Integer.parseInt(parts[1]);
-        } catch (NumberFormatException malformed) {
+        String code = parts[1];
+        if (code.length() != 3) {
             throw new IOException("proxy answered CONNECT with a malformed status line");
         }
+        int status = 0;
+        for (int index = 0; index < 3; index++) {
+            char digit = code.charAt(index);
+            if (digit < '0' || digit > '9') {
+                throw new IOException("proxy answered CONNECT with a malformed status line");
+            }
+            status = status * 10 + (digit - '0');
+        }
+        return status;
     }
 }

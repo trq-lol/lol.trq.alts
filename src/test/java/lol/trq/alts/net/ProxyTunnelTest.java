@@ -10,6 +10,7 @@ import com.google.gson.JsonObject;
 import com.sun.net.httpserver.HttpsServer;
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -209,6 +210,60 @@ class ProxyTunnelTest {
         }
 
         assertEquals(0, originHits.get());
+    }
+
+    @Test
+    void onlyAThreeDigitStatusIsAStatus() throws Exception {
+        assertEquals(200, ProxyTunnelSocketFactory.statusOf("HTTP/1.1 200 Connection established"));
+        assertEquals(407, ProxyTunnelSocketFactory.statusOf("HTTP/1.0 407"));
+
+        for (String line : new String[] {
+            "HTTP/1.1 +200 OK",
+            "HTTP/1.1 -200 OK",
+            "HTTP/1.1 2000 OK",
+            "HTTP/1.1 20 OK",
+            "HTTP/1.1 0200 OK",
+            "HTTP/1.1 \u0662\u0660\u0660 OK",
+            "HTTP/1.1  200 OK",
+            "HTTP/1.1 2e2 OK",
+        }) {
+            assertThrows(
+                    IOException.class,
+                    () -> ProxyTunnelSocketFactory.statusOf(line),
+                    "a tunnel must not be treated as open on a status line that is not one: " + line);
+        }
+    }
+
+    @Test
+    void theTunnelHandshakeAsAWholeIsHeldToOneDeadline() throws Exception {
+        int budgetMillis = 2_000;
+        try (ServerSocket slow = new ServerSocket(0, 0, InetAddress.getLoopbackAddress())) {
+            Thread.ofPlatform().daemon().start(() -> {
+                try (Socket client = slow.accept()) {
+                    // Most of the budget passes, one byte arrives, and then nothing ever does.
+                    Thread.sleep(budgetMillis * 7L / 10);
+                    client.getOutputStream().write('H');
+                    client.getOutputStream().flush();
+                    client.getInputStream().readAllBytes();
+                } catch (IOException | InterruptedException closing) {
+                    // The client hanging up is the expected ending.
+                }
+            });
+            ProxyTunnelSocketFactory factory =
+                    new ProxyTunnelSocketFactory(loopback(), slow.getLocalPort(), null, () -> null);
+
+            long started = System.nanoTime();
+            try (Socket tunnel = factory.createSocket()) {
+                assertThrows(
+                        IOException.class,
+                        () -> tunnel.connect(InetSocketAddress.createUnresolved("origin.example", 443), budgetMillis));
+            }
+            long elapsedMillis = (System.nanoTime() - started) / 1_000_000L;
+
+            assertTrue(
+                    elapsedMillis < budgetMillis * 14L / 10,
+                    "a byte arriving late must not buy the proxy a second full timeout; took " + elapsedMillis + " ms");
+        }
     }
 
     @Test
