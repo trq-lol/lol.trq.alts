@@ -1,11 +1,14 @@
 package lol.trq.alts.vault;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.google.gson.Gson;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import lol.trq.alts.crypto.CryptoException;
@@ -93,6 +96,8 @@ class SharedVaultHardeningTest {
                 base.shareRefreshTokens());
     }
 
+    // --- rollback and downgrade ---------------------------------------------------------------
+
     @Test
     void rejectsEnvelopeSealedUnderAnotherKeyEpoch() throws Exception {
         SharedVault.CreatedRepo created = trusting.createRepo(alice, alts("v1"));
@@ -167,6 +172,8 @@ class SharedVaultHardeningTest {
         // The entry is the epoch-0 wrap; presenting it as epoch 4 must not yield an "epoch 4" key.
         assertThrows(VaultException.class, () -> trusting.openRepo(relabelled, alice));
     }
+
+    // --- key-binding verification -------------------------------------------------------------
 
     @Test
     void addMemberWrapsOnlyToKeysTheVerifierAccepts() throws Exception {
@@ -294,6 +301,21 @@ class SharedVaultHardeningTest {
                 () -> trusting.removeMember(created.context(), alts("v2"), manifest, alice.identityId()));
     }
 
+    // --- malformed, server-controlled input ---------------------------------------------------
+
+    @Test
+    void malformedEnvelopeBase64IsAVaultException() throws Exception {
+        SharedVault.CreatedRepo created = trusting.createRepo(alice, alts("v1"));
+        EncryptedEnvelope good = created.envelope();
+        EncryptedEnvelope badIv = new EncryptedEnvelope(
+                good.repoId(), good.payloadVersion(), good.keyEpoch(), "not base64!", good.ciphertext());
+        EncryptedEnvelope badCiphertext =
+                new EncryptedEnvelope(good.repoId(), good.payloadVersion(), good.keyEpoch(), good.iv(), "***");
+
+        assertThrows(VaultException.class, () -> trusting.decryptPayload(created.context(), badIv, 0));
+        assertThrows(VaultException.class, () -> trusting.decryptPayload(created.context(), badCiphertext, 0));
+    }
+
     @Test
     void malformedMemberKeyIsACryptoException() throws Exception {
         SharedVault.CreatedRepo created = trusting.createRepo(alice, alts("v1"));
@@ -305,6 +327,52 @@ class SharedVaultHardeningTest {
         assertThrows(
                 CryptoException.class,
                 () -> trusting.addMember(created.context(), new MemberPublicKey(bob.identityId(), "c2hvcnQ="), null));
+    }
+
+    @Test
+    void nullEntriesInAPeersPayloadAreDropped() throws Exception {
+        SharedVault.CreatedRepo created = trusting.createRepo(alice, alts("v1"));
+        String json = "{\"alts\":[null," + new Gson().toJson(alts("kept").get(0)) + ",null],\"payloadVersion\":2}";
+
+        List<AltAccount> recovered = trusting.decryptPayload(created.context(), seal(created.context(), json), 0);
+
+        assertEquals(alts("kept"), recovered);
+    }
+
+    @Test
+    void aPayloadThatIsNotAnAltListIsAVaultException() throws Exception {
+        SharedVault.CreatedRepo created = trusting.createRepo(alice, alts("v1"));
+
+        assertThrows(
+                VaultException.class,
+                () -> trusting.decryptPayload(created.context(), seal(created.context(), "{\"alts\":"), 0));
+        assertThrows(
+                VaultException.class,
+                () -> trusting.decryptPayload(created.context(), seal(created.context(), "{\"alts\":7}"), 0));
+    }
+
+    @Test
+    void nullEntriesInACallersListAreDroppedOnEncrypt() throws Exception {
+        SharedVault.CreatedRepo created = trusting.createRepo(alice, alts("v1"));
+        List<AltAccount> withNull = new ArrayList<>(alts("kept"));
+        withNull.add(null);
+
+        EncryptedEnvelope envelope = trusting.encryptPayload(created.context(), withNull);
+
+        assertEquals(alts("kept"), trusting.decryptPayload(created.context(), envelope, 0));
+    }
+
+    @Test
+    void aNullMemberEntryInAManifestDoesNotBreakLookup() throws Exception {
+        SharedVault.CreatedRepo created = trusting.createRepo(alice, alts("v1"));
+        List<MemberEntry> members = new ArrayList<>();
+        members.add(null);
+        members.add(created.manifest().members().get(0));
+        VaultManifest served = withMembers(created.manifest(), members);
+
+        assertNotEquals(null, trusting.openRepo(served, alice));
+        assertThrows(VaultException.class, () -> trusting.openRepo(served, bob));
+        assertThrows(VaultException.class, () -> trusting.rotateKey(created.context(), alts("v2"), served));
     }
 
     /** Seals arbitrary plaintext exactly as a member holding the data key could. */

@@ -44,7 +44,7 @@ public record VaultManifest(
      */
     public MemberEntry findMember(String ed25519PublicKey) {
         for (MemberEntry entry : members) {
-            if (entry.ed25519PublicKey().equals(ed25519PublicKey)) {
+            if (entry != null && entry.ed25519PublicKey().equals(ed25519PublicKey)) {
                 return entry;
             }
         }

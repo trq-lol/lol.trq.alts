@@ -2,6 +2,7 @@ package lol.trq.alts.vault;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonParseException;
 import com.google.gson.annotations.SerializedName;
 import java.nio.charset.StandardCharsets;
 import java.security.PublicKey;
@@ -271,7 +272,8 @@ public final class SharedVault {
      *     to forbid rollback, or 0 to allow any)
      * @return the decrypted alts
      * @throws CryptoException if decryption fails (wrong key or tampering)
-     * @throws VaultException if the repo id or key epoch mismatches, or the version is rolled back
+     * @throws VaultException if the repo id or key epoch mismatches, the version is rolled back, or the
+     *     envelope or its payload is malformed
      */
     public List<AltAccount> decryptPayload(RepoContext ctx, EncryptedEnvelope env, long expectedMinVersion)
             throws CryptoException, VaultException {
@@ -285,13 +287,15 @@ public final class SharedVault {
         if (env.payloadVersion() < expectedMinVersion) {
             throw new VaultException("payload rollback: " + env.payloadVersion() + " < " + expectedMinVersion);
         }
-        byte[] iv = Base64.getDecoder().decode(env.iv());
-        byte[] ciphertext = Base64.getDecoder().decode(env.ciphertext());
+        byte[] iv = decodeEnvelope(env.iv(), "iv");
+        byte[] ciphertext = decodeEnvelope(env.ciphertext(), "ciphertext");
         byte[] aad = PayloadCipher.aad(env.repoId(), env.payloadVersion(), env.keyEpoch());
         byte[] plaintext = PayloadCipher.decrypt(ctx.dataKey().secretKey(), iv, aad, ciphertext);
         VaultPayload payload;
         try {
             payload = GSON.fromJson(new String(plaintext, StandardCharsets.UTF_8), VaultPayload.class);
+        } catch (JsonParseException e) {
+            throw new VaultException("payload is not a well-formed alt list", e);
         } finally {
             Arrays.fill(plaintext, (byte) 0);
         }
@@ -491,6 +495,17 @@ public final class SharedVault {
         return Base64.getEncoder().encodeToString(X25519.encodePublicKey(x25519Public));
     }
 
+    private static byte[] decodeEnvelope(String base64, String what) throws VaultException {
+        if (base64 == null) {
+            throw new VaultException("envelope " + what + " is missing");
+        }
+        try {
+            return Base64.getDecoder().decode(base64);
+        } catch (IllegalArgumentException e) {
+            throw new VaultException("envelope " + what + " is not Base64", e);
+        }
+    }
+
     private EncryptedEnvelope encrypt(
             String repoId,
             long version,
@@ -516,11 +531,15 @@ public final class SharedVault {
     /**
      * Applies the repository's refresh-token policy to a list of alts. Stripping happens on both write
      * and read: on write so the credential never reaches the server, and on read so a peer running a
-     * modified build cannot push tokens into a repository whose policy forbids them.
+     * modified build cannot push tokens into a repository whose policy forbids them. A null element
+     * (which a peer can put in a payload) carries nothing and is dropped rather than dereferenced.
      */
     private static List<AltAccount> applyPolicy(List<AltAccount> alts, boolean shareRefreshTokens) {
         List<AltAccount> copy = new ArrayList<>(alts.size());
         for (AltAccount alt : alts) {
+            if (alt == null) {
+                continue;
+            }
             copy.add(shareRefreshTokens ? alt : alt.withTokens(alt.accessToken(), null, 0L));
         }
         return copy;
