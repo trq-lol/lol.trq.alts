@@ -179,10 +179,17 @@ final class StoreFile {
 
     /**
      * Returns the file to the state of a process that never installed a key provider and never loaded:
-     * no host key, no migration, no recorded failure, and nothing waiting to be written. For tests only,
-     * which is why it is not reachable from outside this package.
+     * no host key, no migration, no recorded failure, and nothing waiting to be written. For tests only:
+     * it is not reachable from outside this package, and is refused unless the JVM was started for tests
+     * (the build's test task sets the {@code lol.trq.alts.testSeams} system property), because removing
+     * the host key is what sends the next write out under the machine-derived one.
+     *
+     * @throws IllegalStateException outside the test suite
      */
     void resetForTests() {
+        if (!Boolean.getBoolean("lol.trq.alts.testSeams")) {
+            throw new IllegalStateException("test seams are disabled outside the test suite");
+        }
         synchronized (ioLock) {
             synchronized (pendingLock) {
                 pending = null;

@@ -8,8 +8,7 @@ import java.nio.file.Path;
 import java.util.List;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
-import lol.trq.alts.net.HttpUtil;
-import lol.trq.alts.net.IoExecutor;
+import lol.trq.alts.net.NetTestHooks;
 import lol.trq.alts.spi.StoreKeyProvider;
 import lol.trq.alts.store.AltStore;
 import lol.trq.alts.store.SecretStore;
@@ -44,8 +43,8 @@ class AltsRuntimeStoreKeyTest {
         SecretStore.flush();
         SecretStore.writeDelay(null);
         StoreTestHooks.reset();
-        HttpUtil.resetForTests();
-        IoExecutor.resetForTests();
+        NetTestHooks.resetHttp();
+        NetTestHooks.resetExecutor();
     }
 
     private AltsRuntime.Builder<Object> builder() {

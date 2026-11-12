@@ -54,11 +54,16 @@ public final class IoExecutor {
     }
 
     /**
-     * Restores the virtual-thread default. For tests, which share this static across classes.
+     * Restores the virtual-thread default. For tests, which share this static across classes; neither
+     * public nor usable outside the test suite, since {@link #bind(Executor)} deliberately never undoes
+     * a host's choice.
      *
-     * @since 0.12.0
+     * @throws IllegalStateException outside the test suite
      */
-    public static void resetForTests() {
+    static void resetForTests() {
+        if (!Boolean.getBoolean("lol.trq.alts.testSeams")) {
+            throw new IllegalStateException("test seams are disabled outside the test suite");
+        }
         override = null;
     }
 }

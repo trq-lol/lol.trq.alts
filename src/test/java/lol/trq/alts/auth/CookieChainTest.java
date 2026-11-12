@@ -15,6 +15,7 @@ import java.util.Map;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
 import lol.trq.alts.auth.MicrosoftAuthUtil.AuthFlowException;
 import lol.trq.alts.net.HttpUtil;
+import lol.trq.alts.net.NetTestHooks;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.net.ProxyRoute;
 import org.junit.jupiter.api.AfterEach;
@@ -47,7 +48,7 @@ class CookieChainTest {
     @AfterEach
     void tearDown() {
         // Static, so leaving a provider installed would route every later test through it.
-        HttpUtil.resetForTests();
+        NetTestHooks.resetHttp();
     }
 
     private static String landing() {

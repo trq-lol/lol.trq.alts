@@ -119,15 +119,34 @@ public final class HttpUtil {
     }
 
     /**
-     * Removes the installed proxy provider, returning every request to direct. The one deliberate way
-     * to do that: {@link #bind(ProxyProvider)} ignores {@code null}. For tests, which share this static
-     * across classes and must not leave a provider pointing at a closed socket.
+     * Removes the installed proxy provider, returning every request to direct, and drops a substituted
+     * TLS factory. {@link #bind(ProxyProvider)} ignores {@code null}, so this is the only way to do
+     * either, and it exists for tests alone: they share this static across classes and must not leave a
+     * provider pointing at a closed socket. Removing the provider is exactly the fail-open a host
+     * installs one to rule out, so this is neither public nor usable outside the test suite.
      *
-     * @since 0.12.0
+     * @throws IllegalStateException outside the test suite
      */
-    public static void resetForTests() {
+    static void resetForTests() {
+        requireTestSeams();
         proxyProvider = null;
-        tlsSocketFactoryForTests(null);
+        tlsOverride = null;
+        synchronized (TUNNEL_FACTORIES) {
+            TUNNEL_FACTORIES.clear();
+        }
+    }
+
+    /**
+     * Refuses a test-only seam unless the JVM was started for tests, which the build's test task says
+     * by setting the {@code lol.trq.alts.testSeams} system property. Each of those seams undoes
+     * something a host relies on, so none of them may be a lever in a running application.
+     *
+     * @throws IllegalStateException if the property is not set to {@code true}
+     */
+    private static void requireTestSeams() {
+        if (!Boolean.getBoolean("lol.trq.alts.testSeams")) {
+            throw new IllegalStateException("test seams are disabled outside the test suite");
+        }
     }
 
     /**
@@ -288,12 +307,14 @@ public final class HttpUtil {
 
     /**
      * Substitutes the factory that layers TLS, so a test can trust a certificate it generated for a
-     * loopback origin. Package-private and test-only: production always uses the JVM's default trust,
-     * and hostname verification stays on either way.
+     * loopback origin. Package-private and refused outside the test suite: production always uses the
+     * JVM's default trust, and hostname verification stays on either way.
      *
      * @param factory the factory to use, or null to restore the JVM default
+     * @throws IllegalStateException outside the test suite
      */
     static void tlsSocketFactoryForTests(SSLSocketFactory factory) {
+        requireTestSeams();
         tlsOverride = factory;
         synchronized (TUNNEL_FACTORIES) {
             TUNNEL_FACTORIES.clear();

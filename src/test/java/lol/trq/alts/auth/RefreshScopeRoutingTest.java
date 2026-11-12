@@ -18,6 +18,7 @@ import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.net.HttpUtil;
+import lol.trq.alts.net.NetTestHooks;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.net.ProxyRoute;
 import org.junit.jupiter.api.AfterEach;
@@ -53,7 +54,7 @@ class RefreshScopeRoutingTest {
     @AfterEach
     void tearDown() {
         // Static, so leaving it installed would route every later test through this recorder.
-        HttpUtil.resetForTests();
+        NetTestHooks.resetHttp();
         chain.close();
     }
 

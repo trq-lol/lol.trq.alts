@@ -8,8 +8,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import lol.trq.alts.model.GameStats;
-import lol.trq.alts.net.HttpUtil;
-import lol.trq.alts.net.IoExecutor;
+import lol.trq.alts.net.NetTestHooks;
 import lol.trq.alts.spi.StaticGameStatsSource;
 import lol.trq.alts.store.AltStore;
 import lol.trq.alts.store.SecretStore;
@@ -28,8 +27,8 @@ class AltsRuntimeGameStatsTest {
         AltStore.writeDelay(null);
         SecretStore.flush();
         SecretStore.writeDelay(null);
-        HttpUtil.resetForTests();
-        IoExecutor.resetForTests();
+        NetTestHooks.resetHttp();
+        NetTestHooks.resetExecutor();
     }
 
     private static AltsRuntime.Builder<Object> baseBuilder(Path dir) {

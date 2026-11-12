@@ -3,6 +3,7 @@ package lol.trq.alts.store;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -250,6 +251,24 @@ class StoreKeyProviderTest {
         reload();
 
         assertTrue(holds(UUID) && holds(OTHER_UUID), "and from here on writes land again");
+    }
+
+    @Test
+    void outsideTheTestSuiteAnInstalledKeyCannotBeRemoved() throws Exception {
+        AltStore.keyProvider(HOST_KEY);
+        AltStore.addAccount(alex());
+        System.clearProperty("lol.trq.alts.testSeams");
+        try {
+            assertThrows(IllegalStateException.class, StoreTestHooks::reset);
+        } finally {
+            System.setProperty("lol.trq.alts.testSeams", "true");
+        }
+
+        AltStore.addAccount(steve());
+
+        assertFalse(
+                StoreTestHooks.opensUnderMachineKey(storeFile(), KEY_BINDING),
+                "the reset is a test seam; in an application it must not be a way to drop the host key");
     }
 
     @Test

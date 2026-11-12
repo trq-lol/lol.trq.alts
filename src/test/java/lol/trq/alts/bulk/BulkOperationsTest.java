@@ -18,6 +18,7 @@ import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.net.HttpUtil;
+import lol.trq.alts.net.NetTestHooks;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -63,7 +64,7 @@ class BulkOperationsTest {
     /** One test here installs a proxy provider to watch the scopes; it must not outlive the test. */
     @AfterEach
     void resetTransport() {
-        HttpUtil.resetForTests();
+        NetTestHooks.resetHttp();
     }
 
     @Test
@@ -461,7 +462,7 @@ class BulkOperationsTest {
         volatile String retryAfter;
 
         EntitlementServer() throws java.io.IOException {
-            HttpUtil.resetForTests();
+            NetTestHooks.resetHttp();
             server = com.sun.net.httpserver.HttpServer.create(
                     new java.net.InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), 0), 0);
             server.createContext("/entitlements/mcstore", exchange -> {
@@ -512,7 +513,7 @@ class BulkOperationsTest {
         @Override
         public void close() {
             server.stop(0);
-            HttpUtil.resetForTests();
+            NetTestHooks.resetHttp();
         }
     }
 

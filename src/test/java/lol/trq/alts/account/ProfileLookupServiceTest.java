@@ -21,7 +21,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
-import lol.trq.alts.net.HttpUtil;
+import lol.trq.alts.net.NetTestHooks;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,7 +49,7 @@ class ProfileLookupServiceTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        HttpUtil.resetForTests();
+        NetTestHooks.resetHttp();
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/", exchange -> {
             String path = exchange.getRequestURI().getRawPath();

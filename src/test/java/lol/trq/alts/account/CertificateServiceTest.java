@@ -15,7 +15,7 @@ import java.security.Signature;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
-import lol.trq.alts.net.HttpUtil;
+import lol.trq.alts.net.NetTestHooks;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -62,7 +62,7 @@ class CertificateServiceTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        HttpUtil.resetForTests();
+        NetTestHooks.resetHttp();
         server = new LoopbackServices();
     }
 

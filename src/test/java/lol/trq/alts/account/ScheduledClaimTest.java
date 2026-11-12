@@ -14,7 +14,7 @@ import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import lol.trq.alts.net.HttpUtil;
+import lol.trq.alts.net.NetTestHooks;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,7 +36,7 @@ class ScheduledClaimTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        HttpUtil.resetForTests();
+        NetTestHooks.resetHttp();
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/", exchange -> {
             if ("PUT".equals(exchange.getRequestMethod())) {

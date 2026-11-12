@@ -24,6 +24,7 @@ import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.net.IoExecutor;
+import lol.trq.alts.net.NetTestHooks;
 import lol.trq.alts.skin.SkinAvatarCache;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,7 +55,7 @@ class HostExecutorAdoptionTest {
 
     @AfterEach
     void restoreDefault() {
-        IoExecutor.resetForTests();
+        NetTestHooks.resetExecutor();
     }
 
     /** Records the current thread if it is not one of the host's. */

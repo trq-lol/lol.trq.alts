@@ -59,6 +59,9 @@ tasks.withType(Javadoc).configureEach {
 
 tasks.named('test') {
     useJUnitPlatform()
+    // The library's test-only seams (dropping the proxy provider, the store key, the TLS trust) refuse
+    // to work unless the JVM says it is running the test suite.
+    systemProperty 'lol.trq.alts.testSeams', 'true'
 }
 
 tasks.named('jar') {
