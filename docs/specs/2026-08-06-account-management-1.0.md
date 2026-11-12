@@ -4,6 +4,27 @@ Status: the management surface shipped in 0.11.0; 1.0.0 finalizes it
 Date: 2026-08-06
 Release: 0.11.0 (the surface, additive) then 1.0.0 (freeze)
 
+**Status as of 0.12.0 (2026-11-12).** This note records where the plan below stands; the record itself
+is left as written.
+
+- *Shipped in 0.12.0:* device-code login (`loginDeviceCode`, §F), the bulk entitlement sweep
+  (`bulk().entitlementsAll`), and the removal of the deprecated
+  `AccountNetworkUtil.fetchProfileFromToken` overloads. 0.12.0 also added services this record did not
+  plan: player attributes, the chat-signing certificate, the blocklist, profile creation, and public
+  profile lookup.
+- *Decided:* username and password login is not built. That is a decision, not a deferral.
+- *Remaining before the 1.0 API freeze:*
+  1. The process-global static stores and transport. `AltStore`, `SecretStore`, the proxy provider,
+     the executor and the store key are statics behind the runtime, so two runtimes in one process
+     share them. They need to become state the runtime owns.
+  2. The public surface. Implementation classes and utilities that are public today need to move behind
+     an internal package, and the jar needs a module descriptor in place of the automatic module name.
+  3. One error model. Sign-in reports a `LoginResult`, check and refresh an `AccountStatus`, the
+     account services throw `AccountException`, and the vault throws `CryptoException` and
+     `VaultException`. These need to be reconciled into one.
+  4. A shared-vault protocol revision with signed key wraps and signed manifests, so that the vault
+     resists a malicious server and not only a passive one. This changes the wire format.
+
 **What shipped in 0.11.0, and how it differs from this record.** The whole `account/` surface — profile,
 entitlements, name (availability, eligibility, change, scheduled claim), skin, cape — plus `time/` and
 `XstsError`, all additive. Two deviations, both improvements: the full profile is a new `PlayerProfile`
