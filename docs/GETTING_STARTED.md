@@ -22,7 +22,7 @@ dependencies {
 }
 ```
 
-Replace `VERSION` with a release tag without its `v`, for example `0.12.0`. Releases up to 0.11.1 were
+Replace `VERSION` with the release tag, for example `v0.12.0`. Releases up to 0.11.1 were
 published under the repository's previous owner and are not served under this coordinate.
 
 The library needs Java 25 and is pure JDK plus Gson. Gson is a compile-time API dependency: you get it

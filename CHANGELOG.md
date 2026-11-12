@@ -16,8 +16,8 @@ read the upgrade notes first.
 Every item here is a break or a change in behaviour that a host has to act on or at least know about.
 
 - **Dependency coordinate.** The repository moved to the `trq-lol` organisation and JitPack coordinates
-  follow the repository owner, so the dependency is now `com.github.trq-lol:lol.trq.alts:0.12.0`. The
-  previous coordinate serves releases up to 0.11.1 only.
+  follow the repository owner, so the dependency is now `com.github.trq-lol:lol.trq.alts`, with the
+  release tag as the version. The previous coordinate serves releases up to 0.11.1 only.
 - **Removed API.** `AccountNetworkUtil.fetchProfileFromToken(String)` and
   `fetchProfileFromToken(String, String)`, deprecated since 0.8.0, are removed. Use
   `fetchProfile(token, profileUrl, scope)`, which returns the status alongside the identity.

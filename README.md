@@ -31,7 +31,7 @@ The device-code route and the cookie route were tested against loopback and scri
 
 [![](https://jitpack.io/v/trq-lol/lol.trq.alts.svg)](https://jitpack.io/#trq-lol/lol.trq.alts)
 
-The coordinate is `com.github.trq-lol:lol.trq.alts`. Replace `VERSION` with a release tag without its `v`, for example `0.12.0`. Releases up to 0.11.1 were published under the repository's previous owner and are not served under this coordinate.
+The coordinate is `com.github.trq-lol:lol.trq.alts`. Replace `VERSION` with the release tag, for example `v0.12.0`. Releases up to 0.11.1 were published under the repository's previous owner and are not served under this coordinate.
 
 <details>
 <summary>Gradle (Groovy)</summary>
