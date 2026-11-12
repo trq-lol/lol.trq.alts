@@ -269,7 +269,7 @@ public class AltLoginServiceImpl implements AltLoginService {
             }
             MinecraftProfile profile;
             try {
-                profile = CookieAuthUtil.authenticate(cookieData);
+                profile = CookieAuthUtil.authenticate(cookieData, microsoftAuth, null);
             } catch (Exception e) {
                 return classifiedFailure("Cookie Auth", e);
             }
