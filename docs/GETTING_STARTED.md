@@ -15,7 +15,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.github.trqlmao:lol.trq.alts:VERSION'
+    implementation 'com.github.trq-lol:lol.trq.alts:VERSION'
 }
 ```
 

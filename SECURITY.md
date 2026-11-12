@@ -6,7 +6,7 @@ The latest released version on the `main` branch receives security updates.
 
 ## Reporting a vulnerability
 
-Please report security vulnerabilities privately via [GitHub Security Advisories](https://github.com/trqlmao/lol.trq.alts/security/advisories/new) rather than opening a public issue.
+Please report security vulnerabilities privately via [GitHub Security Advisories](https://github.com/trq-lol/lol.trq.alts/security/advisories/new) rather than opening a public issue.
 
 We aim to acknowledge reports within 72 hours and to ship a fix or mitigation as quickly as the severity warrants.
 

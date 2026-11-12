@@ -1,7 +1,7 @@
 # lol.trq.alts
 
-[![](https://jitpack.io/v/trqlmao/lol.trq.alts.svg)](https://jitpack.io/#trqlmao/lol.trq.alts)
-[![Build](https://github.com/trqlmao/lol.trq.alts/actions/workflows/build.yml/badge.svg)](https://github.com/trqlmao/lol.trq.alts/actions/workflows/build.yml)
+[![](https://jitpack.io/v/trq-lol/lol.trq.alts.svg)](https://jitpack.io/#trq-lol/lol.trq.alts)
+[![Build](https://github.com/trq-lol/lol.trq.alts/actions/workflows/build.yml/badge.svg)](https://github.com/trq-lol/lol.trq.alts/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > Drop-in Minecraft account-manager core for Fabric mods: auth, encrypted local storage, and async player data, all host-agnostic.
@@ -24,7 +24,7 @@
 
 ## Installation
 
-[![](https://jitpack.io/v/trqlmao/lol.trq.alts.svg)](https://jitpack.io/#trqlmao/lol.trq.alts)
+[![](https://jitpack.io/v/trq-lol/lol.trq.alts.svg)](https://jitpack.io/#trq-lol/lol.trq.alts)
 
 <details>
 <summary>Gradle (Groovy)</summary>
@@ -35,7 +35,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.github.trqlmao:lol.trq.alts:VERSION'
+    implementation 'com.github.trq-lol:lol.trq.alts:VERSION'
 }
 ```
 </details>
@@ -49,7 +49,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.trqlmao:lol.trq.alts:VERSION")
+    implementation("com.github.trq-lol:lol.trq.alts:VERSION")
 }
 ```
 </details>
