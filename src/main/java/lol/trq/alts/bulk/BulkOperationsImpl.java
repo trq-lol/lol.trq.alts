@@ -211,9 +211,11 @@ public final class BulkOperationsImpl implements BulkOperations {
         };
     }
 
-    // A login result carries no stated wait, so a throttled import is recognised by its reason alone.
+    // The stated wait travels with the result, so an import that chooses to wait a limit out waits as
+    // long as the service asked rather than guessing.
     private static Attempt toAttempt(LoginResult result) {
-        return new Attempt(result.success(), result.account(), result.reason(), result.message(), null, null);
+        return new Attempt(
+                result.success(), result.account(), result.reason(), result.message(), result.retryAfter(), null);
     }
 
     private static Attempt toAttempt(AccountStatus status) {

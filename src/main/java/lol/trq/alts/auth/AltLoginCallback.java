@@ -1,5 +1,6 @@
 package lol.trq.alts.auth;
 
+import java.time.Duration;
 import lol.trq.alts.model.AltAccount;
 
 /**
@@ -100,10 +101,34 @@ public interface AltLoginCallback {
      * @param reason the machine-readable cause, {@link FailureReason#NONE} on success; added in 0.6.0
      * @param xstsError why Xbox Live refused to authorize the account, or {@code null} when the attempt
      *     did not fail at that step; added in 0.12.0
+     * @param retryAfter how long the service asked the caller to wait before trying again, or
+     *     {@code null} when it stated no wait — which a rate limit may also do; added in 0.12.0
      * @author trq
      * @since 0.1.0
      */
-    record LoginResult(boolean success, String message, AltAccount account, FailureReason reason, XstsError xstsError) {
+    record LoginResult(
+            boolean success,
+            String message,
+            AltAccount account,
+            FailureReason reason,
+            XstsError xstsError,
+            Duration retryAfter) {
+
+        /**
+         * Creates a result that carries no stated wait. Kept so construction with five arguments still
+         * compiles.
+         *
+         * @param success whether the authentication was successful
+         * @param message a descriptive message
+         * @param account the authenticated account object, or null if the attempt failed
+         * @param reason the machine-readable cause
+         * @param xstsError why Xbox Live refused, or {@code null} when it did not
+         * @since 0.12.0
+         */
+        public LoginResult(
+                boolean success, String message, AltAccount account, FailureReason reason, XstsError xstsError) {
+            this(success, message, account, reason, xstsError, null);
+        }
 
         /**
          * Creates a result that carries no Xbox Live refusal. This is the canonical constructor as it
@@ -116,7 +141,19 @@ public interface AltLoginCallback {
          * @since 0.12.0
          */
         public LoginResult(boolean success, String message, AltAccount account, FailureReason reason) {
-            this(success, message, account, reason, null);
+            this(success, message, account, reason, null, null);
+        }
+
+        /**
+         * Returns whether the attempt failed because the service is rate limiting. True for a throttle
+         * whether or not it came with a stated wait; {@link #retryAfter()} carries the wait when one
+         * was stated.
+         *
+         * @return true if the reason is {@link FailureReason#RATE_LIMITED}
+         * @since 0.12.0
+         */
+        public boolean rateLimited() {
+            return reason == FailureReason.RATE_LIMITED;
         }
 
         /**
@@ -162,6 +199,23 @@ public interface AltLoginCallback {
          */
         public static LoginResult failure(String message, FailureReason cause, XstsError xstsError) {
             return new LoginResult(false, message, null, cause, xstsError);
+        }
+
+        /**
+         * Creates a failed login result carrying the wait the service asked for, so a caller working
+         * through many credentials knows how long to hold off rather than only that it should.
+         *
+         * @param message the human-readable reason why the authentication failed
+         * @param cause the classified cause, for hosts that branch on the outcome
+         * @param xstsError why Xbox Live refused, or {@code null} when it did not
+         * @param retryAfter how long the service asked the caller to wait, or {@code null} when it
+         *     stated no wait
+         * @return a new result indicating failure
+         * @since 0.12.0
+         */
+        public static LoginResult failure(
+                String message, FailureReason cause, XstsError xstsError, Duration retryAfter) {
+            return new LoginResult(false, message, null, cause, xstsError, retryAfter);
         }
     }
 }

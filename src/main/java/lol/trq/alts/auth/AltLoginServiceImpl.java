@@ -128,7 +128,10 @@ public class AltLoginServiceImpl implements AltLoginService {
                         return finalizeLogin(profile.username(), profile.uuid(), cleanToken, AccountType.SESSION, mode);
                     }
                     return AltLoginCallback.LoginResult.failure(
-                            AltAccountServiceImpl.messageFor(profile), AltAccountServiceImpl.reasonFor(profile));
+                            AltAccountServiceImpl.messageFor(profile),
+                            AltAccountServiceImpl.reasonFor(profile),
+                            null,
+                            profile.retryAfter());
                 },
                 IoExecutor.executor());
     }
@@ -240,7 +243,7 @@ public class AltLoginServiceImpl implements AltLoginService {
         if (classified != null) {
             XstsError xstsError = classified instanceof MicrosoftAuthUtil.XstsAuthException xsts ? xsts.error() : null;
             return AltLoginCallback.LoginResult.failure(
-                    label + ": " + classified.getMessage(), classified.reason(), xstsError);
+                    label + ": " + classified.getMessage(), classified.reason(), xstsError, classified.retryAfter());
         }
 
         Throwable cause = failure;
@@ -374,7 +377,8 @@ public class AltLoginServiceImpl implements AltLoginService {
         return accounts.refresh(account)
                 .thenApply(status -> status.usable()
                         ? inject(status.account())
-                        : AltLoginCallback.LoginResult.failure(status.message(), status.reason()));
+                        : AltLoginCallback.LoginResult.failure(
+                                status.message(), status.reason(), null, status.retryAfter()));
     }
 
     /**
@@ -434,7 +438,8 @@ public class AltLoginServiceImpl implements AltLoginService {
         } else {
             reason = FailureReason.NETWORK;
         }
-        return AltLoginCallback.LoginResult.failure("Refresh: " + MicrosoftAuthUtil.describe(cause), reason);
+        return AltLoginCallback.LoginResult.failure(
+                "Refresh: " + MicrosoftAuthUtil.describe(cause), reason, null, rejection.retryAfter());
     }
 
     /**
