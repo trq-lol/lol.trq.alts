@@ -5,7 +5,8 @@ import com.google.gson.GsonBuilder;
 
 /**
  * The whole post-login account surface, built over one live Minecraft access token. Hands out the
- * focused services — profile, entitlements, name, skin, cape — each of which a host can hold on its own.
+ * focused services — profile, entitlements, name, skin, cape, player attributes, chat-signing
+ * certificates, the privacy blocklist — each of which a host can hold on its own.
  *
  * <p>Construct one per account from its access token. Nothing here installs a session or touches the
  * account store; these operate directly on the account the token belongs to.
@@ -24,6 +25,7 @@ public final class AccountServices {
     private final CapeService cape;
     private final PlayerAttributesService attributes;
     private final CertificateService certificates;
+    private final BlocklistService blocklist;
 
     private AccountServices(String token, String accountUuid, AccountEndpoints endpoints) {
         AccountHttp http = new AccountHttp(token, accountUuid);
@@ -34,6 +36,7 @@ public final class AccountServices {
         this.cape = new CapeServiceImpl(http, endpoints, GSON, this.profile);
         this.attributes = new PlayerAttributesServiceImpl(http, endpoints);
         this.certificates = new CertificateServiceImpl(http, endpoints);
+        this.blocklist = new BlocklistServiceImpl(http, endpoints);
     }
 
     /**
@@ -130,5 +133,15 @@ public final class AccountServices {
      */
     public CertificateService certificates() {
         return certificates;
+    }
+
+    /**
+     * Returns the privacy-blocklist service.
+     *
+     * @return the blocklist service
+     * @since 0.12.0
+     */
+    public BlocklistService blocklist() {
+        return blocklist;
     }
 }

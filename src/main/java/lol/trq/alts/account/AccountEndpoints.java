@@ -70,6 +70,10 @@ public record AccountEndpoints(String base) {
         return base + "/player/certificates";
     }
 
+    String blocklist() {
+        return base + "/privacy/blocklist";
+    }
+
     /**
      * Encodes a caller-supplied value as one path segment. Concatenated raw, a name carrying a slash, a
      * question mark, or a fragment marker would address a different endpoint than the one the caller
