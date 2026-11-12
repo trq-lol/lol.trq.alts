@@ -3,6 +3,7 @@ package lol.trq.alts;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Executor;
 import lol.trq.alts.account.AccountEndpoints;
 import lol.trq.alts.account.AccountServices;
 import lol.trq.alts.auth.AltAccountService;
@@ -15,6 +16,7 @@ import lol.trq.alts.cache.AsyncCache;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.GameStats;
 import lol.trq.alts.net.HttpUtil;
+import lol.trq.alts.net.IoExecutor;
 import lol.trq.alts.skin.SkinAvatarCache;
 import lol.trq.alts.spi.AvatarSource;
 import lol.trq.alts.spi.GameStatsSource;
@@ -64,6 +66,7 @@ public final class AltsRuntime<H> {
 
         // Bound first: everything below it that can reach the network must already know how to.
         HttpUtil.bind(builder.proxyProvider);
+        IoExecutor.bind(builder.executor);
 
         AltStore.bind(builder.vaultDirectory);
         AltStore.configure(builder.storeFileName, builder.storeKeyBinding);
@@ -261,6 +264,7 @@ public final class AltsRuntime<H> {
         private VaultTransportResolver vaultTransportResolver;
         private ProxyProvider proxyProvider;
         private AvatarSource avatarSource;
+        private Executor executor;
         private String storeFileName;
         private String storeKeyBinding;
         private String secretsFileName;
@@ -400,6 +404,21 @@ public final class AltsRuntime<H> {
          */
         public Builder<H> proxyProvider(ProxyProvider value) {
             this.proxyProvider = value;
+            return this;
+        }
+
+        /**
+         * Sets the executor the library runs its blocking work on (optional; defaults to one virtual
+         * thread per task, so a request parked on a slow endpoint holds no platform thread). Install one
+         * to bound concurrency or to propagate the host's own context. It is reachable afterwards as
+         * {@link IoExecutor#executor()}.
+         *
+         * @param value the host executor, or null to keep the default
+         * @return this builder
+         * @since 0.12.0
+         */
+        public Builder<H> executor(Executor value) {
+            this.executor = value;
             return this;
         }
 
