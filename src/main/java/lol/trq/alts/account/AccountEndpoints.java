@@ -62,6 +62,10 @@ public record AccountEndpoints(String base) {
         return base + "/minecraft/profile/capes/active";
     }
 
+    String playerAttributes() {
+        return base + "/player/attributes";
+    }
+
     /**
      * Encodes a caller-supplied value as one path segment. Concatenated raw, a name carrying a slash, a
      * question mark, or a fragment marker would address a different endpoint than the one the caller

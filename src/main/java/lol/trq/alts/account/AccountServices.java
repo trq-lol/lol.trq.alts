@@ -22,6 +22,7 @@ public final class AccountServices {
     private final NameService name;
     private final SkinService skin;
     private final CapeService cape;
+    private final PlayerAttributesService attributes;
 
     private AccountServices(String token, String accountUuid, AccountEndpoints endpoints) {
         AccountHttp http = new AccountHttp(token, accountUuid);
@@ -30,6 +31,7 @@ public final class AccountServices {
         this.name = new NameServiceImpl(http, endpoints, GSON);
         this.skin = new SkinServiceImpl(http, endpoints, GSON);
         this.cape = new CapeServiceImpl(http, endpoints, GSON, this.profile);
+        this.attributes = new PlayerAttributesServiceImpl(http, endpoints);
     }
 
     /**
@@ -59,7 +61,7 @@ public final class AccountServices {
     }
 
     /**
-     * Returns the full-profile read service.
+     * Returns the profile service — the full read, and creation for an account that has none.
      *
      * @return the profile service
      * @since 1.0.0
@@ -106,5 +108,15 @@ public final class AccountServices {
      */
     public CapeService cape() {
         return cape;
+    }
+
+    /**
+     * Returns the player-attributes service — privileges, preferences, and ban status.
+     *
+     * @return the player-attributes service
+     * @since 0.12.0
+     */
+    public PlayerAttributesService attributes() {
+        return attributes;
     }
 }
