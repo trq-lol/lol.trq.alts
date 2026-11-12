@@ -6,11 +6,14 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -22,8 +25,12 @@ import lol.trq.alts.auth.MicrosoftAuthUtil;
 
 /**
  * A temporary local HTTP server that captures the authorization code returned by Microsoft's OAuth2
- * redirect. Listens on the loopback address only and shuts itself down as soon as the code future
+ * redirect. Listens on the loopback addresses only and shuts itself down as soon as the code future
  * completes, however it completes: with the code, with a failure, on the timeout, or by cancellation.
+ *
+ * <p>The redirect names {@code localhost}, and which address that is belongs to the user's system: some
+ * resolve it to {@code ::1} first. So the server listens on both {@code 127.0.0.1} and {@code ::1}, on
+ * the same port, wherever both exist. A system without one of them is served on the other.
  * The client id, scope, authorize endpoint, and callback path all come from the host-supplied
  * {@link MicrosoftAuthConfig}.
  *
@@ -39,6 +46,9 @@ public class MicrosoftCallbackServer {
     /** Ports to attempt binding, in order of preference. */
     private static final int[] PORTS = {59125, 25585, 25575, 25565, 0};
 
+    /** How many times an ephemeral port is drawn before giving up on finding one free on every address. */
+    private static final int EPHEMERAL_ATTEMPTS = 8;
+
     /** How long the user has to finish signing in before the login is abandoned. */
     private static final long TIMEOUT_MINUTES = 5;
 
@@ -47,7 +57,7 @@ public class MicrosoftCallbackServer {
     private final String codeChallenge;
     private final Consumer<String> browser;
     private final CompletableFuture<String> codeFuture = new CompletableFuture<>();
-    private volatile HttpServer server;
+    private volatile List<HttpServer> servers = List.of();
     private int boundPort;
 
     /**
@@ -94,9 +104,11 @@ public class MicrosoftCallbackServer {
         codeFuture.whenCompleteAsync((code, failure) -> stop(), IoExecutor.executor());
         try {
             bindToAvailablePort();
-            server.createContext(config.redirectPath(), this::handleCallback);
-            server.setExecutor(null);
-            server.start();
+            for (HttpServer listener : servers) {
+                listener.createContext(config.redirectPath(), this::handleCallback);
+                listener.setExecutor(null);
+                listener.start();
+            }
 
             // The timer is cancelled as soon as the future completes, so nothing outlives the login.
             codeFuture.orTimeout(TIMEOUT_MINUTES, TimeUnit.MINUTES);
@@ -131,23 +143,83 @@ public class MicrosoftCallbackServer {
     }
 
     /**
-     * Attempts to bind the server to the first available port in {@link #PORTS}, on the loopback
-     * address explicitly so the listener is never reachable from another machine.
+     * Binds a listener on every loopback address the system has, all on the first port in
+     * {@link #PORTS} that is free on each of them. Loopback addresses are named explicitly so the
+     * listener is never reachable from another machine.
      *
-     * @throws IOException if the server cannot bind to any of the specified ports
+     * <p>A port is taken only when every available loopback address could be bound to it. Settling for
+     * one would leave the other to whatever else is listening there, and the browser, not the library,
+     * chooses which one {@code localhost} means.
+     *
+     * @throws IOException if no port could be bound on the loopback addresses
      */
     private void bindToAvailablePort() throws IOException {
-        HttpServer created = HttpServer.create();
+        List<InetAddress> loopbacks = availableLoopbacks();
+        if (loopbacks.isEmpty()) {
+            throw new IOException("No loopback address available");
+        }
         for (int port : PORTS) {
-            try {
-                created.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 0);
-                boundPort = created.getAddress().getPort();
-                server = created;
-                return;
-            } catch (IOException ignored) {
+            int attempts = port == 0 ? EPHEMERAL_ATTEMPTS : 1;
+            for (int attempt = 0; attempt < attempts; attempt++) {
+                List<HttpServer> bound = bindAll(loopbacks, port);
+                if (bound != null) {
+                    boundPort = bound.get(0).getAddress().getPort();
+                    servers = bound;
+                    return;
+                }
             }
         }
         throw new IOException("No ports available");
+    }
+
+    /**
+     * Binds one listener per address, all on the same port.
+     *
+     * @param addresses the loopback addresses to listen on
+     * @param port the port to bind, or 0 to let the first address draw one for all of them
+     * @return the bound listeners, or null when the port was not free on every address
+     * @throws IOException if a listener cannot be created at all
+     */
+    private static List<HttpServer> bindAll(List<InetAddress> addresses, int port) throws IOException {
+        List<HttpServer> bound = new ArrayList<>(addresses.size());
+        int chosen = port;
+        for (InetAddress address : addresses) {
+            HttpServer listener = HttpServer.create();
+            try {
+                listener.bind(new InetSocketAddress(address, chosen), 0);
+            } catch (IOException taken) {
+                for (HttpServer earlier : bound) {
+                    earlier.stop(0);
+                }
+                return null;
+            }
+            bound.add(listener);
+            chosen = listener.getAddress().getPort();
+        }
+        return List.copyOf(bound);
+    }
+
+    /**
+     * Returns the loopback addresses this system can listen on: {@code 127.0.0.1}, {@code ::1}, or both.
+     * An address family the system does not have is simply left out.
+     *
+     * @return the usable loopback addresses, IPv4 first
+     */
+    private static List<InetAddress> availableLoopbacks() {
+        List<InetAddress> usable = new ArrayList<>(2);
+        byte[][] candidates = {{127, 0, 0, 1}, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}};
+        for (byte[] raw : candidates) {
+            try {
+                InetAddress address = InetAddress.getByAddress(raw);
+                try (ServerSocket probe = new ServerSocket()) {
+                    probe.bind(new InetSocketAddress(address, 0));
+                }
+                usable.add(address);
+            } catch (IOException | RuntimeException unavailable) {
+                // No such address family here; the other one carries the redirect.
+            }
+        }
+        return usable;
     }
 
     /**
@@ -273,8 +345,7 @@ public class MicrosoftCallbackServer {
 
     /** Forcefully stops the HTTP server, releasing its port. Safe to call more than once. */
     public void stop() {
-        HttpServer running = server;
-        if (running != null) {
+        for (HttpServer running : servers) {
             running.stop(0);
         }
     }

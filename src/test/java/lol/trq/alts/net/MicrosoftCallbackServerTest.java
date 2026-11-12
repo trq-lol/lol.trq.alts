@@ -159,6 +159,48 @@ class MicrosoftCallbackServerTest {
         assertEquals(url, server.authorizationUrl());
     }
 
+    /**
+     * The redirect names localhost, and the browser decides which address that is. Whichever it picks,
+     * the request has to reach this server rather than nothing, or some other program on that port.
+     */
+    @Test
+    void theRedirectReachesTheServerOnEveryAddressLocalhostResolvesTo() throws Exception {
+        for (InetAddress address : InetAddress.getAllByName("localhost")) {
+            String host = address instanceof java.net.Inet6Address
+                    ? "[" + address.getHostAddress() + "]"
+                    : address.getHostAddress();
+            HttpURLConnection connection = (HttpURLConnection)
+                    URI.create("http://" + host + ":" + port() + PATH).toURL().openConnection(java.net.Proxy.NO_PROXY);
+            connection.setConnectTimeout(5_000);
+            connection.setReadTimeout(5_000);
+            try {
+                assertEquals(400, connection.getResponseCode(), "no answer from the callback server on " + address);
+            } finally {
+                connection.disconnect();
+            }
+        }
+    }
+
+    @Test
+    void theIpv6LoopbackCarriesTheRedirectToo() throws Exception {
+        InetAddress v6 = InetAddress.getByName("::1");
+        try (java.net.ServerSocket probe = new java.net.ServerSocket()) {
+            probe.bind(new InetSocketAddress(v6, 0));
+        } catch (IOException noIpv6) {
+            assumeTrue(false, "this system has no IPv6 loopback");
+        }
+
+        HttpURLConnection connection =
+                (HttpURLConnection) URI.create("http://[::1]:" + port() + PATH + "?code=real-code&state=" + STATE)
+                        .toURL()
+                        .openConnection(java.net.Proxy.NO_PROXY);
+        connection.setConnectTimeout(5_000);
+        connection.setReadTimeout(5_000);
+
+        assertEquals(200, connection.getResponseCode());
+        assertEquals("real-code", code.get(5, TimeUnit.SECONDS));
+    }
+
     @Test
     void theListenerIsBoundToLoopbackOnly() throws Exception {
         InetAddress external = firstNonLoopbackAddress();
