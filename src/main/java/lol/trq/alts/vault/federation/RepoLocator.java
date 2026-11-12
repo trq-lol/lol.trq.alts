@@ -96,6 +96,9 @@ public record RepoLocator(
             if (decoded == null || decoded.host == null || decoded.repoId == null) {
                 throw new IllegalArgumentException("malformed repo locator token");
             }
+            // The token is pasted in from someone else: reject a host or id that is not a clean address
+            // here, rather than when a resolver is about to dial it.
+            decoded.toRepoAddress();
             return decoded;
         } catch (IllegalArgumentException e) {
             throw e;

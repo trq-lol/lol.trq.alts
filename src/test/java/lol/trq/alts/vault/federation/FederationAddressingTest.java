@@ -66,4 +66,87 @@ class FederationAddressingTest {
         assertNull(decoded.issuerJwksUrl());
         assertEquals("avp://h/r", decoded.toRepoAddress().toUri());
     }
+
+    @Test
+    void repoAddressRejectsUserinfoInTheHost() {
+        // A naive resolver would connect to evil.example while the address reads as good.example.
+        assertThrows(IllegalArgumentException.class, () -> RepoAddress.parse("avp://good.example@evil.example/x"));
+        assertThrows(IllegalArgumentException.class, () -> new RepoAddress("good.example@evil.example", "x"));
+        assertThrows(IllegalArgumentException.class, () -> new RepoAddress("user:pw@vault.example", "x"));
+    }
+
+    @Test
+    void repoAddressRejectsHostsThatAreNotAPlainAuthority() {
+        for (String host : new String[] {
+            " ",
+            "vault.example ",
+            "vault example",
+            "vault..example",
+            ".vault.example",
+            "vault.example.",
+            "-vault.example",
+            "vault-.example",
+            "vault_host.example",
+            "vault.example?x=1",
+            "vault.example#frag",
+            "vault.example\\evil.example",
+            "vault.example%2e",
+            "vault.example:",
+            "vault.example:0",
+            "vault.example:65536",
+            "vault.example:80:80",
+            "vault.example:8o",
+            "[::1",
+            "[]",
+            "[vault.example]",
+            "[::1]8443",
+            "[::1]:",
+            "b\u00fccher.example",
+            "vault.example\n"
+        }) {
+            assertThrows(IllegalArgumentException.class, () -> new RepoAddress(host, "repo"), host);
+        }
+    }
+
+    @Test
+    void repoAddressAcceptsNamesAddressesAndPorts() {
+        for (String host : new String[] {
+            "h",
+            "localhost",
+            "vault.example",
+            "Vault.Example",
+            "xn--bcher-kva.example",
+            "a-b.c-d.example:1",
+            "vault.example:65535",
+            "192.0.2.10",
+            "192.0.2.10:8443",
+            "[::1]",
+            "[2001:db8::1]:8443",
+            "[::ffff:192.0.2.10]"
+        }) {
+            assertEquals(host, RepoAddress.parse("avp://" + host + "/repo").host());
+        }
+    }
+
+    @Test
+    void repoAddressValidatesTheRepoIdSegment() {
+        for (String repoId : new String[] {
+            " ", "a b", "a/b", "..", ".", "a?b", "a#b", "a@b", "a%2fb", "a\\b", "a\tb", "r\u00e9po", "x".repeat(257)
+        }) {
+            assertThrows(IllegalArgumentException.class, () -> new RepoAddress("vault.example", repoId), repoId);
+        }
+        assertThrows(IllegalArgumentException.class, () -> RepoAddress.parse("avp://vault.example/a/b"));
+        assertEquals("Repo_9.v2~x-1", new RepoAddress("vault.example", "Repo_9.v2~x-1").repoId());
+        assertEquals("x".repeat(256), new RepoAddress("vault.example", "x".repeat(256)).repoId());
+    }
+
+    @Test
+    void repoLocatorRejectsATokenNamingAnUnsafeHost() {
+        String json = "{\"v\":1,\"host\":\"good.example@evil.example\",\"repoId\":\"x\",\"keyEpoch\":0}";
+        String token = java.util.Base64.getUrlEncoder()
+                .withoutPadding()
+                .encodeToString(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        assertThrows(IllegalArgumentException.class, () -> RepoLocator.decode(token));
+    }
 }
