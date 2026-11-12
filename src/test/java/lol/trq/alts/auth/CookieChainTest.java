@@ -157,11 +157,55 @@ class CookieChainTest {
     @Test
     void aShorterOrLongerChainStillEndsAtTheToken() throws Exception {
         ScriptedHops shorter = new ScriptedHops();
-        shorter.firstHopTarget = "https://login.live.com/a";
-        shorter.redirects.put("https://login.live.com/a", landing());
+        shorter.firstHopTarget = "https://sisu.xboxlive.com/callback?code=abc";
+        shorter.redirects.put("https://sisu.xboxlive.com/callback?code=abc", landing());
 
         assertEquals(landing(), CookieAuthUtil.followChain(List.of(), shorter));
         assertEquals(2, shorter.fetched.size());
+    }
+
+    @Test
+    void aTokenIsAcceptedOnlyFromTheServiceThatStartedTheSignIn() {
+        ScriptedHops hops = new ScriptedHops();
+        hops.firstHopTarget = "https://login.live.com/a";
+        hops.redirects.put("https://login.live.com/a", "https://elsewhere.example/open-redirect");
+        hops.redirects.put("https://elsewhere.example/open-redirect", landing());
+
+        AuthFlowException failure =
+                assertThrows(AuthFlowException.class, () -> CookieAuthUtil.followChain(List.of(), hops));
+
+        assertFalse(
+                failure.getMessage().contains("accessToken"),
+                "a bundle handed over by a host that is not the issuer is refused, and not quoted");
+
+        ScriptedHops live = new ScriptedHops();
+        live.firstHopTarget = "https://login.live.com/a";
+        live.redirects.put("https://login.live.com/a", landing());
+
+        assertThrows(
+                AuthFlowException.class,
+                () -> CookieAuthUtil.followChain(List.of(), live),
+                "not even a host the chain legitimately visits may end it");
+    }
+
+    @Test
+    void aRedirectRelativeToTheCurrentPathIsResolvedAgainstIt() throws Exception {
+        ScriptedHops hops = new ScriptedHops();
+        hops.firstHopTarget = "https://login.live.com/oauth/start?x=1";
+        hops.redirects.put("https://login.live.com/oauth/start?x=1", "continue?step=2");
+        hops.redirects.put("https://login.live.com/oauth/continue?step=2", "../finish");
+        hops.redirects.put("https://login.live.com/finish", "//sisu.xboxlive.com/callback?code=abc");
+        hops.redirects.put("https://sisu.xboxlive.com/callback?code=abc", landing());
+
+        assertEquals(landing(), CookieAuthUtil.followChain(List.of(), hops));
+        assertEquals(
+                List.of(
+                        "https://login.live.com/oauth/start?x=1",
+                        "https://login.live.com/oauth/continue?step=2",
+                        "https://login.live.com/finish",
+                        "https://sisu.xboxlive.com/callback?code=abc"),
+                hops.fetched.subList(1, hops.fetched.size()),
+                "a Location is relative to the address that sent it, with or without a leading slash");
     }
 
     @Test

@@ -80,6 +80,12 @@ public final class CookieAuthUtil {
     /** The query or fragment parameter the last redirect carries the token bundle in. */
     private static final String ACCESS_TOKEN_PARAM = "accessToken=";
 
+    /**
+     * The only host whose redirect may end the chain with a token bundle: the one the chain starts at.
+     * Derived from the start address so the two cannot drift apart.
+     */
+    private static final String TOKEN_ISSUER_HOST = URI.create(SISU_START).getHost();
+
     /** The relying party whose XSTS token Minecraft services accept. */
     private static final String MINECRAFT_RELYING_PARTY = "rp://api.minecraftservices.com/";
 
@@ -189,11 +195,24 @@ public final class CookieAuthUtil {
                 throw new AuthFlowException("Cookie sign-in did not redirect", FailureReason.INVALID_TOKEN);
             }
             if (next.contains(ACCESS_TOKEN_PARAM)) {
+                // The bundle is only as good as whoever handed it over. The chain passes through hosts
+                // that take a return address as a parameter, so "some hop redirected to an address with
+                // a token in it" proves nothing; the service that started the sign-in is the one that
+                // ends it.
+                if (!TOKEN_ISSUER_HOST.equalsIgnoreCase(target.getHost())) {
+                    throw new AuthFlowException(
+                            "Cookie sign-in produced a token from an unexpected host", FailureReason.UNKNOWN);
+                }
                 return next;
             }
-            url = next.startsWith("/")
-                    ? target.resolve(next.replace(" ", "%20")).toString()
-                    : next;
+            // Resolved against the address that answered, whatever form the redirect took: absolute,
+            // rooted at the host, or relative to the current path.
+            try {
+                url = target.resolve(next.replace(" ", "%20")).toString();
+            } catch (IllegalArgumentException unparseable) {
+                throw new AuthFlowException(
+                        "Cookie sign-in redirected to an unreadable address", FailureReason.UNKNOWN);
+            }
         }
         // The usual cause is cookies that no longer sign in: the chain loops through the sign-in page.
         throw new AuthFlowException("Cookie sign-in never produced a token", FailureReason.INVALID_TOKEN);
