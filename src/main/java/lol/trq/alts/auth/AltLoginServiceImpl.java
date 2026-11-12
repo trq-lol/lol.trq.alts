@@ -15,11 +15,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
 import lol.trq.alts.auth.MicrosoftAuthUtil.AuthFlowException;
+import lol.trq.alts.auth.MicrosoftAuthUtil.DeviceCodeTiming;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.model.SessionData;
 import lol.trq.alts.net.NetworkScope;
+import lol.trq.alts.spi.DeviceCodePrompt;
 import lol.trq.alts.spi.SessionInjector;
 import lol.trq.alts.store.AltStore;
 
@@ -42,6 +44,9 @@ public class AltLoginServiceImpl implements AltLoginService {
     private final MicrosoftAuthConfig microsoftAuth;
     private final Clock clock;
     private final AltAccountService accounts;
+
+    // Replaced in tests so a device-code login's polling does not wait out real intervals.
+    DeviceCodeTiming deviceCodeTiming = DeviceCodeTiming.STANDARD;
 
     /**
      * Creates a login service that installs resolved sessions through the given injector.
@@ -142,7 +147,8 @@ public class AltLoginServiceImpl implements AltLoginService {
     }
 
     /**
-     * Initiates the Microsoft OAuth2 authentication flow via a local callback server.
+     * Initiates the Microsoft OAuth2 authentication flow via a local callback server. Cancelling the
+     * returned future shuts the callback server down and releases its port.
      *
      * @param mode the login mode
      * @return a future containing the result of the login attempt
@@ -153,9 +159,54 @@ public class AltLoginServiceImpl implements AltLoginService {
             return CompletableFuture.completedFuture(AltLoginCallback.LoginResult.failure(
                     "Microsoft login not configured", FailureReason.NOT_CONFIGURED));
         }
-        return MicrosoftAuthUtil.authenticate(microsoftAuth)
+        return interactive(MicrosoftAuthUtil.authenticate(microsoftAuth), "Microsoft Auth", mode);
+    }
+
+    /**
+     * Initiates the device-code sign-in: the host shows the code through {@code prompt} and the library
+     * polls until the user approves it, declines it, or it expires. Cancelling the returned future stops
+     * the polling.
+     *
+     * <p>Start this only on an explicit user action and always display the real verification address;
+     * see {@link DeviceCodePrompt} for why.
+     *
+     * @param prompt the host seam that shows the user the code and the verification address
+     * @param mode the login mode
+     * @return a future containing the result of the login attempt
+     * @since 0.12.0
+     */
+    @Override
+    public CompletableFuture<AltLoginCallback.LoginResult> loginDeviceCode(DeviceCodePrompt prompt, LoginMode mode) {
+        if (microsoftAuth == null) {
+            return CompletableFuture.completedFuture(AltLoginCallback.LoginResult.failure(
+                    "Microsoft login not configured", FailureReason.NOT_CONFIGURED));
+        }
+        if (prompt == null) {
+            return CompletableFuture.completedFuture(
+                    AltLoginCallback.LoginResult.failure("No device code prompt given", FailureReason.NOT_CONFIGURED));
+        }
+        return interactive(
+                MicrosoftAuthUtil.authenticateWithDeviceCode(microsoftAuth, prompt, deviceCodeTiming),
+                "Device code",
+                mode);
+    }
+
+    /**
+     * Finishes an interactive Microsoft sign-in: stores and installs the account on success, classifies
+     * the failure otherwise, and passes a cancellation of the returned future back to the sign-in so
+     * that whatever it started (a callback server, a polling loop) stops.
+     *
+     * @param authentication the running sign-in
+     * @param label the route's name, prefixed to a failure message
+     * @param mode the login mode
+     * @return a future containing the result of the login attempt
+     */
+    private CompletableFuture<AltLoginCallback.LoginResult> interactive(
+            CompletableFuture<MinecraftProfile> authentication, String label, LoginMode mode) {
+        CompletableFuture<AltLoginCallback.LoginResult> result = authentication
                 .thenApply(profile -> finalizeLogin(profile, AccountType.MICROSOFT, mode))
-                .exceptionally(failure -> classifiedFailure("Microsoft Auth", failure));
+                .exceptionally(failure -> classifiedFailure(label, failure));
+        return MicrosoftAuthUtil.cancelling(result, authentication);
     }
 
     /**

@@ -1,23 +1,28 @@
 package lol.trq.alts.auth;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.google.gson.annotations.SerializedName;
 import java.awt.Desktop;
 import java.io.Serial;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.time.Instant;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
 import lol.trq.alts.net.HttpUtil;
 import lol.trq.alts.net.MicrosoftCallbackServer;
 import lol.trq.alts.net.NetworkScope;
+import lol.trq.alts.spi.DeviceCodePrompt;
 
 /**
  * Orchestrates the multi-step OAuth 2.0 and Xbox Live authentication flow, exchanging an
@@ -33,6 +38,14 @@ public final class MicrosoftAuthUtil {
 
     /** The scope for a flow that has no account yet: a fresh interactive login or a credential import. */
     private static final NetworkScope NO_ACCOUNT = NetworkScope.of(NetworkScope.Purpose.AUTH);
+
+    /** The grant type a device code is redeemed with. */
+    private static final String DEVICE_CODE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
+
+    /** How many polls in a row may fail to get an answer before the device-code login gives up. */
+    private static final int MAX_UNANSWERED_POLLS = 3;
+
+    private static final Gson GSON = new Gson();
 
     private MicrosoftAuthUtil() {}
 
@@ -73,6 +86,292 @@ public final class MicrosoftAuthUtil {
         }
         return exchangeRefreshForToken(config, refreshToken, NO_ACCOUNT)
                 .thenCompose(tokens -> completeFrom(config, tokens, NO_ACCOUNT));
+    }
+
+    /**
+     * Signs in with the OAuth device-authorization grant: the host shows the user a short code and an
+     * address, the user enters the code in any browser on any device, and the library polls until the
+     * sign-in is approved, declined, or expires. No loopback port and no local browser are involved, so
+     * it works on a headless or locked-down machine.
+     *
+     * <p>The library never opens a browser for this flow and never prints the code; presenting it is
+     * entirely the {@link DeviceCodePrompt}'s job. Polling honours the interval the service advertises
+     * and lengthens it by five seconds each time the service answers {@code slow_down}.
+     *
+     * <p>Cancelling the returned future stops the polling.
+     *
+     * <p><strong>Phishing.</strong> A device code signs in whoever started the flow. Start it only on an
+     * explicit action by the user, and always show the real verification address; see
+     * {@link DeviceCodePrompt}.
+     *
+     * @param config the host's Microsoft authentication configuration (client id, scope, endpoints)
+     * @param prompt the host seam that shows the user the code and the verification address
+     * @return a future containing the final {@link MinecraftProfile} on success
+     * @throws NullPointerException if {@code config} or {@code prompt} is null
+     * @since 0.12.0
+     */
+    public static CompletableFuture<MinecraftProfile> authenticateWithDeviceCode(
+            MicrosoftAuthConfig config, DeviceCodePrompt prompt) {
+        return authenticateWithDeviceCode(config, prompt, DeviceCodeTiming.STANDARD);
+    }
+
+    // Exists so the polling can be exercised in tests without waiting out real five-second intervals.
+    static CompletableFuture<MinecraftProfile> authenticateWithDeviceCode(
+            MicrosoftAuthConfig config, DeviceCodePrompt prompt, DeviceCodeTiming timing) {
+        Objects.requireNonNull(config, "config");
+        Objects.requireNonNull(prompt, "prompt");
+        Objects.requireNonNull(timing, "timing");
+
+        CompletableFuture<MsTokens> tokens = new CompletableFuture<>();
+        CompletableFuture.runAsync(() -> {
+            try {
+                startDeviceCode(config, prompt, timing, tokens);
+            } catch (Throwable failure) {
+                tokens.completeExceptionally(failure);
+            }
+        });
+        return cancelling(tokens.thenCompose(issued -> completeFrom(config, issued, NO_ACCOUNT)), tokens);
+    }
+
+    /**
+     * Requests a device code, hands it to the host, and schedules the first poll.
+     *
+     * @param config the host's Microsoft authentication configuration
+     * @param prompt the host seam that shows the challenge
+     * @param timing how advertised seconds map onto real delays
+     * @param tokens the future the polling completes
+     */
+    private static void startDeviceCode(
+            MicrosoftAuthConfig config,
+            DeviceCodePrompt prompt,
+            DeviceCodeTiming timing,
+            CompletableFuture<MsTokens> tokens) {
+        String body = "client_id=" + encode(config.clientId()) + "&scope=" + encode(config.scope());
+        HttpUtil.HttpResponse response = send(
+                "Device code request",
+                () -> HttpUtil.postFormForStatus(config.deviceCodeUrl(), null, body, NO_ACCOUNT));
+
+        DeviceAuthorization issued;
+        try {
+            issued = GSON.fromJson(response.body(), DeviceAuthorization.class);
+        } catch (RuntimeException malformed) {
+            throw unexpected("Device code request", malformed);
+        }
+        if (issued == null
+                || isBlank(issued.deviceCode())
+                || isBlank(issued.userCode())
+                || isBlank(issued.verificationUri())) {
+            throw unexpected("Device code request", null);
+        }
+
+        long lifetimeSeconds = issued.expiresIn() > 0 ? issued.expiresIn() : DeviceCodeTiming.DEFAULT_LIFETIME_SECONDS;
+        long intervalSeconds = issued.interval() > 0 ? issued.interval() : DeviceCodeTiming.DEFAULT_INTERVAL_SECONDS;
+        long lifetimeMillis = lifetimeSeconds * timing.secondMillis();
+
+        // A cancellation that landed while the request was in flight: do not show a code nobody is
+        // waiting on.
+        if (tokens.isDone()) {
+            return;
+        }
+        try {
+            prompt.show(
+                    issued.userCode(), issued.verificationUri(), Instant.now().plusMillis(lifetimeMillis));
+        } catch (RuntimeException promptFailure) {
+            throw new AuthFlowException("Device code prompt failed", FailureReason.UNKNOWN, promptFailure);
+        }
+
+        new DeviceCodePoll(
+                        config,
+                        issued.deviceCode(),
+                        System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(lifetimeMillis),
+                        intervalSeconds * timing.secondMillis(),
+                        timing.slowDownMillis(),
+                        tokens)
+                .schedule();
+    }
+
+    /**
+     * One device-code login's polling loop. Each poll is its own scheduled task, so no thread sleeps
+     * between them, and each one first checks whether the login is still wanted, which is what makes a
+     * cancelled future stop the polling rather than merely stop listening to it.
+     */
+    private static final class DeviceCodePoll implements Runnable {
+
+        private final MicrosoftAuthConfig config;
+        private final String deviceCode;
+        private final long deadlineNanos;
+        private final long slowDownMillis;
+        private final CompletableFuture<MsTokens> tokens;
+        private long intervalMillis;
+        private int unanswered;
+
+        DeviceCodePoll(
+                MicrosoftAuthConfig config,
+                String deviceCode,
+                long deadlineNanos,
+                long intervalMillis,
+                long slowDownMillis,
+                CompletableFuture<MsTokens> tokens) {
+            this.config = config;
+            this.deviceCode = deviceCode;
+            this.deadlineNanos = deadlineNanos;
+            this.intervalMillis = intervalMillis;
+            this.slowDownMillis = slowDownMillis;
+            this.tokens = tokens;
+        }
+
+        void schedule() {
+            CompletableFuture.delayedExecutor(intervalMillis, TimeUnit.MILLISECONDS)
+                    .execute(this);
+        }
+
+        @Override
+        public void run() {
+            if (tokens.isDone()) {
+                return;
+            }
+            try {
+                poll();
+            } catch (Throwable failure) {
+                tokens.completeExceptionally(failure);
+            }
+        }
+
+        private void poll() {
+            if (System.nanoTime() - deadlineNanos >= 0) {
+                throw new AuthFlowException("Device code expired before it was used", FailureReason.TIMED_OUT);
+            }
+
+            HttpUtil.HttpResponse response;
+            try {
+                String body = "grant_type=" + encode(DEVICE_CODE_GRANT) + "&client_id=" + encode(config.clientId())
+                        + "&device_code=" + encode(deviceCode);
+                response = HttpUtil.postFormForStatus(config.deviceTokenUrl(), null, body, NO_ACCOUNT);
+            } catch (Exception transportFailure) {
+                unanswered(unreachable("Device code poll", transportFailure));
+                return;
+            }
+
+            JsonObject json = response.body();
+            if (response.successful() && json != null && json.has("access_token")) {
+                tokens.complete(new MsTokens(stringOrNull(json, "access_token"), stringOrNull(json, "refresh_token")));
+                return;
+            }
+
+            String error = json == null ? null : stringOrNull(json, "error");
+            switch (error == null ? "" : error) {
+                case "authorization_pending" -> again();
+                case "slow_down" -> slowDown();
+                case "authorization_declined", "access_denied" ->
+                    throw new AuthFlowException("Device code sign-in was declined", FailureReason.DECLINED);
+                case "expired_token" ->
+                    throw new AuthFlowException("Device code expired before it was used", FailureReason.TIMED_OUT);
+                case "bad_verification_code" ->
+                    throw new AuthFlowException("Device code was not recognised", FailureReason.INVALID_TOKEN);
+                default -> {
+                    if (response.rateLimited()) {
+                        slowDown();
+                    } else if (response.status() >= 500 || response.status() == 408) {
+                        unanswered(stepFailure("Device code poll", response));
+                    } else {
+                        throw stepFailure("Device code poll", response);
+                    }
+                }
+            }
+        }
+
+        private void again() {
+            unanswered = 0;
+            schedule();
+        }
+
+        private void slowDown() {
+            intervalMillis += slowDownMillis;
+            again();
+        }
+
+        // A dropped connection or a 5xx says nothing about the code, and the user may be halfway through
+        // typing it, so one bad poll must not end the login. A run of them means the service is gone.
+        private void unanswered(AuthFlowException failure) {
+            if (++unanswered >= MAX_UNANSWERED_POLLS) {
+                throw failure;
+            }
+            schedule();
+        }
+    }
+
+    /**
+     * How the seconds a device-code response advertises map onto real delays. Production uses
+     * {@link #STANDARD}; tests shrink the second so a slow-down can be observed without waiting for one.
+     *
+     * @param secondMillis how many milliseconds one advertised second lasts
+     * @param slowDownMillis how much a {@code slow_down} answer lengthens the polling interval
+     */
+    record DeviceCodeTiming(long secondMillis, long slowDownMillis) {
+
+        /** Real time: a second is a second, and {@code slow_down} adds the five the grant specifies. */
+        static final DeviceCodeTiming STANDARD = new DeviceCodeTiming(1000L, 5000L);
+
+        /** The polling interval assumed when the service advertises none. */
+        static final long DEFAULT_INTERVAL_SECONDS = 5L;
+
+        /** The code lifetime assumed when the service advertises none. */
+        static final long DEFAULT_LIFETIME_SECONDS = 900L;
+    }
+
+    /**
+     * The device-authorization response.
+     *
+     * @param deviceCode the secret the library redeems; never shown to the user
+     * @param userCode the short code the user types
+     * @param verificationUri the address the user types it at
+     * @param expiresIn the code's lifetime in seconds
+     * @param interval the minimum number of seconds between polls
+     * @param message the service's own instructions for the user, unused
+     */
+    private record DeviceAuthorization(
+            @SerializedName("device_code") String deviceCode,
+            @SerializedName("user_code") String userCode,
+            @SerializedName("verification_uri") String verificationUri,
+            @SerializedName("expires_in") long expiresIn,
+            @SerializedName("interval") long interval,
+            @SerializedName("message") String message) {
+
+        // The device code is a bearer credential until it expires, and the message embeds the user code.
+        @Override
+        public String toString() {
+            return "DeviceAuthorization[deviceCode=" + redacted(deviceCode) + ", userCode=" + redacted(userCode)
+                    + ", verificationUri=" + verificationUri + ", expiresIn=" + expiresIn + ", interval=" + interval
+                    + ", message=" + redacted(message) + "]";
+        }
+    }
+
+    /**
+     * Returns a future mirroring {@code chain} whose cancellation also cancels {@code source}. A stage
+     * derived with {@code thenCompose} does not pass a cancellation back up to the stage it came from,
+     * so without this a caller cancelling a login would stop waiting for it while the callback server or
+     * the polling it started carried on.
+     *
+     * @param chain the stage whose outcome the returned future mirrors
+     * @param source the stage to cancel when the returned future is cancelled
+     * @param <T> the result type
+     * @return the mirroring future
+     */
+    static <T> CompletableFuture<T> cancelling(CompletableFuture<T> chain, CompletableFuture<?> source) {
+        CompletableFuture<T> result = new CompletableFuture<>();
+        chain.whenComplete((value, failure) -> {
+            if (failure != null) {
+                result.completeExceptionally(failure);
+            } else {
+                result.complete(value);
+            }
+        });
+        result.whenComplete((value, failure) -> {
+            if (result.isCancelled()) {
+                source.cancel(true);
+            }
+        });
+        return result;
     }
 
     /**
@@ -485,6 +784,10 @@ public final class MicrosoftAuthUtil {
 
     private static String encode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     private static String stringOrNull(JsonObject json, String key) {

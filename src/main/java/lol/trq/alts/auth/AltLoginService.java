@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
+import lol.trq.alts.spi.DeviceCodePrompt;
 
 /**
  * Contract for Minecraft account authentication services. Provides asynchronous methods to log into
@@ -22,6 +23,33 @@ public interface AltLoginService {
      * @return a future containing the result of the login attempt
      */
     CompletableFuture<AltLoginCallback.LoginResult> loginMicrosoft(LoginMode mode);
+
+    /**
+     * Initiates authentication through the OAuth device-authorization grant: the host shows the user a
+     * short code and an address through {@code prompt}, the user enters the code in any browser on any
+     * device, and the library polls until the sign-in is approved, declined, or expires. It needs no
+     * loopback port and no local browser, so it is the interactive route for a headless or locked-down
+     * machine. The resulting account carries a refresh token exactly as {@link #loginMicrosoft} does.
+     *
+     * <p>The library never opens a browser for this flow and never prints the code. Cancelling the
+     * returned future stops the polling.
+     *
+     * <p><strong>Phishing.</strong> A device code signs in whoever started the flow, not whoever types
+     * the code. Call this only on an explicit action by the user, and always display the real
+     * verification address the prompt is given.
+     *
+     * <p>The default implementation reports {@code NOT_CONFIGURED}, so an existing implementation of
+     * this interface keeps compiling.
+     *
+     * @param prompt the host seam that shows the user the code and the verification address
+     * @param mode the login mode (whether to add the account to storage)
+     * @return a future containing the result of the login attempt
+     * @since 0.12.0
+     */
+    default CompletableFuture<AltLoginCallback.LoginResult> loginDeviceCode(DeviceCodePrompt prompt, LoginMode mode) {
+        return CompletableFuture.completedFuture(AltLoginCallback.LoginResult.failure(
+                "Device code login is not supported", AltLoginCallback.FailureReason.NOT_CONFIGURED));
+    }
 
     /**
      * Authenticates using raw browser cookie data. Useful for bypassing 2FA if cookies are exported
