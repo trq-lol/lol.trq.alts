@@ -37,6 +37,7 @@ Notes for implementers: the library never imports a host type, and it must never
 - [Refresh-token design](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/docs/specs/2026-07-28-refresh-token-auth.md): Shipped. Why renewal, the sharing policy, and the typed failure reason are shaped the way they are.
 - [Alt-management surface design](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/docs/specs/2026-08-05-alt-management-surface.md): Shipped across 0.8.0 to 0.12.0. Per-account proxies, operating on an account without logging into it, UUID-keyed avatars, entitlement as an outcome, bulk operations, and device-code login.
 - [Account management and the 1.0 surface](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/docs/specs/2026-08-06-account-management-1.0.md): The account services, shipped in 0.11.0 and 0.12.0, with a status note listing what remains before the 1.0 API freeze.
+- [The 1.0 freeze](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/docs/specs/2026-11-12-1.0-freeze.md): Proposed. Runtime-owned state in place of the static stores and transport, one error model, an internal package with a module descriptor, and a vault protocol revision that resists a malicious server.
 
 ## Core source
 
