@@ -21,6 +21,7 @@ import lol.trq.alts.spi.GameStatsSource;
 import lol.trq.alts.spi.MainThreadExecutor;
 import lol.trq.alts.spi.ProxyProvider;
 import lol.trq.alts.spi.SessionInjector;
+import lol.trq.alts.spi.StoreKeyProvider;
 import lol.trq.alts.spi.TextureUploader;
 import lol.trq.alts.spi.ToastSink;
 import lol.trq.alts.spi.VaultDirectoryProvider;
@@ -68,6 +69,13 @@ public final class AltsRuntime<H> {
         AltStore.configure(builder.storeFileName, builder.storeKeyBinding);
         SecretStore.bind(builder.vaultDirectory);
         SecretStore.configure(builder.secretsFileName, builder.secretsKeyBinding);
+
+        // After the bind, which resets both: a host key (when there is one) must be in place before the
+        // load below, and coalesced writes keep a burst of logins from writing the file once each.
+        AltStore.keyProvider(builder.storeKeyProvider);
+        AltStore.writeDelay(AltStore.DEFAULT_WRITE_DELAY);
+        SecretStore.keyProvider(builder.storeKeyProvider);
+        SecretStore.writeDelay(AltStore.DEFAULT_WRITE_DELAY);
         AltsToasts.bind(builder.toastSink);
 
         // Read what is already on disk here, so a host never has to know that binding and loading are two
@@ -257,6 +265,7 @@ public final class AltsRuntime<H> {
         private String storeKeyBinding;
         private String secretsFileName;
         private String secretsKeyBinding;
+        private StoreKeyProvider storeKeyProvider;
 
         /** Creates an empty builder; populate it with the host seams, then call {@link #build()}. */
         public Builder() {}
@@ -441,6 +450,24 @@ public final class AltsRuntime<H> {
          */
         public Builder<H> secretsKeyBinding(String value) {
             this.secretsKeyBinding = value;
+            return this;
+        }
+
+        /**
+         * Sets the store key provider (optional; without one both encrypted stores are sealed under a
+         * key derived from machine properties, as in every release before this seam existed). A host
+         * that can reach a real secret, such as an operating-system keystore entry, supplies it here.
+         * Files written before the provider was installed still load and are rewritten under the
+         * host's key; a file written under a host key does not open without it.
+         *
+         * <p>Note that resolution fails closed once a provider is installed: see {@link StoreKeyProvider}.
+         *
+         * @param value the host store key provider
+         * @return this builder
+         * @since 0.12.0
+         */
+        public Builder<H> storeKeyProvider(StoreKeyProvider value) {
+            this.storeKeyProvider = value;
             return this;
         }
 
