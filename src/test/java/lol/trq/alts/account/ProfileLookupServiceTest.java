@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.google.gson.JsonParser;
+import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetAddress;
@@ -39,8 +41,11 @@ class ProfileLookupServiceTest {
     private ProfileLookupService lookup;
     private final List<String> paths = new CopyOnWriteArrayList<>();
     private final List<String> authorizations = new CopyOnWriteArrayList<>();
+    private final List<List<String>> batches = new CopyOnWriteArrayList<>();
     private volatile int forcedStatus;
     private volatile String forcedRetryAfter;
+    private volatile int forcedFromBatch;
+    private volatile String batchBody;
 
     @BeforeEach
     void setUp() throws IOException {
@@ -50,8 +55,12 @@ class ProfileLookupServiceTest {
             String path = exchange.getRequestURI().getRawPath();
             paths.add(exchange.getRequestMethod() + " " + path);
             authorizations.add(String.valueOf(exchange.getRequestHeaders().getFirst("Authorization")));
-            exchange.getRequestBody().readAllBytes();
+            String sent = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
 
+            if (path.equals("/minecraft/profile/lookup/bulk/byname")) {
+                answerBatch(exchange, sent);
+                return;
+            }
             int status = 404;
             String body = "{\"path\":\"" + path + "\",\"error\":\"NOT_FOUND\",\"errorMessage\":\"Not Found\"}";
             if (forcedStatus != 0) {
@@ -90,6 +99,43 @@ class ProfileLookupServiceTest {
     @AfterEach
     void tearDown() {
         server.stop(0);
+    }
+
+    /** Answers the batch endpoint the way the service does: an array of the names that exist, no more. */
+    private void answerBatch(HttpExchange exchange, String sent) throws IOException {
+        int request = batches.size();
+        List<String> names = new ArrayList<>();
+        JsonParser.parseString(sent).getAsJsonArray().forEach(name -> names.add(name.getAsString()));
+        batches.add(names);
+
+        int status = 200;
+        String body;
+        if (forcedStatus != 0 && request >= forcedFromBatch) {
+            status = forcedStatus;
+            body = "{\"error\":\"X\",\"errorMessage\":\"forced\"}";
+            if (forcedRetryAfter != null) {
+                exchange.getResponseHeaders().add("Retry-After", forcedRetryAfter);
+            }
+        } else if (batchBody != null) {
+            body = batchBody;
+        } else if (names.size() > 10) {
+            status = 400;
+            body = "{\"error\":\"CONSTRAINT_VIOLATION\",\"errorMessage\":\"size must be between 0 and 10\"}";
+        } else {
+            // Reversed, because the service makes no promise about the order it answers in.
+            List<String> found = new ArrayList<>();
+            for (String name : names) {
+                String player = PLAYERS.get(name.toLowerCase(Locale.ROOT));
+                if (player != null) {
+                    found.add(0, player);
+                }
+            }
+            body = "[" + String.join(",", found) + "]";
+        }
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.sendResponseHeaders(status, bytes.length);
+        exchange.getResponseBody().write(bytes);
+        exchange.close();
     }
 
     @Test
@@ -162,8 +208,79 @@ class ProfileLookupServiceTest {
         assertEquals(2, found.size());
         assertEquals("Steve_1", found.get(0).name(), "results keep the order the names were given in");
         assertEquals("Alex", found.get(1).name());
-        assertEquals("069a79f4-44e9-4726-a5be-fca90e38aaf5", found.get(1).uuid());
-        assertEquals(3, paths.size(), "a repeated name is resolved once and an invalid one not at all");
+        assertEquals("069a79f4-44e9-4726-a5be-fca90e38aaf5", found.get(1).uuid(), "ids come back dashed");
+        assertEquals(List.of("POST /minecraft/profile/lookup/bulk/byname"), paths, "one request for the list");
+        assertEquals(
+                List.of(List.of("Steve_1", "Nobody_Here", "alex")),
+                batches,
+                "a repeated name is sent once and an invalid one not at all");
+        assertEquals(List.of("null"), authorizations, "the batch lookup is anonymous too");
+    }
+
+    @Test
+    void aListOfInvalidNamesAloneCostsNoRequest() throws Exception {
+        assertTrue(lookup.byNames(Arrays.asList(null, "", "ab", "has space", "../x"))
+                .isEmpty());
+
+        assertTrue(paths.isEmpty());
+    }
+
+    /** The endpoint refuses more than ten names, so a longer list is split rather than refused. */
+    @Test
+    void aLongListIsSentTenNamesAtATime() throws Exception {
+        List<String> names = new ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+            names.add("Player_" + i);
+        }
+        names.add("Steve_1");
+        names.addAll(List.of("Other_1", "Other_2", "Other_3", "Other_4", "Other_5", "Other_6", "Other_7"));
+        names.add("alex");
+        names.add("PLAYER_3");
+
+        List<PublicProfile> found = lookup.byNames(names);
+
+        assertEquals(List.of(10, 10, 1), batches.stream().map(List::size).toList());
+        assertEquals(2, found.size());
+        assertEquals("Steve_1", found.get(0).name(), "order follows the input across batches");
+        assertEquals("Alex", found.get(1).name());
+    }
+
+    /**
+     * A limit on the second request must not read as "the rest of those players do not exist", and the
+     * caller needs the stated wait to know when to come back.
+     */
+    @Test
+    void aRateLimitPartWayThroughAListFailsTheCallWithTheStatedWait() {
+        forcedStatus = 429;
+        forcedRetryAfter = "17";
+        forcedFromBatch = 1;
+        List<String> names = new ArrayList<>();
+        for (int i = 0; i < 25; i++) {
+            names.add("Player_" + i);
+        }
+
+        AccountException limited = assertThrows(AccountException.class, () -> lookup.byNames(names));
+
+        assertTrue(limited.rateLimited());
+        assertEquals(429, limited.status());
+        assertEquals(Duration.ofSeconds(17), limited.retryAfter());
+        assertEquals(2, batches.size(), "the list stops at the limit instead of sending the rest");
+    }
+
+    @Test
+    void aBatchAnswerThatIsNotAListIsAnExceptionNotAnEmptyAnswer() {
+        batchBody = "{\"unexpected\":true}";
+
+        assertThrows(AccountException.class, () -> lookup.byNames(List.of("Alex")));
+    }
+
+    @Test
+    void aBatchAnswerIsReadLeniently() throws Exception {
+        batchBody = "[{\"id\":\"069a79f444e94726a5befca90e38aaf5\",\"name\":\"Alex\"},7,{\"name\":\"NoId\"}]";
+
+        List<PublicProfile> found = lookup.byNames(List.of("Alex", "NoId"));
+
+        assertEquals(List.of(new PublicProfile("069a79f4-44e9-4726-a5be-fca90e38aaf5", "Alex")), found);
     }
 
     @Test
@@ -178,7 +295,7 @@ class ProfileLookupServiceTest {
 
         assertEquals(1, found.size());
         assertEquals("Alex", found.get(0).name());
-        assertEquals(24, paths.size());
+        assertEquals(3, paths.size(), "twenty-four names are three requests, not twenty-four");
         assertTrue(lookup.byNames(List.of()).isEmpty());
         assertTrue(lookup.byNames(null).isEmpty());
     }
@@ -197,6 +314,7 @@ class ProfileLookupServiceTest {
         assertEquals(Duration.ofSeconds(9), single.retryAfter());
         assertTrue(byId.rateLimited());
         assertTrue(list.rateLimited(), "a limited list fails rather than reading as nobody existing");
+        assertEquals(Duration.ofSeconds(9), list.retryAfter());
         assertEquals(3, paths.size(), "the list stops at the limit instead of sending the rest");
     }
 

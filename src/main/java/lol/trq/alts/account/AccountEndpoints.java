@@ -78,6 +78,11 @@ public record AccountEndpoints(String base) {
         return base + "/minecraft/profile/lookup/name/" + segment(name);
     }
 
+    /** The batch lookup, which takes a JSON array of names and answers with an array of the ones that exist. */
+    String lookupByNames() {
+        return base + "/minecraft/profile/lookup/bulk/byname";
+    }
+
     String lookupByUuid(String undashedUuid) {
         return base + "/minecraft/profile/lookup/" + segment(undashedUuid);
     }

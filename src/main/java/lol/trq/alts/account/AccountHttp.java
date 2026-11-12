@@ -145,6 +145,25 @@ final class AccountHttp {
     }
 
     /**
+     * POSTs a JSON body and hands back whatever came, in whatever JSON shape — for the batch lookup,
+     * which answers with a top-level array.
+     *
+     * @param url the target URL
+     * @param json the JSON request body
+     * @param purpose the request purpose
+     * @return the response, successful or not
+     * @throws AccountException only when the service could not be reached
+     */
+    HttpUtil.JsonResponse exchangeElement(String url, String json, NetworkScope.Purpose purpose)
+            throws AccountException {
+        try {
+            return HttpUtil.postJsonForElement(url, auth(), json, scope(purpose));
+        } catch (Exception transport) {
+            throw new AccountException("POST " + describe(url) + ": " + transport.getMessage(), transport);
+        }
+    }
+
+    /**
      * Builds the exception for a rejected response, carrying its status and any stated wait.
      *
      * @param method the HTTP method that was sent

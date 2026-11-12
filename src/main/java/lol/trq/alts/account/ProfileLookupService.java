@@ -67,10 +67,11 @@ public interface ProfileLookupService {
      * one that is not a valid username; a name given more than once, in any capitalisation, is resolved
      * once.
      *
-     * <p>Any number of names is accepted, and each distinct valid one costs a request. A long list is
-     * therefore the caller's to pace: a rate limit part-way through fails the call with an exception
-     * for which {@link AccountException#rateLimited()} is true, rather than returning a partial answer
-     * that reads as "those players do not exist".
+     * <p>Any number of names is accepted. They are sent to the batch endpoint ten at a time, so the
+     * distinct valid names cost one request per ten. A very long list is still the caller's to pace: a
+     * rate limit part-way through fails the call with an exception for which
+     * {@link AccountException#rateLimited()} is true and {@link AccountException#retryAfter()} carries
+     * any stated wait, rather than returning a partial answer that reads as "those players do not exist".
      *
      * @param names the usernames to resolve
      * @return the players found, in the order their names were first given
