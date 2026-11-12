@@ -69,7 +69,13 @@ final class SkinServiceImpl implements SkinService {
 
     @Override
     public void reset() throws AccountException {
-        http.sendJson("DELETE", endpoints.activeSkin(), null, NetworkScope.Purpose.PROFILE);
+        resetToDefault();
+    }
+
+    @Override
+    public PlayerProfile resetToDefault() throws AccountException {
+        JsonObject response = http.sendJson("DELETE", endpoints.activeSkin(), null, NetworkScope.Purpose.PROFILE);
+        return response == null ? null : gson.fromJson(response, PlayerProfile.class);
     }
 
     /**

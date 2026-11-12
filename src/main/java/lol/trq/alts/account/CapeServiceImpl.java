@@ -42,6 +42,12 @@ final class CapeServiceImpl implements CapeService {
 
     @Override
     public void hide() throws AccountException {
-        http.sendJson("DELETE", endpoints.activeCape(), null, NetworkScope.Purpose.PROFILE);
+        hideActive();
+    }
+
+    @Override
+    public PlayerProfile hideActive() throws AccountException {
+        JsonObject response = http.sendJson("DELETE", endpoints.activeCape(), null, NetworkScope.Purpose.PROFILE);
+        return response == null ? null : gson.fromJson(response, PlayerProfile.class);
     }
 }

@@ -71,4 +71,18 @@ public interface SkinService {
      * @since 1.0.0
      */
     void reset() throws AccountException;
+
+    /**
+     * Resets the skin to the default and returns the profile as it stands afterwards, the way the other
+     * mutations here do.
+     *
+     * @return the updated profile, or {@code null} when the service confirmed the reset without sending
+     *     one back
+     * @throws AccountException if the token was refused or the service failed
+     * @since 0.12.0
+     */
+    default PlayerProfile resetToDefault() throws AccountException {
+        reset();
+        return null;
+    }
 }
