@@ -99,8 +99,13 @@ public class AltLoginServiceImpl implements AltLoginService {
 
             String cleanToken = cleanToken(sessionToken);
 
-            // Optimization: try to extract identity from the JWT payload without a network request
-            if (cleanToken.startsWith("eyJ")) {
+            // Optimization: try to extract identity from the JWT payload without a network request.
+            // Only when nothing is being saved: the payload is unsigned text anyone can write, so it is
+            // good enough to try a session with but not to store an identity on, and in ADD mode it
+            // would be merged over whatever account the store already holds under the UUID it claims.
+            // Saving therefore always goes through the profile lookup below, which asks the service who
+            // the token really belongs to.
+            if (mode != LoginMode.ADD && cleanToken.startsWith("eyJ")) {
                 Optional<AltLoginCallback.LoginResult> fastResult = attemptFastJwtLogin(cleanToken, mode);
                 if (fastResult.isPresent()) return fastResult.get();
             }
@@ -481,6 +486,10 @@ public class AltLoginServiceImpl implements AltLoginService {
      * Attempts to extract a username and UUID from a token without network calls by parsing the JWT
      * payload if applicable.
      *
+     * <p>The payload is unverified, so this is only ever used for a login that saves nothing, and only
+     * for a token that states its own expiry: one with no {@code exp} gives no way to tell a live token
+     * from a long-dead one, and is sent to the profile lookup instead.
+     *
      * @param token the JWT string
      * @param mode the login mode
      * @return an optional result if the JWT was valid and contained profile data
@@ -488,7 +497,7 @@ public class AltLoginServiceImpl implements AltLoginService {
     private Optional<AltLoginCallback.LoginResult> attemptFastJwtLogin(String token, LoginMode mode) {
         try {
             long expiry = TokenExpiry.jwtExpiryMillis(token);
-            if (expiry > 0 && clock.millis() >= expiry - TokenExpiry.SKEW_MILLIS) {
+            if (expiry <= 0 || clock.millis() >= expiry - TokenExpiry.SKEW_MILLIS) {
                 return Optional.empty();
             }
 
