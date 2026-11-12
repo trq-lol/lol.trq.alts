@@ -49,9 +49,10 @@ final class NameServiceImpl implements NameService {
         JsonObject body = http.get(endpoints.nameChangeInfo(), NetworkScope.Purpose.PROFILE);
         boolean allowed =
                 body.has("nameChangeAllowed") && body.get("nameChangeAllowed").getAsBoolean();
-        Instant created =
-                parseInstant(body.has("createdAt") ? body.get("createdAt").getAsString() : null);
-        return new NameEligibility(allowed, created);
+        return new NameEligibility(
+                allowed,
+                parseInstant(AccountHttp.string(body, "createdAt")),
+                parseInstant(AccountHttp.string(body, "changedAt")));
     }
 
     @Override
