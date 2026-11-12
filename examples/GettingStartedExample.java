@@ -8,7 +8,9 @@ import lol.trq.alts.account.ClaimOptions;
 import lol.trq.alts.account.Entitlements;
 import lol.trq.alts.account.NameAvailability;
 import lol.trq.alts.account.NameChangeResult;
+import lol.trq.alts.account.PlayerAttributes;
 import lol.trq.alts.account.PlayerProfile;
+import lol.trq.alts.account.PublicProfile;
 import lol.trq.alts.auth.AltLoginCallback;
 import lol.trq.alts.auth.MicrosoftAuthConfig;
 import lol.trq.alts.bulk.BulkEntryResult;
@@ -25,10 +27,18 @@ import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.model.SessionData;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.net.ProxyRoute;
+import lol.trq.alts.spi.DeviceCodePrompt;
 import lol.trq.alts.spi.ProxyProvider;
+import lol.trq.alts.spi.StoreKeyProvider;
 import lol.trq.alts.spi.ToastSink;
 import lol.trq.alts.store.AltStore;
+import lol.trq.alts.vault.RepoContext;
+import lol.trq.alts.vault.RepoPin;
 import lol.trq.alts.vault.SharedVault;
+import lol.trq.alts.vault.VaultException;
+import lol.trq.alts.vault.transport.IssuerSignedKeyBindingVerifier;
+import lol.trq.alts.vault.transport.KeyBindingVerifier;
+import lol.trq.alts.vault.transport.VaultManifest;
 
 /**
  * The compiled companion to {@code docs/GETTING_STARTED.md}. Every snippet that guide shows is a method
@@ -162,8 +172,13 @@ public final class GettingStartedExample {
                     case REAUTH_REQUIRED -> promptMicrosoftLogin(status.account());
                     // Authenticated fine, but there is no Minecraft profile behind it.
                     case NOT_ENTITLED -> showError(status.account().username() + " does not own Minecraft");
-                    // Try again later. Nothing was spent.
-                    case UNREACHABLE -> showRetry(status.message());
+                    // Try again later. Nothing was spent. A rate limit lands here too, and says how long
+                    // to wait when the service named a wait.
+                    case UNREACHABLE ->
+                        showRetry(
+                                status.rateLimited() && status.retryAfter() != null
+                                        ? "Rate limited for " + status.retryAfter()
+                                        : status.message());
                     default -> showError(status.message());
                 }
             });
@@ -222,6 +237,63 @@ public final class GettingStartedExample {
                         showError(failure.label() + ": " + failure.message());
                     }
                 });
+    }
+
+    /**
+     * Section "Logging in with a device code": a sign-in for a host that cannot open a browser or
+     * listen on a port. The library fetches a short code; the host shows it, and the user enters it on
+     * the identity provider's own page from any device.
+     *
+     * @param alts the runtime built by {@link #buildRuntime}
+     */
+    public static void logInWithDeviceCode(AltsRuntime<MyHandle> alts) {
+        // Called once, off the render thread. Show the address exactly as given: the user has to be
+        // able to see that they are typing the code into the identity provider's page and nowhere else.
+        DeviceCodePrompt prompt = (userCode, verificationUri, expiresAt) ->
+                render("Open " + verificationUri + " and enter " + userCode + " before " + expiresAt);
+
+        // Start this only on the user's own action. A device code signs in whoever started the flow,
+        // so a code shown to someone else is a phishing lure.
+        alts.loginService().loginDeviceCode(prompt, LoginMode.ADD).thenAccept(result -> {
+            if (result.success()) {
+                render(result.account().username());
+                return;
+            }
+            switch (result.reason()) {
+                // The user said no. Nothing to retry until they ask again.
+                case DECLINED -> render("Sign-in cancelled");
+                // The code ran out before it was entered; starting again issues a fresh one.
+                case TIMED_OUT -> showRetry("The code expired");
+                // The service asked to be left alone. Wait before starting another.
+                case RATE_LIMITED -> showRetry("Too many attempts; try again shortly");
+                // Signed in, but Xbox Live will not authorize the account; xstsError() says why.
+                case XBOX_DENIED -> showError("Xbox Live refused this account: " + result.xstsError());
+                default -> showError(result.message());
+            }
+        });
+    }
+
+    /**
+     * Section "Protecting the stored file": sealing the stores under a secret the host holds, instead
+     * of under a key derived from machine properties any local process can read.
+     *
+     * @param dataDir the directory the encrypted account file lives in
+     * @param keystore wherever the host keeps a real secret: an OS keystore entry, a hardware-backed key
+     * @return the constructed runtime
+     */
+    public static AltsRuntime<MyHandle> buildRuntimeWithHostKey(Path dataDir, HostKeystore keystore) {
+        // The same bytes every time, and at least StoreKeyProvider.MIN_LENGTH of them. A provider that
+        // throws leaves the stores unreadable and unwritable rather than falling back to the weaker key.
+        StoreKeyProvider storeKey = () -> keystore.loadOrCreate("alts-store-key", 32);
+
+        return new AltsRuntime.Builder<MyHandle>()
+                .sessionInjector(GettingStartedExample::installSession)
+                .vaultDirectory(() -> dataDir)
+                .mainThread(Runnable::run)
+                .toastSink((level, title, description, durationMs) -> show(level, title, description))
+                // Files written before the provider was installed still load, and are rewritten under it.
+                .storeKeyProvider(storeKey)
+                .build();
     }
 
     /**
@@ -297,9 +369,56 @@ public final class GettingStartedExample {
                 // Transient: the service was unreachable or failed. The stored refresh token is
                 // untouched, so offer a retry.
                 case NETWORK -> showRetry(result.message());
+                // Also transient, but the remedy is to wait rather than to try again at once.
+                case RATE_LIMITED -> showRetry("Too many requests; try again shortly");
                 default -> showError(result.message());
             }
         });
+    }
+
+    /**
+     * Section "Shared vault": constructing the facade with a deliberate answer to "whose word do I take
+     * for another member's keys?". There is no default: the data key is wrapped to whatever keys the
+     * verifier returns, so the choice decides whether a hostile server can read the repository.
+     *
+     * @param issuerPublicKey the raw Ed25519 public key of the service that signs members' key bindings
+     * @return the facade
+     * @throws CryptoException if the issuer key is not a valid Ed25519 public key
+     */
+    public static SharedVault sharedVault(byte[] issuerPublicKey) throws CryptoException {
+        // Member keys arrive through a server, so each one must carry a binding signed by an issuer the
+        // host already trusts. A server that swaps a member's key cannot forge that signature.
+        KeyBindingVerifier verifier = IssuerSignedKeyBindingVerifier.ofRawKey(issuerPublicKey);
+
+        // The explicit alternative is KeyBindingVerifier.trustTransport(), which accepts served keys
+        // as they are. Choose it only when the keys did not come from a server you would not trust
+        // with the accounts themselves: you run the server, or the keys were compared out of band.
+        return new SharedVault(new X25519HkdfAesGcmKeyWrap(), verifier);
+    }
+
+    /**
+     * Section "Shared vault": opening a repository against the rollback floor the host stored last
+     * time, and storing the new floor afterwards. Nothing in a served manifest is signed, so without
+     * this a server could hand back an earlier key epoch — one from before a member was removed.
+     *
+     * @param vault the facade from {@link #sharedVault}
+     * @param manifest the manifest the transport served
+     * @param identity this member's unlocked identity
+     * @return the working context
+     * @throws CryptoException if the data key cannot be unwrapped
+     * @throws VaultException if the manifest is older than the stored floor, or this member is not in it
+     */
+    public static RepoContext openPinned(SharedVault vault, VaultManifest manifest, VaultIdentity identity)
+            throws CryptoException, VaultException {
+        // RepoPin.none() the first time a repository is opened; whatever was stored after that.
+        RepoPin stored = loadPin(manifest.repoId());
+
+        RepoContext context = vault.openRepo(manifest, identity, stored);
+
+        // Persist the floor the open just reached, merged so it can never move backwards. Do the same
+        // whenever the context advances: after a pull, a push, or a key rotation.
+        savePin(manifest.repoId(), stored.advancedTo(context.pin()));
+        return context;
     }
 
     /**
@@ -307,16 +426,16 @@ public final class GettingStartedExample {
      * one that shares them with every member. Both overloads throw the checked {@link CryptoException},
      * as does creating the identity.
      *
+     * @param vault the facade from {@link #sharedVault}
      * @param passphrase the passphrase sealing the new identity's private material
      * @param alts the initial alt payload
      * @return the repository that shares refresh tokens
      * @throws CryptoException if identity creation, key generation, or encryption fails
      */
-    public static SharedVault.CreatedRepo createRepositories(char[] passphrase, List<AltAccount> alts)
-            throws CryptoException {
+    public static SharedVault.CreatedRepo createRepositories(
+            SharedVault vault, char[] passphrase, List<AltAccount> alts) throws CryptoException {
         // The facade is stateless; the identity is the member's key pair, created once here and
         // unlocked from its stored form on later runs.
-        SharedVault vault = new SharedVault(new X25519HkdfAesGcmKeyWrap());
         VaultIdentity identity = VaultIdentity.create(passphrase);
 
         // Withholds refresh tokens (the default).
@@ -375,6 +494,59 @@ public final class GettingStartedExample {
     }
 
     /**
+     * Section "Player attributes and bans": what the account is allowed to do, and whether the platform
+     * has banned it. This is the platform's own verdict, read over the account's token — distinct from
+     * the per-server bans a host records on the account itself.
+     *
+     * @param alts the runtime built by {@link #buildRuntime}
+     * @param account the account to read
+     * @throws AccountException if the call was refused or the service failed
+     */
+    public static void readAttributes(AltsRuntime<MyHandle> alts, AltAccount account) throws AccountException {
+        PlayerAttributes attributes = alts.accountServices(account).attributes().fetch();
+
+        if (!attributes.canPlayMultiplayer()) {
+            showError(account.username() + " cannot join servers");
+        }
+        if (!attributes.canChat()) {
+            render(account.username() + " has chat disabled");
+        }
+
+        // A ban is per scope. A null expiry is a permanent one.
+        PlayerAttributes.Ban ban = attributes.ban(PlayerAttributes.SCOPE_MULTIPLAYER);
+        if (ban != null && ban.activeAt(java.time.Instant.now())) {
+            showError(account.username() + " is banned from multiplayer "
+                    + (ban.permanent() ? "permanently" : "until " + ban.expires()) + ": " + ban.reason());
+        }
+    }
+
+    /**
+     * Section "Looking a player up": resolving names to identities without any account. The lookup is
+     * anonymous, so it works before anyone has logged in.
+     *
+     * @param alts the runtime built by {@link #buildRuntime}
+     * @param names the usernames to resolve
+     * @throws AccountException if the service refused or could not be reached
+     */
+    public static void lookUpPlayers(AltsRuntime<MyHandle> alts, List<String> names) throws AccountException {
+        // One name: empty when nobody holds it, which is an answer rather than an error.
+        alts.profileLookup().byName("DesiredName").ifPresent(player -> render(player.name() + " " + player.uuid()));
+
+        try {
+            // Many names: sent ten per request. A name nobody holds is simply absent from the result.
+            for (PublicProfile player : alts.profileLookup().byNames(names)) {
+                render(player.name() + " " + player.uuid());
+            }
+        } catch (AccountException failure) {
+            if (!failure.rateLimited()) {
+                throw failure;
+            }
+            // Not "those players do not exist": come back after the wait, when the service named one.
+            showRetry("Lookup rate limited" + (failure.retryAfter() != null ? " for " + failure.retryAfter() : ""));
+        }
+    }
+
+    /**
      * Section "Claiming a name at a drop": fire a bounded burst of change attempts around the instant a
      * name frees up, stopping on the first success. The drop time is one you read off wherever names are
      * listed; the library claims at the time you give it, it does not monitor for one.
@@ -398,6 +570,28 @@ public final class GettingStartedExample {
                     }
                 });
     }
+
+    /** Stands in for wherever the host keeps a real secret, such as an operating-system keystore. */
+    public interface HostKeystore {
+
+        /**
+         * Returns the named secret, creating it on first use.
+         *
+         * @param alias the entry's name
+         * @param length how many random bytes to create when the entry does not exist yet
+         * @return the secret bytes, the same on every call
+         * @throws Exception if the keystore cannot be reached
+         */
+        byte[] loadOrCreate(String alias, int length) throws Exception;
+    }
+
+    /** Stands in for the host reading the rollback floor it stored for a repository. */
+    private static RepoPin loadPin(String repoId) {
+        return RepoPin.none();
+    }
+
+    /** Stands in for the host storing a repository's rollback floor next to its other settings. */
+    private static void savePin(String repoId, RepoPin pin) {}
 
     /** Stands in for the host translating a {@link SessionData} into its platform's live session. */
     private static void installSession(SessionData session) {}
