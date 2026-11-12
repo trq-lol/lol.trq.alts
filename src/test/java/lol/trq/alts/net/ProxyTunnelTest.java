@@ -10,6 +10,8 @@ import com.google.gson.JsonObject;
 import com.sun.net.httpserver.HttpsServer;
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -181,8 +183,44 @@ class ProxyTunnelTest {
 
         assertThrows(SSLException.class, () -> HttpUtil.get(byAnotherName, null, PROFILE));
 
-        assertEquals(1, proxy.requestLines().size(), "the tunnel itself was opened");
+        assertEquals(
+                List.of("CONNECT localhost:" + origin.getAddress().getPort() + " HTTP/1.1"),
+                proxy.requestLines(),
+                "the tunnel was opened, naming the host as written so the proxy is the one to resolve it");
         assertEquals(0, originHits.get(), "but no request may be sent to a peer that failed verification");
+    }
+
+    /** Whatever answers on the proxy port, anything short of a 2xx to the CONNECT ends the request there. */
+    @Test
+    void aProxyThatDoesNotSpeakHttpFailsTheRequest() throws Exception {
+        try (ServerSocket impostor = new ServerSocket(0, 0, InetAddress.getLoopbackAddress())) {
+            Thread.ofPlatform().daemon().start(() -> {
+                try (Socket client = impostor.accept()) {
+                    client.getOutputStream().write("SSH-2.0-not-a-proxy\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1));
+                    client.getOutputStream().flush();
+                    client.getInputStream().readAllBytes();
+                } catch (IOException closing) {
+                    // The client hanging up is the expected ending.
+                }
+            });
+            HttpUtil.bind(scope -> ProxyRoute.http(loopback(), impostor.getLocalPort()));
+
+            assertThrows(IOException.class, () -> HttpUtil.get(originUrl(), null, PROFILE));
+        }
+
+        assertEquals(0, originHits.get());
+    }
+
+    @Test
+    void theTunnelAuthorityIsWrittenSafely() throws Exception {
+        assertEquals("login.example:443", ProxyTunnelSocketFactory.authority("login.example", 443));
+        assertEquals("[2001:db8::1]:443", ProxyTunnelSocketFactory.authority("2001:db8::1", 443));
+        assertEquals("[2001:db8::1]:443", ProxyTunnelSocketFactory.authority("[2001:db8::1]", 443));
+        assertThrows(
+                IOException.class,
+                () -> ProxyTunnelSocketFactory.authority("login.example\r\nProxy-Authorization: x", 443),
+                "a host must never be able to add a line to the CONNECT");
+        assertThrows(IOException.class, () -> ProxyTunnelSocketFactory.authority("", 443));
     }
 
     /** Without the test seam the JVM's default trust applies, and it has never heard of this certificate. */
