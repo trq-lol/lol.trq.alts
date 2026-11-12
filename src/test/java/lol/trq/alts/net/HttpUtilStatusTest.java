@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.net.httpserver.HttpServer;
@@ -18,8 +19,11 @@ class HttpUtilStatusTest {
 
     private HttpServer server;
 
+    private volatile String retryAfter;
+
     @AfterEach
     void stopServer() {
+        HttpUtil.resetForTests();
         if (server != null) {
             server.stop(0);
         }
@@ -28,6 +32,10 @@ class HttpUtilStatusTest {
     private String startServer(int status, String body) throws IOException {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/token", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            if (retryAfter != null) {
+                exchange.getResponseHeaders().add("Retry-After", retryAfter);
+            }
             byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(status, bytes.length);
             exchange.getResponseBody().write(bytes);
@@ -71,5 +79,74 @@ class HttpUtilStatusTest {
         assertEquals(503, response.status());
         assertFalse(response.successful());
         assertNull(response.body(), "a non-JSON error body parses to null rather than throwing");
+    }
+
+    /** The batch endpoints answer with a top-level array, which the object-only reader reports as no body. */
+    @Test
+    void anArrayBodyIsReadByTheElementMethodAndInvisibleToTheObjectOne() throws Exception {
+        String url = startServer(200, "[{\"id\":\"1\"},{\"id\":\"2\"}]");
+
+        HttpUtil.JsonResponse element =
+                HttpUtil.postJsonForElement(url, null, "[\"a\",\"b\"]", NetworkScope.of(NetworkScope.Purpose.PROFILE));
+        HttpUtil.HttpResponse object = HttpUtil.postJsonForStatus(url, null, "[\"a\",\"b\"]", null);
+
+        assertTrue(element.successful());
+        assertTrue(element.body().isJsonArray());
+        assertEquals(2, element.body().getAsJsonArray().size());
+        assertNull(object.body(), "the object reader keeps reporting an array as no body");
+    }
+
+    @Test
+    void theElementMethodCarriesAnErrorStatusItsBodyAndTheStatedWait() throws Exception {
+        retryAfter = "21";
+        String url = startServer(429, "{\"error\":\"TooManyRequests\"}");
+
+        HttpUtil.JsonResponse response = HttpUtil.postJsonForElement(url, null, "[]", null);
+
+        assertEquals(429, response.status());
+        assertTrue(response.rateLimited());
+        assertFalse(response.successful());
+        assertEquals(java.time.Duration.ofSeconds(21), response.retryAfter());
+        assertEquals(
+                "TooManyRequests",
+                response.body().getAsJsonObject().get("error").getAsString());
+    }
+
+    @Test
+    void theElementMethodReportsANonJsonOrEmptyBodyAsNull() throws Exception {
+        String url = startServer(503, "unavailable");
+        assertNull(HttpUtil.postJsonForElement(url, null, "[]", null).body());
+        server.stop(0);
+
+        url = startServer(200, "null");
+        assertNull(HttpUtil.postJsonForElement(url, null, "[]", null).body(), "a JSON null is no body");
+    }
+
+    /** The new method is one more way out of the library, so it must fail closed like the rest. */
+    @Test
+    void theElementMethodFailsClosedWhenTheProxyProviderDoes() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger hits = new java.util.concurrent.atomic.AtomicInteger();
+        server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        server.createContext("/token", exchange -> {
+            hits.incrementAndGet();
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.start();
+        String url = "http://" + InetAddress.getLoopbackAddress().getHostAddress() + ":"
+                + server.getAddress().getPort() + "/token";
+        HttpUtil.bind(scope -> null);
+
+        assertThrows(
+                IOException.class,
+                () -> HttpUtil.postJsonForElement(url, null, "[]", NetworkScope.of(NetworkScope.Purpose.PROFILE)));
+        assertEquals(0, hits.get(), "a provider with no answer must not become a direct connection");
+    }
+
+    @Test
+    void theElementMethodRefusesABodyPastTheCap() throws Exception {
+        String url = startServer(200, "[\"" + "x".repeat(HttpUtil.MAX_TEXT_BODY_BYTES) + "\"]");
+
+        assertThrows(IOException.class, () -> HttpUtil.postJsonForElement(url, null, "[]", null));
     }
 }

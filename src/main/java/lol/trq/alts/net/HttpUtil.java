@@ -490,6 +490,64 @@ public final class HttpUtil {
     }
 
     /**
+     * An HTTP response carrying its status alongside the parsed body, whatever JSON shape that body has.
+     * {@link HttpResponse} reads object bodies only; this is for the few endpoints that answer with a
+     * top-level array.
+     *
+     * @param status the HTTP status code
+     * @param body the parsed JSON body — an object or an array — or {@code null} when the body was
+     *     absent or was neither
+     * @param retryAfter how long the service asked the caller to wait, or {@code null} when it did not
+     * @author trq
+     * @since 0.12.0
+     */
+    public record JsonResponse(int status, JsonElement body, Duration retryAfter) {
+
+        /**
+         * Returns whether the status is in the 2xx success range.
+         *
+         * @return true if the request succeeded
+         * @since 0.12.0
+         */
+        public boolean successful() {
+            return status >= 200 && status < 300;
+        }
+
+        /**
+         * Returns whether the service is asking the caller to slow down.
+         *
+         * @return true if the status is 429
+         * @since 0.12.0
+         */
+        public boolean rateLimited() {
+            return status == 429;
+        }
+    }
+
+    /**
+     * Sends a POST request with a JSON body over the route the scope resolves to, returning the status
+     * alongside the parsed body in whatever JSON shape it arrived. The counterpart of
+     * {@link #postJsonForStatus(String, Map, String, NetworkScope)} for an endpoint that answers with a
+     * top-level array, which that method would report as no body at all.
+     *
+     * <p>Same request path as every other method here: the scope's route, failing closed when the proxy
+     * provider does; the same timeouts; no redirects; the same cap on the body read.
+     *
+     * @param urlString the target URL
+     * @param headers optional HTTP headers to include in the request
+     * @param jsonBody the JSON payload as a string
+     * @param scope what is being fetched, and on whose behalf
+     * @return the status and parsed body; the body is null when absent or not JSON
+     * @throws Exception if a network or protocol error occurs
+     * @since 0.12.0
+     */
+    public static JsonResponse postJsonForElement(
+            String urlString, Map<String, String> headers, String jsonBody, NetworkScope scope) throws Exception {
+        return executeForElement(
+                urlString, "POST", "application/json", headers, jsonBody.getBytes(StandardCharsets.UTF_8), scope);
+    }
+
+    /**
      * Sends a GET request to the specified URL.
      *
      * @param urlString the target URL
@@ -963,6 +1021,35 @@ public final class HttpUtil {
             byte[] body,
             NetworkScope scope)
             throws Exception {
+        JsonResponse response = executeForElement(urlString, method, contentType, headers, body, scope);
+        JsonElement parsed = response.body();
+        return new HttpResponse(
+                response.status(),
+                parsed != null && parsed.isJsonObject() ? parsed.getAsJsonObject() : null,
+                response.retryAfter());
+    }
+
+    /**
+     * Sends one request and parses whatever JSON came back. The single implementation behind every
+     * status-carrying method, so the route, the timeouts and the body cap cannot differ between them.
+     *
+     * @param urlString the target URL
+     * @param method the HTTP method
+     * @param contentType the Content-Type header value, or null when there is no body
+     * @param headers optional HTTP headers to include in the request
+     * @param body the raw request body, or null
+     * @param scope what is being fetched, and on whose behalf
+     * @return the status and parsed body; the body is null when absent or not JSON
+     * @throws Exception if a network or protocol error occurs
+     */
+    private static JsonResponse executeForElement(
+            String urlString,
+            String method,
+            String contentType,
+            Map<String, String> headers,
+            byte[] body,
+            NetworkScope scope)
+            throws Exception {
         HttpURLConnection conn = open(urlString, scope);
         conn.setRequestMethod(method);
         applyHeaders(conn, contentType, headers);
@@ -972,15 +1059,18 @@ public final class HttpUtil {
         Duration retryAfter = retryAfter(conn);
         InputStream stream = responseStream(conn, status);
         if (stream == null) {
-            return new HttpResponse(status, null, retryAfter);
+            return new JsonResponse(status, null, retryAfter);
         }
 
         String text = readText(stream);
         try {
             JsonElement parsed = JsonParser.parseString(text);
-            return new HttpResponse(status, parsed.isJsonObject() ? parsed.getAsJsonObject() : null, retryAfter);
+            // A bare primitive is not an answer any endpoint here gives; it is what the lenient parser makes
+            // of an HTML or plain-text error page, so it is reported as no body rather than as a string.
+            boolean structured = parsed.isJsonObject() || parsed.isJsonArray();
+            return new JsonResponse(status, structured ? parsed : null, retryAfter);
         } catch (RuntimeException parseFailure) {
-            return new HttpResponse(status, null, retryAfter);
+            return new JsonResponse(status, null, retryAfter);
         }
     }
 
