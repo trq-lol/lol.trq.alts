@@ -41,12 +41,13 @@ public final class EncryptionUtil {
     private EncryptionUtil() {}
 
     /**
-     * Generates a unique, environment-specific string used as a password for key derivation. This
-     * binds the encrypted data to the specific hardware and user profile of the system.
+     * Generates an environment-specific string used as a password for key derivation. It is built
+     * from the OS user name, OS name, home directory and the binding, none of which is secret, so a
+     * file sealed under it resists casual copying and not an attacker who knows those values.
      *
      * @param appBinding a host-supplied constant mixed into the key so files are bound to one
      *     application; changing it for an existing store renders prior files undecryptable
-     * @return a hardware-bound string identifier
+     * @return the machine-derived key string
      */
     public static String getHardwareKey(String appBinding) {
         return System.getProperty("user.name")
@@ -153,7 +154,7 @@ public final class EncryptionUtil {
      */
     private static SecretKey deriveKey(String password, byte[] salt) throws GeneralSecurityException {
         SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
-        // 65,536 iterations balances security and performance for a hardware-bound local file
+        // 65,536 iterations balances security and performance for a machine-keyed local file
         KeySpec spec = new PBEKeySpec(password.toCharArray(), salt, 65536, 256);
         return new SecretKeySpec(factory.generateSecret(spec).getEncoded(), "AES");
     }

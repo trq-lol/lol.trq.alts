@@ -16,8 +16,9 @@ import lol.trq.alts.spi.VaultDirectoryProvider;
  * host secrets (API keys, referral codes, integration tokens) that belong to the individual user and
  * must never travel into a shared account repository.
  *
- * <p>Secrets are encrypted with a hardware-bound key from {@link EncryptionUtil#getHardwareKey(String)}
- * so the file cannot be transferred between systems. The directory is supplied by the host through a
+ * <p>Secrets are encrypted with the machine-derived key from
+ * {@link EncryptionUtil#getHardwareKey(String)} unless the host supplies its own. That default is
+ * built from values that are not secret, so it deters casual copying and nothing more. The directory is supplied by the host through a
  * {@link VaultDirectoryProvider} bound at runtime startup; the store keeps no Minecraft or platform
  * types. Hosts namespace their own keys (for example {@code "myfeature.api-key"}); the library imposes
  * no schema.

@@ -33,7 +33,7 @@ import lol.trq.alts.store.AltStore;
 import lol.trq.alts.store.SecretStore;
 
 /**
- * Central wiring object for the consumer-agnostic alt-manager library. The host supplies its platform
+ * Central wiring object for the consumer-agnostic account library. The host supplies its platform
  * seams through {@link Builder}; the library exposes an {@link AltLoginService} and a generic
  * {@link SkinAvatarCache}, and binds the static {@link AltStore} and {@link AltsToasts} helpers to the
  * host's seams.

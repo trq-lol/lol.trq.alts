@@ -21,8 +21,10 @@ import lol.trq.alts.spi.StoreKeyProvider;
 import lol.trq.alts.spi.VaultDirectoryProvider;
 
 /**
- * Persists and manages the lifecycle of Minecraft accounts on local disk. Data is stored encrypted
- * with a hardware-bound key to prevent unauthorized access or transfer between systems.
+ * Persists and manages the lifecycle of Minecraft accounts on local disk. Data is stored encrypted.
+ * The default key is derived from values that are not secret (the OS user, OS name and home
+ * directory), so it deters casual copying and nothing more; a host that needs real protection
+ * supplies its own key through a {@link StoreKeyProvider}.
  *
  * <p>The directory is supplied by the host through a {@link VaultDirectoryProvider} bound at runtime
  * startup; the store keeps no Minecraft or platform types. This store holds <em>accounts</em> only —
