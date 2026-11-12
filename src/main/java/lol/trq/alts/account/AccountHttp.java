@@ -1,6 +1,8 @@
 package lol.trq.alts.account;
 
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import lol.trq.alts.net.HttpUtil;
 import lol.trq.alts.net.NetworkScope;
@@ -26,6 +28,15 @@ final class AccountHttp {
         this.accountUuid = accountUuid;
     }
 
+    /**
+     * Returns plumbing for the public endpoints, which take no token and belong to no account.
+     *
+     * @return an unauthenticated instance
+     */
+    static AccountHttp anonymous() {
+        return new AccountHttp(null, null);
+    }
+
     /** The bearer token, for a service that classifies a raw response itself rather than through {@link #send}. */
     String token() {
         return token;
@@ -36,13 +47,13 @@ final class AccountHttp {
         return accountUuid;
     }
 
-    /** Returns the bearer header this account's calls carry. */
+    /** Returns the bearer header this account's calls carry, or nothing for the public endpoints. */
     private Map<String, String> auth() {
-        return Map.of("Authorization", "Bearer " + token);
+        return token == null ? Map.of() : Map.of("Authorization", "Bearer " + token);
     }
 
     private NetworkScope scope(NetworkScope.Purpose purpose) {
-        return NetworkScope.forAccount(purpose, accountUuid, null);
+        return accountUuid == null ? NetworkScope.of(purpose) : NetworkScope.forAccount(purpose, accountUuid, null);
     }
 
     /**
@@ -72,6 +83,21 @@ final class AccountHttp {
     }
 
     /**
+     * Sends a JSON-bodied request whose response the caller must be able to read.
+     *
+     * @param method the HTTP method
+     * @param url the target URL
+     * @param json the JSON request body
+     * @param purpose the request purpose
+     * @return the parsed response body, never null
+     * @throws AccountException if the request was refused or failed, or answered with no JSON body
+     */
+    JsonObject exchangeJson(String method, String url, String json, NetworkScope.Purpose purpose)
+            throws AccountException {
+        return body(sendJson(method, url, json, purpose));
+    }
+
+    /**
      * Sends a request carrying a raw body of a given content type — for the multipart skin upload.
      *
      * @param method the HTTP method
@@ -89,16 +115,46 @@ final class AccountHttp {
 
     private JsonObject send(String method, String url, String contentType, byte[] body, NetworkScope.Purpose purpose)
             throws AccountException {
-        HttpUtil.HttpResponse response;
+        HttpUtil.HttpResponse response = exchange(method, url, contentType, body, purpose);
+        if (!response.successful()) {
+            throw failure(method, url, response);
+        }
+        return response.body();
+    }
+
+    /**
+     * Sends a request and hands back whatever came, for a service that classifies the status itself — a
+     * 404 that means "no such player", a 400 whose details say why a name was refused.
+     *
+     * @param method the HTTP method
+     * @param url the target URL
+     * @param contentType the Content-Type, or null when there is no body
+     * @param body the raw body, or null
+     * @param purpose the request purpose
+     * @return the response, successful or not
+     * @throws AccountException only when the service could not be reached
+     */
+    HttpUtil.HttpResponse exchange(
+            String method, String url, String contentType, byte[] body, NetworkScope.Purpose purpose)
+            throws AccountException {
         try {
-            response = HttpUtil.sendForStatus(method, url, contentType, auth(), body, scope(purpose));
+            return HttpUtil.sendForStatus(method, url, contentType, auth(), body, scope(purpose));
         } catch (Exception transport) {
             throw new AccountException(method + " " + describe(url) + ": " + transport.getMessage(), transport);
         }
-        if (!response.successful()) {
-            throw new AccountException(method + " " + describe(url) + ": " + reason(response), response.status());
-        }
-        return response.body();
+    }
+
+    /**
+     * Builds the exception for a rejected response, carrying its status and any stated wait.
+     *
+     * @param method the HTTP method that was sent
+     * @param url the URL it was sent to
+     * @param response the rejected response
+     * @return the exception to throw
+     */
+    static AccountException failure(String method, String url, HttpUtil.HttpResponse response) {
+        return new AccountException(
+                method + " " + describe(url) + ": " + reason(response), response.status(), response.retryAfter());
     }
 
     /**
@@ -122,7 +178,7 @@ final class AccountHttp {
      * @param response the rejected response
      * @return a short reason
      */
-    private static String reason(HttpUtil.HttpResponse response) {
+    static String reason(HttpUtil.HttpResponse response) {
         JsonObject body = response.body();
         if (body != null) {
             for (String field : new String[] {"errorMessage", "error", "details"}) {
@@ -134,6 +190,41 @@ final class AccountHttp {
         return "status " + response.status();
     }
 
+    /**
+     * Reads the machine-readable cause out of an error body: {@code details.status} where the service
+     * gave one, else its {@code errorType} or {@code error} code.
+     *
+     * @param response the rejected response
+     * @return the code, or {@code null} when the body named none
+     */
+    static String errorCode(HttpUtil.HttpResponse response) {
+        JsonObject body = response.body();
+        if (body == null) {
+            return null;
+        }
+        JsonElement details = body.get("details");
+        if (details != null && details.isJsonObject()) {
+            String status = string(details.getAsJsonObject(), "status");
+            if (status != null) {
+                return status;
+            }
+        }
+        String errorType = string(body, "errorType");
+        return errorType != null ? errorType : string(body, "error");
+    }
+
+    /**
+     * Reads a string field leniently.
+     *
+     * @param object the object to read from
+     * @param field the field name
+     * @return the value, or {@code null} when it is absent or not a primitive
+     */
+    static String string(JsonObject object, String field) {
+        JsonElement element = object == null ? null : object.get(field);
+        return element != null && element.isJsonPrimitive() ? element.getAsString() : null;
+    }
+
     /** Strips the query string from a URL so an error message names the endpoint, never a token in a query. */
     private static String describe(String url) {
         int query = url.indexOf('?');
@@ -141,6 +232,6 @@ final class AccountHttp {
     }
 
     private static byte[] bytes(String value) {
-        return value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        return value.getBytes(StandardCharsets.UTF_8);
     }
 }
