@@ -87,6 +87,10 @@ public final class MicrosoftAuthUtil {
      * token endpoint issues a rotated refresh token on success; the returned profile carries it, and
      * callers must persist it or the next renewal will fail.
      *
+     * <p>Every request is made with an account-less scope. Prefer
+     * {@link #authenticateWithRefreshToken(MicrosoftAuthConfig, String, NetworkScope)} when the token
+     * belongs to a known account, so a host's proxy provider can route the renewal for that account.
+     *
      * @param config the host's Microsoft authentication configuration (client id, scope, endpoints)
      * @param refreshToken the stored refresh token to redeem
      * @return a future containing the renewed {@link MinecraftProfile}
@@ -95,12 +99,32 @@ public final class MicrosoftAuthUtil {
      */
     public static CompletableFuture<MinecraftProfile> authenticateWithRefreshToken(
             MicrosoftAuthConfig config, String refreshToken) {
+        return authenticateWithRefreshToken(config, refreshToken, NO_ACCOUNT);
+    }
+
+    /**
+     * Renews a session from a stored OAuth refresh token on one account's behalf. Every hop of the
+     * chain (the token redemption, Xbox Live, XSTS, the Minecraft services login, and the profile
+     * lookup) carries the account named by {@code account}, so a host's
+     * {@link lol.trq.alts.spi.ProxyProvider} can give each account its own route. Without that, a
+     * renewal sweep over many accounts sends all of its rate-limited requests from one address.
+     *
+     * @param config the host's Microsoft authentication configuration (client id, scope, endpoints)
+     * @param refreshToken the stored refresh token to redeem
+     * @param account a scope naming the account the token belongs to; only its account fields are read,
+     *     and {@code null} means no account
+     * @return a future containing the renewed {@link MinecraftProfile}
+     * @throws NullPointerException if {@code config} is null
+     * @since 0.12.0
+     */
+    public static CompletableFuture<MinecraftProfile> authenticateWithRefreshToken(
+            MicrosoftAuthConfig config, String refreshToken, NetworkScope account) {
         Objects.requireNonNull(config, "config");
         if (refreshToken == null || refreshToken.isBlank()) {
             return CompletableFuture.failedFuture(new RefreshRejectedException("refresh token is blank", true));
         }
-        return exchangeRefreshForToken(config, refreshToken, NO_ACCOUNT)
-                .thenCompose(tokens -> completeFrom(config, tokens, NO_ACCOUNT));
+        return exchangeRefreshForToken(config, refreshToken, account)
+                .thenCompose(tokens -> completeFrom(config, tokens, account));
     }
 
     /**

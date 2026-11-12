@@ -148,7 +148,10 @@ public class AltAccountServiceImpl implements AltAccountService {
      * @return a future holding the outcome
      */
     private CompletableFuture<AccountStatus> renew(AltAccount account) {
-        return MicrosoftAuthUtil.authenticateWithRefreshToken(microsoftAuth, account.refreshToken())
+        // The scope names the account on every hop, so a host proxying per account can route this
+        // renewal apart from the next account's.
+        NetworkScope scope = NetworkScope.forAccount(NetworkScope.Purpose.AUTH, account.uuid(), account.username());
+        return MicrosoftAuthUtil.authenticateWithRefreshToken(microsoftAuth, account.refreshToken(), scope)
                 .thenApply(profile -> {
                     AltAccount renewed =
                             account.withTokens(profile.accessToken(), profile.refreshToken(), profile.expiresAt());
