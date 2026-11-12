@@ -32,6 +32,19 @@ public record RepoContext(
     }
 
     /**
+     * Returns the rollback floor this context establishes: the key epoch and payload version it has
+     * reached. Persist it per repository and pass it to
+     * {@link SharedVault#openRepo(lol.trq.alts.vault.transport.VaultManifest, VaultIdentity, RepoPin)}
+     * next time, so a server cannot serve an older manifest unnoticed.
+     *
+     * @return the pin to persist
+     * @since 0.12.0
+     */
+    public RepoPin pin() {
+        return new RepoPin(dataKey.epoch(), payloadVersion);
+    }
+
+    /**
      * Returns a copy holding a rotated data key.
      *
      * @param rotated the new data key

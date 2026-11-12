@@ -34,9 +34,10 @@ import lol.trq.alts.vault.transport.VaultManifest;
  * <p>What that buys is confidentiality against a server that stores and relays faithfully, and against
  * anyone observing the network. It does not, on its own, defend against a server that actively
  * substitutes keys: nothing in the current protocol signs a wrapped data key, a manifest, or an
- * envelope. One local defence narrows that gap: a {@link KeyBindingVerifier} is consulted before the
+ * envelope. Two local defences narrow that gap. A {@link KeyBindingVerifier} is consulted before the
  * data key is wrapped to any other member's keys, so a host that supplies a real verifier cannot be
- * tricked into wrapping to keys the server swapped in.
+ * tricked into wrapping to keys the server swapped in. And a {@link RepoPin} the host persists between
+ * sessions stops a server from rolling a repository back to an earlier key epoch or payload version.
  *
  * <p>The payload carries {@link AltAccount}s — the credential plus shareable account state
  * (last-used activity and observed-ban status, so members coordinate and avoid handing each other a
@@ -143,19 +144,61 @@ public final class SharedVault {
     }
 
     /**
-     * Opens a repository for {@code identity} by unwrapping the data key from their member entry.
+     * Opens a repository for {@code identity} by unwrapping the data key from their member entry, with
+     * no rollback floor. Prefer {@link #openRepo(VaultManifest, VaultIdentity, RepoPin)} once the host
+     * has seen the repository before: without a pin, a server can serve an older manifest unnoticed.
      *
      * @param manifest the repository manifest
      * @param identity the opening member's unlocked identity
      * @return the working context
      * @throws CryptoException if unwrapping fails
-     * @throws VaultException if the identity is not a member of the repository
+     * @throws VaultException if the identity is not a member of the repository, or the manifest names a
+     *     different key-wrap scheme or is inconsistent
      */
     public RepoContext openRepo(VaultManifest manifest, VaultIdentity identity) throws CryptoException, VaultException {
+        return openRepo(manifest, identity, RepoPin.none());
+    }
+
+    /**
+     * Opens a repository for {@code identity}, refusing a manifest older than the host last saw.
+     *
+     * <p>The manifest comes from the server, so its key epoch and payload version are claims. The pin is
+     * the host's own record of the highest values it has already accepted for this repository; a
+     * manifest below either is a rollback and is rejected. After a successful open (and after each
+     * accepted pull, push, or rotation) persist {@link RepoContext#pin()} and pass it back next time.
+     *
+     * @param manifest the repository manifest
+     * @param identity the opening member's unlocked identity
+     * @param pin the lowest key epoch and payload version to accept ({@link RepoPin#none()} on first
+     *     contact)
+     * @return the working context; its {@link RepoContext#pin()} is the value to persist
+     * @throws CryptoException if unwrapping fails
+     * @throws VaultException if the identity is not a member of the repository, the manifest names a
+     *     different key-wrap scheme, is inconsistent, or falls below the pin
+     * @since 0.12.0
+     */
+    public RepoContext openRepo(VaultManifest manifest, VaultIdentity identity, RepoPin pin)
+            throws CryptoException, VaultException {
+        Objects.requireNonNull(pin, "pin");
+        if (!scheme.schemeId().equals(manifest.schemeId())) {
+            throw new VaultException("manifest key-wrap scheme " + manifest.schemeId()
+                    + " is not the configured scheme " + scheme.schemeId());
+        }
+        if (manifest.keyEpoch() < pin.minimumKeyEpoch()) {
+            throw new VaultException("key epoch rollback: " + manifest.keyEpoch() + " < " + pin.minimumKeyEpoch());
+        }
+        if (manifest.payloadVersion() < pin.minimumPayloadVersion()) {
+            throw new VaultException(
+                    "payload version rollback: " + manifest.payloadVersion() + " < " + pin.minimumPayloadVersion());
+        }
         String memberId = identity.identityId();
         MemberEntry entry = manifest.findMember(memberId);
         if (entry == null) {
             throw new VaultException("identity is not a member of repository " + manifest.repoId());
+        }
+        if (entry.keyEpoch() != manifest.keyEpoch()) {
+            throw new VaultException(
+                    "member entry key epoch " + entry.keyEpoch() + " does not match manifest " + manifest.keyEpoch());
         }
         RepoDataKey dataKey = RepoDataKey.unwrap(
                 scheme, entry.wrappedDataKey(), identity.keyAgreementPrivateKey(), manifest.keyEpoch());
@@ -218,21 +261,26 @@ public final class SharedVault {
     }
 
     /**
-     * Decrypts a payload envelope, rejecting an envelope from a different repository or one that rolls
-     * the version back below {@code expectedMinVersion}.
+     * Decrypts a payload envelope, rejecting an envelope from a different repository, one sealed under
+     * a different key epoch than the context holds, or one that rolls the version back below
+     * {@code expectedMinVersion}.
      *
      * @param ctx the working context
      * @param env the encrypted envelope
      * @param expectedMinVersion the lowest acceptable payload version (pass {@code ctx.payloadVersion()}
      *     to forbid rollback, or 0 to allow any)
      * @return the decrypted alts
-     * @throws CryptoException if decryption fails (wrong key/epoch or tampering)
-     * @throws VaultException if the repo id mismatches or the version is rolled back
+     * @throws CryptoException if decryption fails (wrong key or tampering)
+     * @throws VaultException if the repo id or key epoch mismatches, or the version is rolled back
      */
     public List<AltAccount> decryptPayload(RepoContext ctx, EncryptedEnvelope env, long expectedMinVersion)
             throws CryptoException, VaultException {
         if (!env.repoId().equals(ctx.repoId())) {
             throw new VaultException("envelope repo id does not match context");
+        }
+        if (env.keyEpoch() != ctx.dataKey().epoch()) {
+            throw new VaultException("envelope key epoch " + env.keyEpoch() + " does not match the open data key epoch "
+                    + ctx.dataKey().epoch());
         }
         if (env.payloadVersion() < expectedMinVersion) {
             throw new VaultException("payload rollback: " + env.payloadVersion() + " < " + expectedMinVersion);

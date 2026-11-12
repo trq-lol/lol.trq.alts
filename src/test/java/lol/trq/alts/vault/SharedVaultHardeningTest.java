@@ -94,6 +94,81 @@ class SharedVaultHardeningTest {
     }
 
     @Test
+    void rejectsEnvelopeSealedUnderAnotherKeyEpoch() throws Exception {
+        SharedVault.CreatedRepo created = trusting.createRepo(alice, alts("v1"));
+        SharedVault.RotationResult rotation = trusting.rotateKey(created.context(), alts("v2"), created.manifest());
+
+        // The old context still holds the epoch-0 key; an epoch-1 envelope is not for it.
+        assertThrows(VaultException.class, () -> trusting.decryptPayload(created.context(), rotation.envelope(), 0));
+        // And the reverse: a replayed epoch-0 envelope is refused by the rotated context.
+        assertThrows(VaultException.class, () -> trusting.decryptPayload(rotation.context(), created.envelope(), 0));
+    }
+
+    @Test
+    void rejectsManifestNamingAnotherScheme() throws Exception {
+        SharedVault.CreatedRepo created = trusting.createRepo(alice, alts("v1"));
+        VaultManifest other = new VaultManifest(
+                created.manifest().repoId(),
+                "some-weaker-scheme-v0",
+                created.manifest().keyEpoch(),
+                created.manifest().payloadVersion(),
+                created.manifest().members(),
+                false);
+
+        assertThrows(VaultException.class, () -> trusting.openRepo(other, alice));
+    }
+
+    @Test
+    void rejectsManifestBelowThePinnedKeyEpoch() throws Exception {
+        SharedVault.CreatedRepo created = trusting.createRepo(alice, alts("v1"));
+        SharedVault.RotationResult rotation = trusting.rotateKey(created.context(), alts("v2"), created.manifest());
+        RepoPin pin = rotation.context().pin();
+        assertEquals(new RepoPin(1L, 2L), pin);
+
+        // A server replays the pre-rotation manifest: it is internally valid, only stale.
+        assertThrows(VaultException.class, () -> trusting.openRepo(created.manifest(), alice, pin));
+
+        // The current manifest still opens at exactly the pin.
+        RepoContext reopened = trusting.openRepo(rotatedManifest(created.manifest(), rotation), alice, pin);
+        assertEquals(pin, reopened.pin());
+    }
+
+    @Test
+    void rejectsManifestBelowThePinnedPayloadVersion() throws Exception {
+        SharedVault.CreatedRepo created = trusting.createRepo(alice, alts("v1"));
+        RepoPin pin = new RepoPin(0L, 5L);
+
+        assertThrows(VaultException.class, () -> trusting.openRepo(created.manifest(), alice, pin));
+    }
+
+    @Test
+    void openWithoutAPinReportsTheObservedFloor() throws Exception {
+        SharedVault.CreatedRepo created = trusting.createRepo(alice, alts("v1"));
+
+        RepoContext opened = trusting.openRepo(created.manifest(), alice, RepoPin.none());
+
+        assertEquals(new RepoPin(0L, 1L), opened.pin());
+        assertEquals(new RepoPin(3L, 9L), new RepoPin(3L, 1L).advancedTo(new RepoPin(0L, 9L)));
+        assertThrows(IllegalArgumentException.class, () -> new RepoPin(-1L, 0L));
+        assertThrows(IllegalArgumentException.class, () -> new RepoPin(0L, -1L));
+    }
+
+    @Test
+    void rejectsMemberEntryFromAnotherEpochThanTheManifest() throws Exception {
+        SharedVault.CreatedRepo created = trusting.createRepo(alice, alts("v1"));
+        VaultManifest relabelled = new VaultManifest(
+                created.manifest().repoId(),
+                created.manifest().schemeId(),
+                4L,
+                created.manifest().payloadVersion(),
+                created.manifest().members(),
+                false);
+
+        // The entry is the epoch-0 wrap; presenting it as epoch 4 must not yield an "epoch 4" key.
+        assertThrows(VaultException.class, () -> trusting.openRepo(relabelled, alice));
+    }
+
+    @Test
     void addMemberWrapsOnlyToKeysTheVerifierAccepts() throws Exception {
         SharedVault vault = verifying();
         SharedVault.CreatedRepo created = vault.createRepo(alice, alts("v1"));
