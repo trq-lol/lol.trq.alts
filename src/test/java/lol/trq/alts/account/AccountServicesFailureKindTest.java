@@ -125,9 +125,16 @@ class AccountServicesFailureKindTest {
     }
 
     @Test
-    void aMissingResourceIsNotFound() {
+    void aMissingResourceIsNotFoundAndAMissingProfileIsNotEntitled() {
         server.canned(404, HOSTILE_BODY);
-        assertThrown(throwingCalls(), Kind.NOT_FOUND, Optional.empty());
+        Map<String, Executable> others = throwingCalls();
+        Map<String, Executable> profile = new LinkedHashMap<>();
+        profile.put("profile.fetch", others.remove("profile.fetch"));
+        profile.put("cape.owned", () -> services.cape().owned());
+
+        assertThrown(others, Kind.NOT_FOUND, Optional.empty());
+        assertThrown(profile, Kind.NOT_ENTITLED, Optional.empty());
+        assertEquals(Optional.empty(), services.profile().fetchIfPresent(), "an answer, not a failure");
     }
 
     @Test

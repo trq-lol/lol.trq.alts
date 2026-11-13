@@ -84,11 +84,15 @@ public record AltsFailure(
 
         /**
          * The credential authenticated, but the account has no Minecraft profile or does not own the
-         * game. Neither retrying nor signing in again changes it.
+         * game. Neither retrying nor signing in again changes it. Sign-in, check and
+         * {@code ProfileService.fetch} all report a missing profile this way.
          */
         NOT_ENTITLED,
 
-        /** The thing asked for does not exist ({@code 404}): no such player, no such resource. */
+        /**
+         * The thing asked for does not exist ({@code 404}): no such resource. A missing Minecraft profile
+         * is {@link #NOT_ENTITLED} instead, and a lookup of a name nobody holds is an empty answer.
+         */
         NOT_FOUND,
 
         /**

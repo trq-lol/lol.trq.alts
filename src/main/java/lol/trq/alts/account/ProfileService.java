@@ -15,9 +15,9 @@ public interface ProfileService {
     /**
      * Fetches the full profile.
      *
-     * <p>An account with no profile fails this with a 404, a failure of kind
-     * {@link lol.trq.alts.AltsFailure.Kind#NOT_FOUND}
-     * reports; {@link #fetchIfPresent()} is the form that treats it as an answer.
+     * <p>An account with no profile (the service answers 404) fails this with kind
+     * {@link lol.trq.alts.AltsFailure.Kind#NOT_ENTITLED}, as sign-in and check report it;
+     * {@link #fetchIfPresent()} is the form that treats it as an answer.
      *
      * @return the profile
      * @throws lol.trq.alts.AltsException if the token was refused, the account has no profile, or the service
@@ -43,7 +43,7 @@ public interface ProfileService {
         try {
             return Optional.ofNullable(fetch());
         } catch (lol.trq.alts.AltsException failure) {
-            if (failure.kind() == lol.trq.alts.AltsFailure.Kind.NOT_FOUND) {
+            if (failure.kind() == lol.trq.alts.AltsFailure.Kind.NOT_ENTITLED) {
                 return Optional.empty();
             }
             throw failure;

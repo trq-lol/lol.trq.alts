@@ -208,7 +208,8 @@ says the kind); *none* means success, so `failure()` is empty.
 | `FailureReason.DECLINED` | `DECLINED` | |
 | `FailureReason.TIMED_OUT` | `TIMED_OUT` | |
 | `AccountException.tokenRefused()` | `UNAUTHORIZED` | Status 401 or 403. |
-| `AccountException.notFound()` | `NOT_FOUND` | Status 404; `fetchIfPresent()` still treats it as no profile. |
+| `AccountException.notFound()` | `NOT_FOUND` | Status 404 on any call but the profile read. |
+| `AccountException.notFound()` from `ProfileService.fetch` | `NOT_ENTITLED` | No Minecraft profile, as sign-in and check say; `fetchIfPresent()` is still empty. |
 | `AccountException.rateLimited()` | `RATE_LIMITED` | Status 429, with its wait. |
 | `AccountException` status 5xx or 408 | `NETWORK` | |
 | `AccountException` status 400 or 422 | `INVALID_INPUT` | |

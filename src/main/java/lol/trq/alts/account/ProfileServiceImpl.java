@@ -32,8 +32,18 @@ final class ProfileServiceImpl implements ProfileService {
 
     @Override
     public PlayerProfile fetch() {
-        return AccountHttp.decode(
-                gson, http.get(endpoints.profile(), NetworkScope.Purpose.PROFILE), PlayerProfile.class);
+        JsonObject body;
+        try {
+            body = http.get(endpoints.profile(), NetworkScope.Purpose.PROFILE);
+        } catch (AltsException failure) {
+            if (failure.kind() == Kind.NOT_FOUND) {
+                // The token is fine; there is no Minecraft profile behind it. Sign-in and check report
+                // the same answer as NOT_ENTITLED, and so does this.
+                throw new AltsException(Kind.NOT_ENTITLED, "Profile: this account has no Minecraft profile");
+            }
+            throw failure;
+        }
+        return AccountHttp.decode(gson, body, PlayerProfile.class);
     }
 
     @Override

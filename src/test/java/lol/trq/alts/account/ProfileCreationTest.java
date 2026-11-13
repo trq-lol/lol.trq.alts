@@ -59,7 +59,10 @@ class ProfileCreationTest {
         AltsException thrown = assertThrows(
                 AltsException.class, () -> server.services().profile().fetch());
 
-        assertEquals(Kind.NOT_FOUND, thrown.kind(), "the missing-profile state is typed, not a credential problem");
+        assertEquals(
+                Kind.NOT_ENTITLED,
+                thrown.kind(),
+                "a missing profile is typed as sign-in and check type it, not as a credential problem");
     }
 
     @Test

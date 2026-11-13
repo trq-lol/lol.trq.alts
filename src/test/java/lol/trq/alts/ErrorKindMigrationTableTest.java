@@ -48,6 +48,7 @@ class ErrorKindMigrationTableTest {
         rows.put("FailureReason.TIMED_OUT", "TIMED_OUT");
         rows.put("AccountException.tokenRefused()", "UNAUTHORIZED");
         rows.put("AccountException.notFound()", "NOT_FOUND");
+        rows.put("AccountException.notFound() from ProfileService.fetch", "NOT_ENTITLED");
         rows.put("AccountException.rateLimited()", "RATE_LIMITED");
         rows.put("AccountException status 5xx or 408", "NETWORK");
         rows.put("AccountException status 400 or 422", "INVALID_INPUT");
