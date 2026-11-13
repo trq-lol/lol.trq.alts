@@ -67,6 +67,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MicrosoftAuthUtil`, `CookieAuthUtil` and `AccountNetworkUtil` (all internal, moving under
   `lol.trq.alts.internal` before the release) take the runtime's transport or executor through their
   constructors; the auth chain's request methods are instance methods.
+- **Breaking: `NetworkScope` gains a fourth component, `Optional<String> routeTag`,** so a deconstruction
+  pattern over it needs one more binding; the three-argument constructor, `of` and `forAccount` remain
+  and give an empty tag. New `AltLoginService.routed(String tag)` returns a view of the login service
+  whose every request, on every hop of every route (the renewal behind `loginAccount` included),
+  reaches the `ProxyProvider` with that tag, and new `BulkOptions.withRouteTag(tag)` does the same for
+  `importCredentials`. A host that pins accounts to proxies can now route a new account's first
+  sign-in before any UUID exists. `routed` is abstract, so a host's own `AltLoginService`
+  implementation has to add it; `BulkOptions` gains a sixth component, `Optional<String> routeTag`, and
+  keeps its five-argument constructor.
 
 ### Removed
 

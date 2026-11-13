@@ -99,6 +99,24 @@ public class AltLoginServiceImpl implements AltLoginService {
     }
 
     /**
+     * Returns a view whose every request carries {@code tag}; see {@link AltLoginService#routed(String)}.
+     * The view shares this service's store, session injector, configuration and clock, and its account
+     * service is tagged too, so the renewal behind {@code loginAccount} carries the tag on every hop.
+     *
+     * @param tag the host's route tag
+     * @return the tagged view
+     * @since 1.0.0
+     */
+    @Override
+    public AltLoginServiceImpl routed(String tag) {
+        AltLoginServiceImpl view =
+                new AltLoginServiceImpl(store, sessionInjector, microsoftAuth, http.routed(tag), clock);
+        view.deviceCodeTiming = deviceCodeTiming;
+        view.browser = browser;
+        return view;
+    }
+
+    /**
      * Returns the account service this login service is built on, for a caller that wants to validate or
      * renew without installing a session.
      *

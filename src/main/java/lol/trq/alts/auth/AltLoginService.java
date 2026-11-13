@@ -109,4 +109,21 @@ public interface AltLoginService {
      * @return a future containing the result of the login attempt
      */
     CompletableFuture<AltLoginCallback.LoginResult> loginAccount(AltAccount account);
+
+    /**
+     * Returns a view of this login service whose every request carries {@code tag} as the
+     * {@link lol.trq.alts.net.NetworkScope#routeTag() route tag} its proxy provider sees, on every hop
+     * of every route: the token exchange, Xbox Live, XSTS, the Minecraft services login, the profile
+     * lookup, the cookie chain, and the renewal behind {@link #loginAccount(AltAccount)}. For a host that
+     * pins each account to its own proxy and has to route a new account's first sign-in before any
+     * account UUID exists to route on. The view stores, injects and classifies exactly as this service
+     * does; only the tag differs.
+     *
+     * @param tag the host's route tag
+     * @return the tagged view
+     * @throws NullPointerException if {@code tag} is null
+     * @throws IllegalArgumentException if {@code tag} is blank
+     * @since 1.0.0
+     */
+    AltLoginService routed(String tag);
 }

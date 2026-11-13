@@ -755,6 +755,11 @@ class BulkOperationsTest {
     /** Stands in for a login service the account-only runs never reach. */
     private static class UnusedLoginService implements lol.trq.alts.auth.AltLoginService {
 
+        @Override
+        public lol.trq.alts.auth.AltLoginService routed(String tag) {
+            throw new AssertionError("no run here carries a route tag");
+        }
+
         private static CompletableFuture<lol.trq.alts.auth.AltLoginCallback.LoginResult> unused() {
             throw new AssertionError("the import routes are not exercised by an account run");
         }

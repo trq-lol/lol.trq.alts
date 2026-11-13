@@ -18,6 +18,11 @@ import lol.trq.alts.net.ProxyRoute;
  * it was covered. A failed request is recoverable; a disclosed address is not. Say "direct is fine here"
  * by returning {@link ProxyRoute#direct()}.
  *
+ * <p>A provider belongs to one runtime: it is asked about that runtime's requests and no other's. A
+ * request with no account yet, such as a new account's first sign-in, can still be routed: a sign-in
+ * started through {@code AltLoginService.routed(tag)}, or a bulk import with a route tag, carries the
+ * tag in {@link NetworkScope#routeTag()} on every request it makes.
+ *
  * @author trq
  * @since 0.8.0
  */

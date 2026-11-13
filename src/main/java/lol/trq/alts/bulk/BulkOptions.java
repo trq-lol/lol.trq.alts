@@ -1,6 +1,7 @@
 package lol.trq.alts.bulk;
 
 import java.time.Duration;
+import java.util.Optional;
 
 /**
  * How a bulk run should pace itself.
@@ -11,11 +12,18 @@ import java.time.Duration;
  * @param retryBaseDelay the delay a retry grows from when the service asked for nothing specific
  * @param stopOnRateLimit whether a rate limit ends the run rather than being waited out; a limit counts
  *     whether or not the service said how long to wait
+ * @param routeTag the route tag an import's sign-ins carry, on every request, to the proxy provider, or
+ *     empty for none; see {@link #withRouteTag(String)}. Added in 1.0.0
  * @author trq
  * @since 0.9.0
  */
 public record BulkOptions(
-        int concurrency, Duration minSpacing, int maxRetries, Duration retryBaseDelay, boolean stopOnRateLimit) {
+        int concurrency,
+        Duration minSpacing,
+        int maxRetries,
+        Duration retryBaseDelay,
+        boolean stopOnRateLimit,
+        Optional<String> routeTag) {
 
     /** Validates the shape, since a zero concurrency would hang the run and a negative delay is a bug. */
     public BulkOptions {
@@ -27,6 +35,25 @@ public record BulkOptions(
         }
         minSpacing = nonNegative(minSpacing);
         retryBaseDelay = nonNegative(retryBaseDelay);
+        routeTag = routeTag == null ? Optional.empty() : routeTag;
+        if (routeTag.isPresent() && routeTag.get().isBlank()) {
+            throw new IllegalArgumentException("a route tag must not be blank");
+        }
+    }
+
+    /**
+     * Creates options with no route tag: the shape before the tag existed.
+     *
+     * @param concurrency how many entries may be in flight at once
+     * @param minSpacing the least time between two entries starting
+     * @param maxRetries how many times a retryable failure is retried, beyond the first attempt
+     * @param retryBaseDelay the delay a retry grows from when the service asked for nothing specific
+     * @param stopOnRateLimit whether a rate limit ends the run rather than being waited out
+     * @since 0.9.0
+     */
+    public BulkOptions(
+            int concurrency, Duration minSpacing, int maxRetries, Duration retryBaseDelay, boolean stopOnRateLimit) {
+        this(concurrency, minSpacing, maxRetries, retryBaseDelay, stopOnRateLimit, Optional.empty());
     }
 
     /**
@@ -52,7 +79,7 @@ public record BulkOptions(
      * @since 0.9.0
      */
     public BulkOptions withConcurrency(int value) {
-        return new BulkOptions(value, minSpacing, maxRetries, retryBaseDelay, stopOnRateLimit);
+        return new BulkOptions(value, minSpacing, maxRetries, retryBaseDelay, stopOnRateLimit, routeTag);
     }
 
     /**
@@ -67,7 +94,25 @@ public record BulkOptions(
      * @since 0.9.0
      */
     public BulkOptions withoutStoppingOnRateLimit() {
-        return new BulkOptions(concurrency, minSpacing, maxRetries, retryBaseDelay, false);
+        return new BulkOptions(concurrency, minSpacing, maxRetries, retryBaseDelay, false, routeTag);
+    }
+
+    /**
+     * Returns a copy whose import signs every credential in through
+     * {@code AltLoginService.routed(tag)}: every request of every entry, on every hop, reaches the proxy
+     * provider with {@code tag} as its {@code NetworkScope.routeTag()}. For a host that pins accounts to
+     * proxies and wants a batch of new accounts to sign in through one it chose. Only
+     * {@code importCredentials} reads it; the runs over stored accounts name the account on every hop
+     * instead.
+     *
+     * @param tag the route tag
+     * @return a copy with the tag set
+     * @throws NullPointerException if {@code tag} is null
+     * @throws IllegalArgumentException if {@code tag} is blank
+     * @since 1.0.0
+     */
+    public BulkOptions withRouteTag(String tag) {
+        return new BulkOptions(concurrency, minSpacing, maxRetries, retryBaseDelay, stopOnRateLimit, Optional.of(tag));
     }
 
     private static Duration nonNegative(Duration value) {

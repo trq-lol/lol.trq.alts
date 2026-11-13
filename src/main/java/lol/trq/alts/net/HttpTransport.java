@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.function.Predicate;
 import javax.net.ssl.HttpsURLConnection;
@@ -96,21 +97,8 @@ public final class HttpTransport implements AutoCloseable {
     private final ProxyProvider proxyProvider;
     private final Executor executor;
     private final SSLSocketFactory tlsOverride;
-    private final List<ProxyTunnelSocketFactory> retired = new ArrayList<>();
-    private final Map<TunnelIdentity, ProxyTunnelSocketFactory> tunnelFactories = new LinkedHashMap<>(16, 0.75f, true) {
-        @Override
-        protected boolean removeEldestEntry(Map.Entry<TunnelIdentity, ProxyTunnelSocketFactory> eldest) {
-            if (size() <= MAX_TUNNEL_FACTORIES) {
-                return false;
-            }
-            // Its idle connections stay in the JDK's pool until they age out, so it is kept where
-            // close() can still reach them.
-            retired.removeIf(ProxyTunnelSocketFactory::idle);
-            retired.add(eldest.getValue());
-            return true;
-        }
-    };
-    private volatile boolean closed;
+    private final Tunnels tunnels;
+    private final String routeTag;
 
     /**
      * Creates a transport.
@@ -133,9 +121,46 @@ public final class HttpTransport implements AutoCloseable {
      * @param tls the TLS socket factory, or null for the JVM default
      */
     HttpTransport(ProxyProvider proxyProvider, Executor executor, SSLSocketFactory tls) {
+        this(proxyProvider, Objects.requireNonNull(executor, "executor"), tls, new Tunnels(), null);
+    }
+
+    private HttpTransport(
+            ProxyProvider proxyProvider, Executor executor, SSLSocketFactory tls, Tunnels tunnels, String routeTag) {
         this.proxyProvider = proxyProvider;
-        this.executor = Objects.requireNonNull(executor, "executor");
+        this.executor = executor;
         this.tlsOverride = tls;
+        this.tunnels = tunnels;
+        this.routeTag = routeTag;
+    }
+
+    /**
+     * Returns a view of this transport whose every request carries {@code tag} as its scope's
+     * {@link NetworkScope#routeTag()}, so the proxy provider can route a request that has no account yet,
+     * such as a new account's first sign-in. The view shares everything else: the provider, the executor,
+     * the tunnels, and being closed.
+     *
+     * @param tag the host's route tag
+     * @return the tagged view
+     * @throws NullPointerException if {@code tag} is null
+     * @throws IllegalArgumentException if {@code tag} is blank
+     * @since 1.0.0
+     */
+    public HttpTransport routed(String tag) {
+        Objects.requireNonNull(tag, "tag");
+        if (tag.isBlank()) {
+            throw new IllegalArgumentException("a route tag must not be blank");
+        }
+        return new HttpTransport(proxyProvider, executor, tlsOverride, tunnels, tag);
+    }
+
+    /**
+     * Returns the route tag this view stamps on every request, if it is a tagged view.
+     *
+     * @return the tag, or empty for an untagged transport
+     * @since 1.0.0
+     */
+    public Optional<String> routeTag() {
+        return Optional.ofNullable(routeTag);
     }
 
     /**
@@ -152,28 +177,19 @@ public final class HttpTransport implements AutoCloseable {
     }
 
     /**
-     * Closes every pooled tunnel connection and refuses every request made from now on. Idempotent. A
-     * request already past its route resolution may still complete or fail on its own.
+     * Closes every pooled tunnel connection and refuses every request made from now on, on this
+     * transport and every view of it. Idempotent. A request already past its route resolution may still
+     * complete or fail on its own.
      *
      * @since 1.0.0
      */
     @Override
     public void close() {
-        closed = true;
-        List<ProxyTunnelSocketFactory> factories;
-        synchronized (tunnelFactories) {
-            factories = new ArrayList<>(tunnelFactories.values());
-            factories.addAll(retired);
-            tunnelFactories.clear();
-            retired.clear();
-        }
-        for (ProxyTunnelSocketFactory factory : factories) {
-            factory.closeAll();
-        }
+        tunnels.close();
     }
 
     /**
-     * Resolves the route a request should take.
+     * Resolves the route a request should take, with this view's route tag stamped on the scope.
      *
      * <p>Fails closed when a provider is set: a provider that throws or returns null fails the request
      * rather than quietly connecting directly, because a silent fallback discloses the host's real
@@ -184,7 +200,7 @@ public final class HttpTransport implements AutoCloseable {
      * @throws IOException if the transport is closed or the provider could not name a route
      */
     ProxyRoute routeFor(NetworkScope scope) throws IOException {
-        if (closed) {
+        if (tunnels.closed) {
             throw new IOException("the runtime is closed");
         }
         ProxyProvider provider = proxyProvider;
@@ -192,6 +208,9 @@ public final class HttpTransport implements AutoCloseable {
             return ProxyRoute.direct();
         }
         NetworkScope effective = scope == null ? NetworkScope.of(NetworkScope.Purpose.AUTH) : scope;
+        if (routeTag != null) {
+            effective = effective.withRouteTag(routeTag);
+        }
         ProxyRoute route;
         try {
             route = provider.routeFor(effective);
@@ -202,6 +221,44 @@ public final class HttpTransport implements AutoCloseable {
             throw new IOException("proxy provider named no route for " + effective.purpose());
         }
         return route;
+    }
+
+    /**
+     * The tunnel factories of one transport and its views, and whether it is closed. The factory
+     * instance is the JDK's keep-alive key, so two transports never share one, and a view shares its
+     * transport's.
+     */
+    private static final class Tunnels {
+
+        private final List<ProxyTunnelSocketFactory> retired = new ArrayList<>();
+        private final Map<TunnelIdentity, ProxyTunnelSocketFactory> factories = new LinkedHashMap<>(16, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<TunnelIdentity, ProxyTunnelSocketFactory> eldest) {
+                if (size() <= MAX_TUNNEL_FACTORIES) {
+                    return false;
+                }
+                // Its idle connections stay in the JDK's pool until they age out, so it is kept
+                // where close() can still reach them.
+                retired.removeIf(ProxyTunnelSocketFactory::idle);
+                retired.add(eldest.getValue());
+                return true;
+            }
+        };
+        private volatile boolean closed;
+
+        void close() {
+            closed = true;
+            List<ProxyTunnelSocketFactory> open;
+            synchronized (factories) {
+                open = new ArrayList<>(factories.values());
+                open.addAll(retired);
+                factories.clear();
+                retired.clear();
+            }
+            for (ProxyTunnelSocketFactory factory : open) {
+                factory.closeAll();
+            }
+        }
     }
 
     /**
@@ -312,8 +369,8 @@ public final class HttpTransport implements AutoCloseable {
     private ProxyTunnelSocketFactory tunnelFactory(ProxyRoute route) {
         TunnelIdentity identity = new TunnelIdentity(
                 route.host().toLowerCase(Locale.ROOT), route.port(), route.username(), route.authorizationHeader());
-        synchronized (tunnelFactories) {
-            return tunnelFactories.computeIfAbsent(
+        synchronized (tunnels.factories) {
+            return tunnels.factories.computeIfAbsent(
                     identity,
                     key -> new ProxyTunnelSocketFactory(
                             route.host(), key.port(), key.authorization(), this::tlsSocketFactory));
@@ -337,8 +394,8 @@ public final class HttpTransport implements AutoCloseable {
      * @return the size of the factory cache
      */
     int tunnelFactoryCount() {
-        synchronized (tunnelFactories) {
-            return tunnelFactories.size();
+        synchronized (tunnels.factories) {
+            return tunnels.factories.size();
         }
     }
 

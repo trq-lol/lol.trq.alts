@@ -2,6 +2,7 @@ package lol.trq.alts.auth;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -12,6 +13,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import lol.trq.alts.auth.AltLoginCallback.LoginResult;
 import lol.trq.alts.model.AccountType;
@@ -83,6 +85,7 @@ class RefreshScopeRoutingTest {
         for (NetworkScope scope : scopes) {
             assertEquals(AuthChainServer.UUID, scope.accountUuid(), "a hop left without its account: " + scope);
             assertEquals("Alex", scope.accountUsername());
+            assertEquals(Optional.empty(), scope.routeTag(), "an unrouted renewal carries no tag");
         }
         assertEquals(
                 List.of(
@@ -159,5 +162,55 @@ class RefreshScopeRoutingTest {
         for (NetworkScope scope : scopes) {
             assertNull(scope.accountUuid());
         }
+    }
+
+    @Test
+    void aRoutedSignInCarriesItsTagOnEveryHop() throws Exception {
+        AltLoginService routed = new AltLoginServiceImpl(
+                        localStore.store(), session -> {}, chain.config(), transport, clock())
+                .routed("pool-7");
+
+        LoginResult result =
+                routed.loginRefreshToken("pasted-refresh", LoginMode.DIRECT).get(10, TimeUnit.SECONDS);
+
+        assertTrue(result.success(), result.message());
+        assertEquals(5, scopes.size(), "token, Xbox Live, XSTS, Minecraft login, profile: " + scopes);
+        for (NetworkScope scope : scopes) {
+            assertEquals(Optional.of("pool-7"), scope.routeTag(), "a hop left without the route tag: " + scope);
+            assertNull(scope.accountUuid(), "and there is still no account to route on");
+        }
+    }
+
+    @Test
+    void aRoutedLoginOfAStoredAccountCarriesTheTagThroughItsRenewal() throws Exception {
+        AltAccount account = expiredRenewableAccount();
+        localStore.seed(account);
+        AltLoginServiceImpl logins =
+                new AltLoginServiceImpl(localStore.store(), session -> {}, chain.config(), transport, clock());
+
+        LoginResult result = logins.routed("pool-7").loginAccount(account).get(10, TimeUnit.SECONDS);
+        assertTrue(result.success(), result.message());
+        assertEquals(5, scopes.size());
+        for (NetworkScope scope : scopes) {
+            assertEquals(Optional.of("pool-7"), scope.routeTag(), "a renewal hop lost the tag: " + scope);
+            assertEquals(AuthChainServer.UUID, scope.accountUuid(), "and still names its account");
+        }
+
+        // The view leaves the service it came from untagged.
+        scopes.clear();
+        localStore.seed(expiredRenewableAccount());
+        assertTrue(logins.loginAccount(expiredRenewableAccount())
+                .get(10, TimeUnit.SECONDS)
+                .success());
+        assertTrue(scopes.stream().allMatch(scope -> scope.routeTag().isEmpty()), scopes.toString());
+    }
+
+    @Test
+    void aBlankTagIsRefused() {
+        AltLoginServiceImpl logins =
+                new AltLoginServiceImpl(localStore.store(), session -> {}, chain.config(), transport, clock());
+
+        assertThrows(IllegalArgumentException.class, () -> logins.routed(" "));
+        assertThrows(NullPointerException.class, () -> logins.routed(null));
     }
 }

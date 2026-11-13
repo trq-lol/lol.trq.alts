@@ -87,13 +87,17 @@ public final class BulkOperationsImpl implements BulkOperations {
         // pointer is put back where the run found it.
         Optional<AltAccount> before = store.currentAccount();
 
+        // A route tag makes every sign-in of the run go through a tagged view, so each request it makes,
+        // on every hop, reaches the provider with the tag.
+        BulkOptions paced = options == null ? BulkOptions.defaults() : options;
+        AltLoginService logins = paced.routeTag().map(importService::routed).orElse(importService);
         Run run = new Run(
                 executor,
                 items.size(),
-                options,
+                paced,
                 progress,
                 index -> BulkEntryResult.positionalLabel(index),
-                index -> importOne(items.get(index), mode));
+                index -> importOne(logins, items.get(index), mode));
         run.report.whenComplete((report, failure) -> store.useAccount(before.orElse(null)));
         return start(run);
     }
@@ -188,11 +192,12 @@ public final class BulkOperationsImpl implements BulkOperations {
     /**
      * Sends one credential line to the route that fits it.
      *
+     * @param importService the login service to sign in through, tagged or not
      * @param entry the line
      * @param mode whether to store what it resolves to
      * @return the attempt
      */
-    private CompletableFuture<Attempt> importOne(String entry, LoginMode mode) {
+    private static CompletableFuture<Attempt> importOne(AltLoginService importService, String entry, LoginMode mode) {
         CredentialKind kind = CredentialKind.detect(entry);
         return switch (kind) {
             case REFRESH_TOKEN -> importService.loginRefreshToken(entry, mode).thenApply(BulkOperationsImpl::toAttempt);
