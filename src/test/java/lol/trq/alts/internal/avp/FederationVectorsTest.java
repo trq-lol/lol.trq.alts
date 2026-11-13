@@ -99,6 +99,35 @@ class FederationVectorsTest {
         }
     }
 
+    /**
+     * SPEC 11.2: a repo locator names a 22-character base64url repository id and a 16-hex-digit owner
+     * fingerprint; a pasted token or locator is trimmed of surrounding whitespace.
+     */
+    @Test
+    void aRepoLocatorWithAMalformedIdOrFingerprintIsRefused() {
+        JsonObject t = Vectors.cases(ROOT, "tokens", 5).get(1);
+        assertEquals("RepoLocator", str(t, "schema"));
+        JsonObject decoded = Tokens.decode(" \t" + str(t, "base64url") + "\r\n");
+        assertEquals(str(t, "base64url"), Tokens.encode(Tokens.toJson(Tokens.locatorFromJson(decoded))));
+        String[][] bad = {
+            {"repoId", "RBhoUI0PUSR7tD5HpFC9l"},
+            {"repoId", "RBhoUI0PUSR7tD5HpFC9lA="},
+            {"repoId", "RBhoUI0PUSR7tD5HpFC9+A"},
+            {"ownerFingerprint", "267B69E617FA4594"},
+            {"ownerFingerprint", "267b69e617fa459"},
+            {"ownerFingerprint", "267b-69e6-17fa-4594"}
+        };
+        for (String[] b : bad) {
+            JsonObject o = decoded.deepCopy();
+            o.addProperty(b[0], b[1]);
+            AltsException e = assertThrows(AltsException.class, () -> Tokens.locatorFromJson(o), b[1]);
+            assertEquals(Kind.PROTOCOL, e.kind(), b[1]);
+        }
+        JsonObject u = Vectors.cases(ROOT, "uris", 2).get(0);
+        assertEquals(
+                str(u, "repoId"), Tokens.parseUri("  " + str(u, "uri") + "\n").repoId());
+    }
+
     @Test
     void theInviteAcceptanceIsSignedByTheJoinersHomeHostAndVerifiedAsTheOwnerMust() {
         JsonObject t = Vectors.cases(ROOT, "tokens", 5).get(0);

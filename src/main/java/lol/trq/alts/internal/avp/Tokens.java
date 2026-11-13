@@ -25,6 +25,7 @@ import lol.trq.alts.internal.avp.AvpCrypto.WrapLabel;
 public final class Tokens {
 
     private static final Pattern REPO_ID = Pattern.compile("[A-Za-z0-9_-]{22}");
+    private static final Pattern OWNER_FINGERPRINT = Pattern.compile("[0-9a-f]{16}");
 
     private Tokens() {}
 
@@ -151,7 +152,7 @@ public final class Tokens {
     }
 
     /**
-     * Decodes a token's outer encoding.
+     * Decodes a token's outer encoding. Whitespace around a pasted token is trimmed first.
      *
      * @param token the token text
      * @return the JSON object, for a typed decoder
@@ -159,7 +160,7 @@ public final class Tokens {
      *     base64url-nopad over a strict JSON object
      */
     public static JsonObject decode(String token) {
-        return AvpJson.object(AvpJson.parse(AvpBytes.fromBase64Url(token, "the token")), "a token");
+        return AvpJson.object(AvpJson.parse(AvpBytes.fromBase64Url(token.strip(), "the token")), "a token");
     }
 
     private static void requireV2(JsonObject o) {
@@ -312,11 +313,16 @@ public final class Tokens {
      */
     public static RepoLocator locatorFromJson(JsonObject json) {
         requireV2(json);
+        String repoId = AvpJson.string(json, "repoId");
+        if (!REPO_ID.matcher(repoId).matches()) {
+            throw AvpFailures.protocol("the repo locator's repository id is not 22 base64url characters");
+        }
+        String fingerprint = AvpJson.string(json, "ownerFingerprint");
+        if (!OWNER_FINGERPRINT.matcher(fingerprint).matches()) {
+            throw AvpFailures.protocol("the repo locator's owner fingerprint is not 16 hex digits");
+        }
         return new RepoLocator(
-                AvpJson.string(json, "repoId"),
-                AvpJson.bytes(json, "hostKey", 32),
-                AvpJson.string(json, "hostLocator"),
-                AvpJson.string(json, "ownerFingerprint"));
+                repoId, AvpJson.bytes(json, "hostKey", 32), AvpJson.string(json, "hostLocator"), fingerprint);
     }
 
     /**
@@ -575,7 +581,7 @@ public final class Tokens {
     }
 
     /**
-     * Parses {@code avp://<hostLocator>/<repoId>}.
+     * Parses {@code avp://<hostLocator>/<repoId>}, trimmed of surrounding whitespace.
      *
      * @param uri the text
      * @return the locator
@@ -583,10 +589,11 @@ public final class Tokens {
      *     the host locator is empty, or the id is not 22 base64url characters
      */
     public static AvpUri parseUri(String uri) {
-        if (!uri.startsWith("avp://")) {
+        String text = uri.strip();
+        if (!text.startsWith("avp://")) {
             throw AvpFailures.protocol("not an avp:// locator");
         }
-        String rest = uri.substring("avp://".length());
+        String rest = text.substring("avp://".length());
         int slash = rest.indexOf('/');
         if (slash <= 0) {
             throw AvpFailures.protocol("not an avp:// locator");
