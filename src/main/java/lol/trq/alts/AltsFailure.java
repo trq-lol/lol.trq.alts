@@ -133,8 +133,10 @@ public record AltsFailure(
         CONFLICT,
 
         /**
-         * The operation needs host configuration that was not supplied, such as Microsoft sign-in without
-         * a {@code MicrosoftAuthConfig}, or a device-code sign-in without a prompt.
+         * The host's configuration is missing or was refused: Microsoft sign-in without a
+         * {@code MicrosoftAuthConfig}, or a token endpoint answering {@code invalid_client} or
+         * {@code unauthorized_client} to the host's client registration. Neither a retry nor a fresh
+         * sign-in fixes it.
          */
         NOT_CONFIGURED,
 

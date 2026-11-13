@@ -1013,9 +1013,10 @@ public final class MicrosoftAuthUtil {
 
     /**
      * Classifies a refused refresh-token redemption. Only a stated {@code invalid_grant} (see
-     * {@link #tokenIsSpent}) is {@link Kind#REAUTH_REQUIRED}; an outage stays {@link Kind#NETWORK} and
-     * any other refusal, a misconfigured host's included, is {@link Kind#UNAUTHORIZED}, which costs the
-     * stored credential nothing.
+     * {@link #tokenIsSpent}) is {@link Kind#REAUTH_REQUIRED}; a refused client registration
+     * ({@code invalid_client} or {@code unauthorized_client}) is {@link Kind#NOT_CONFIGURED}; an outage
+     * stays {@link Kind#NETWORK}; and any other refusal is {@link Kind#UNAUTHORIZED}. None but the first
+     * costs the stored credential anything.
      *
      * @param response the token endpoint's rejection, not a {@code 429}
      * @return the exception to fail the flow with
