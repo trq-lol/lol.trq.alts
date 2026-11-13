@@ -265,6 +265,18 @@ public final class AltsRuntime<H> implements AutoCloseable {
      * flight when the runtime closes resolves, as a failure if it still had a request to make, and what
      * it would have saved is not saved.
      *
+     * <p>Whatever was waiting on the runtime ends here too: a bulk run paced between entries, a
+     * device-code sign-in between polls, a scheduled name claim, a browser sign-in waiting for its
+     * callback. Each such wait fails on the thread that calls {@code close()}, and so do the callbacks
+     * chained onto it: a bulk run's {@code BulkProgress.finished} and the completion of its report, and
+     * whatever a sign-in's future runs as it fails, including continuations the host attached to it. A
+     * host that calls {@code close()} from its main thread should expect that work there, and must not
+     * block in such a callback on something only {@code close()} would release.
+     *
+     * <p>A wait that was due far in the future, such as a claim scheduled hours ahead, is failed at
+     * once, but the JDK keeps the small task that would have woken it queued in its own delay scheduler
+     * until its original time; that task then does nothing.
+     *
      * @since 1.0.0
      */
     @Override
