@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Gates this library's crypto against the published Alt Vault Protocol conformance vectors (vendored from
- * {@code trqlmao/avp} under {@code src/test/resources/avp-vectors}). Round-trip tests prove the library is
+ * {@code trqlmao/avp} 0.4 under {@code src/test/resources/avp-vectors/0.4}). Round-trip tests prove the library is
  * self-consistent; these prove it is byte-for-byte interoperable with every other AVP implementation, so a
  * silent change to a construction (an AAD field order, a base64 variant, an HKDF salt) is caught here.
  */
@@ -34,7 +34,7 @@ class AvpConformanceVectorsTest {
     private static final byte[] WRAP_INFO = "avp/rdk-wrap/v1".getBytes(StandardCharsets.UTF_8);
 
     private static JsonArray cases(String file) throws Exception {
-        try (InputStream in = AvpConformanceVectorsTest.class.getResourceAsStream("/avp-vectors/" + file)) {
+        try (InputStream in = AvpConformanceVectorsTest.class.getResourceAsStream("/avp-vectors/0.4/" + file)) {
             Objects.requireNonNull(in, "missing vendored vector resource: " + file);
             JsonObject root = JsonParser.parseReader(new InputStreamReader(in, StandardCharsets.UTF_8))
                     .getAsJsonObject();
