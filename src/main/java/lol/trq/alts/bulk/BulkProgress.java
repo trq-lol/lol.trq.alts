@@ -44,7 +44,8 @@ public interface BulkProgress {
     void completed(int index, int total, BulkEntryResult result);
 
     /**
-     * Called once when the run is over, however it ended.
+     * Called once when the run is over, however it ended, and before {@link BulkHandle#report()}
+     * completes: a caller woken by the report has already had this call, and every call before it.
      *
      * @param report what the run came to
      * @since 0.9.0

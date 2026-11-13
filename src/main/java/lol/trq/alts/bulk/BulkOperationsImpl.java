@@ -386,6 +386,7 @@ public final class BulkOperationsImpl implements BulkOperations {
         private final AtomicReferenceArray<BulkEntryResult> results;
         private final AtomicBoolean cancelled = new AtomicBoolean();
         private final AtomicBoolean stopped = new AtomicBoolean();
+        private final AtomicBoolean finishing = new AtomicBoolean();
         private final CompletableFuture<BulkReport> report = new CompletableFuture<>();
 
         private final Object spacingLock = new Object();
@@ -459,8 +460,15 @@ public final class BulkOperationsImpl implements BulkOperations {
                 }
             }
             BulkReport built = new BulkReport(collected, cancelled.get(), stopped.get());
-            if (report.complete(built)) {
+            if (!finishing.compareAndSet(false, true)) {
+                return;
+            }
+            // The last callback is delivered before the report completes, so a caller woken by the
+            // report has seen every callback; and the report completes even if that callback throws.
+            try {
                 progress.finished(built);
+            } finally {
+                report.complete(built);
             }
         }
 

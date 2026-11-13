@@ -108,6 +108,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `IoExecutor.resetForTests`, `NetTestHooks`): a test builds its own runtime or transport and needs no
   process-wide reset.
 
+### Fixed
+
+- A bulk run's report completed before its `BulkProgress.finished` callback ran, so a caller woken by
+  the report could miss it. The report now completes after `finished` has returned (or thrown).
+
 ## [0.12.0] - 2026-11-12
 
 Device-code login, a wider account surface, a host-supplied store key, and a hardening pass over the

@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import lol.trq.alts.auth.AccountStatus;
@@ -742,6 +743,63 @@ class BulkOperationsTest {
             assertEquals(6, completed.get());
             assertEquals(1, finished.get());
         }
+    }
+
+    /**
+     * The report completing is a caller's signal that the run is over, so every callback must already
+     * have been made: a host closing its progress view on the report must not then get a late
+     * {@code finished}. Made deterministic by a slow callback on the thread the run ends on.
+     */
+    @Test
+    void theReportCompletesOnlyAfterTheFinishedCallbackReturned() throws Exception {
+        AtomicInteger finished = new AtomicInteger();
+        // Resolved on another thread, so the run ends there while the caller waits on the report.
+        BulkOperations bulk = bulkOver(
+                account -> CompletableFuture.supplyAsync(() -> AccountStatus.valid(account), TestTransports.EXECUTOR));
+
+        bulk.refreshAll(accounts(3), FAST, new BulkProgress() {
+                    @Override
+                    public void started(int index, int total, String label) {}
+
+                    @Override
+                    public void completed(int index, int total, BulkEntryResult result) {}
+
+                    @Override
+                    public void finished(BulkReport report) {
+                        try {
+                            Thread.sleep(100);
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                        }
+                        finished.incrementAndGet();
+                    }
+                })
+                .report()
+                .get(10, TimeUnit.SECONDS);
+
+        assertEquals(1, finished.get(), "finished had returned before the report completed");
+    }
+
+    @Test
+    void aFinishedCallbackThatThrowsStillCompletesTheReport() throws Exception {
+        BulkOperations bulk = bulkOver(account -> CompletableFuture.completedFuture(AccountStatus.valid(account)));
+
+        BulkReport report = bulk.refreshAll(accounts(2), FAST, new BulkProgress() {
+                    @Override
+                    public void started(int index, int total, String label) {}
+
+                    @Override
+                    public void completed(int index, int total, BulkEntryResult result) {}
+
+                    @Override
+                    public void finished(BulkReport done) {
+                        throw new IllegalStateException("the host's view is gone");
+                    }
+                })
+                .report()
+                .get(10, TimeUnit.SECONDS);
+
+        assertEquals(2, report.succeeded());
     }
 
     @Test
