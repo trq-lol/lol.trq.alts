@@ -64,6 +64,11 @@ public interface SkinService {
      * <p>No failure this raises names the file: a path on the user's disk says where they keep things
      * and under what account name, and failure messages are what a host shows and logs.
      *
+     * <p>A file that is missing, unreadable or not an uploadable skin fails with kind
+     * {@link lol.trq.alts.AltsFailure.Kind#INVALID_INPUT}, which does not say which check it failed. A
+     * host that wants the reason to show reads the bytes itself and calls {@link #validate(byte[])} on
+     * them; there is no {@code validate(Path)}.
+     *
      * @param pngFile the skin PNG file
      * @param model the arm model to render it with
      * @return the updated profile
