@@ -3,6 +3,7 @@ package lol.trq.alts.net;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,6 +18,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -110,5 +112,39 @@ class HttpTransportWaitTest {
 
         assertThrows(ExecutionException.class, () -> wait.get(2, TimeUnit.SECONDS));
         assertEquals(0, transport.closerCount());
+    }
+
+    /**
+     * A wait asked for after the transport closed is ended at once, even an hour-long one on an
+     * executor that is still running: it must not wait out its delay to find the runtime gone.
+     */
+    @Test
+    void aWaitAskedForAfterCloseFailsAtOnce() throws Exception {
+        ExecutorService host = Executors.newSingleThreadExecutor();
+        try {
+            HttpTransport transport = new HttpTransport(null, host);
+            transport.close();
+
+            CompletableFuture<Void> wait = transport.delay(Duration.ofHours(1));
+
+            ExecutionException failed = assertThrows(ExecutionException.class, () -> wait.get(2, TimeUnit.SECONDS));
+            assertInstanceOf(IOException.class, failed.getCause());
+            assertFalse(host.isShutdown(), "the host's executor was never the reason");
+        } finally {
+            host.shutdownNow();
+        }
+    }
+
+    @Test
+    void anActionRegisteredAfterCloseRunsBeforeTheCallReturns() {
+        HttpTransport transport = TestTransports.direct();
+        transport.close();
+        Thread caller = Thread.currentThread();
+        AtomicReference<Thread> ranOn = new AtomicReference<>();
+
+        transport.whenClosed(() -> ranOn.set(Thread.currentThread()));
+
+        assertSame(caller, ranOn.get(), "it ran synchronously, on the registering thread");
+        assertEquals(0, transport.closerCount(), "and left nothing registered");
     }
 }
