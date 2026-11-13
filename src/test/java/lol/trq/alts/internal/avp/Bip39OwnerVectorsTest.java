@@ -28,6 +28,28 @@ class Bip39OwnerVectorsTest {
         assertEquals(2048, wordlist.get("words").getAsInt());
     }
 
+    /**
+     * The main-resource wordlist is the vendored upstream list, and a list that differs by one byte is
+     * refused before any word of it is used.
+     */
+    @Test
+    void theMainWordlistIsPinnedAndAnAlteredListIsRefused() throws Exception {
+        byte[] main;
+        try (java.io.InputStream in = Bip39.class.getResourceAsStream("bip39-english.txt")) {
+            main = in.readAllBytes();
+        }
+        assertEquals(AvpVectorFilesTest.SHA256.get("bip39-english.txt"), Vectors.hex(AvpCrypto.sha256(main)));
+        assertEquals(2048, Bip39.load(main).list().size());
+
+        byte[] altered = main.clone();
+        altered[0] ^= 0x20;
+        assertThrows(IllegalStateException.class, () -> Bip39.load(altered));
+        byte[] reordered = new String(main, java.nio.charset.StandardCharsets.UTF_8)
+                .replaceFirst("abandon\nability\n", "ability\nabandon\n")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        assertThrows(IllegalStateException.class, () -> Bip39.load(reordered));
+    }
+
     @Test
     void everyOwnerCaseReproduces() {
         for (JsonObject c : Vectors.cases(Vectors.load("bip39-owner.json"), "cases", 3)) {

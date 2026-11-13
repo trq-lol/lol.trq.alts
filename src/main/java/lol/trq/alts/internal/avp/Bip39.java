@@ -45,7 +45,7 @@ public final class Bip39 {
 
     private Bip39() {}
 
-    private record Words(List<String> list, Map<String, Integer> index) {}
+    record Words(List<String> list, Map<String, Integer> index) {}
 
     private static Words words() {
         Words w = words;
@@ -71,6 +71,17 @@ public final class Bip39 {
         } catch (IOException e) {
             throw new UncheckedIOException("the BIP39 wordlist resource cannot be read", e);
         }
+        return load(raw);
+    }
+
+    /**
+     * Builds the wordlist from the bytes of a list file, after checking them against the pinned SHA-256.
+     *
+     * @param raw the file bytes
+     * @return the list and its index
+     * @throws IllegalStateException if the bytes are not the pinned list
+     */
+    static Words load(byte[] raw) {
         if (!AvpBytes.hex(AvpCrypto.sha256(raw)).equals(WORDLIST_SHA256)) {
             throw new IllegalStateException("the BIP39 wordlist does not match its pinned SHA-256");
         }
