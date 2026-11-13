@@ -6,6 +6,8 @@ package lol.trq.alts.internal.avp;
  * secret; the constructor copies the arrays and the accessors return the record's own, which callers must
  * not modify.
  *
+ * <p>Ported from the Alt Vault Protocol reference implementation (MIT).
+ *
  * @param schemeId the wrap scheme id
  * @param ephemeralPublicKey the 32-byte ephemeral X25519 public key
  * @param iv the 12-byte AES-GCM IV
