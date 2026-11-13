@@ -117,22 +117,27 @@ public final class AvpCrypto {
         byte[] prk = hmacSha256(salt.length == 0 ? new byte[32] : salt, ikm);
         byte[] out = new byte[length];
         byte[] previous = new byte[0];
-        int filled = 0;
-        for (int counter = 1; filled < length; counter++) {
-            byte[] block = new byte[previous.length + info.length + 1];
-            System.arraycopy(previous, 0, block, 0, previous.length);
-            System.arraycopy(info, 0, block, previous.length, info.length);
-            block[block.length - 1] = (byte) counter;
+        byte[] block = new byte[0];
+        try {
+            int filled = 0;
+            for (int counter = 1; filled < length; counter++) {
+                block = new byte[previous.length + info.length + 1];
+                System.arraycopy(previous, 0, block, 0, previous.length);
+                System.arraycopy(info, 0, block, previous.length, info.length);
+                block[block.length - 1] = (byte) counter;
+                Arrays.fill(previous, (byte) 0);
+                previous = hmacSha256(prk, block);
+                Arrays.fill(block, (byte) 0);
+                int take = Math.min(previous.length, length - filled);
+                System.arraycopy(previous, 0, out, filled, take);
+                filled += take;
+            }
+            return out;
+        } finally {
+            Arrays.fill(prk, (byte) 0);
             Arrays.fill(previous, (byte) 0);
-            previous = hmacSha256(prk, block);
             Arrays.fill(block, (byte) 0);
-            int take = Math.min(previous.length, length - filled);
-            System.arraycopy(previous, 0, out, filled, take);
-            filled += take;
         }
-        Arrays.fill(previous, (byte) 0);
-        Arrays.fill(prk, (byte) 0);
-        return out;
     }
 
     /**

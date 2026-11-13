@@ -33,9 +33,10 @@ public final class OwnerKeys {
     private final byte[] x25519Private;
     private final byte[] x25519Public;
 
+    /** Copies the private keys; the caller zeroes its own arrays. */
     private OwnerKeys(byte[] ed25519Seed, byte[] x25519Private) {
-        this.ed25519Seed = ed25519Seed;
-        this.x25519Private = x25519Private;
+        this.ed25519Seed = ed25519Seed.clone();
+        this.x25519Private = x25519Private.clone();
         this.ownerKey = Ed25519Strict.publicKey(ed25519Seed);
         this.x25519Public = AvpCrypto.x25519Public(x25519Private);
     }
@@ -51,14 +52,15 @@ public final class OwnerKeys {
         if (seed.length != 64) {
             throw AvpFailures.invalidInput("a BIP39 seed is 64 bytes");
         }
-        byte[] ed = AvpCrypto.hkdf(seed, new byte[0], ED25519_INFO.getBytes(StandardCharsets.UTF_8), 32);
-        byte[] x = AvpCrypto.hkdf(seed, new byte[0], X25519_INFO.getBytes(StandardCharsets.UTF_8), 32);
+        byte[] ed = new byte[0];
+        byte[] x = new byte[0];
         try {
+            ed = AvpCrypto.hkdf(seed, new byte[0], ED25519_INFO.getBytes(StandardCharsets.UTF_8), 32);
+            x = AvpCrypto.hkdf(seed, new byte[0], X25519_INFO.getBytes(StandardCharsets.UTF_8), 32);
             return new OwnerKeys(ed, x);
-        } catch (RuntimeException failed) {
+        } finally {
             Arrays.fill(ed, (byte) 0);
             Arrays.fill(x, (byte) 0);
-            throw failed;
         }
     }
 
