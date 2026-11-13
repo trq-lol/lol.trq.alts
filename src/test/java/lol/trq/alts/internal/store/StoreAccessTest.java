@@ -1,10 +1,13 @@
 package lol.trq.alts.internal.store;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicBoolean;
 import lol.trq.alts.AltsRuntime;
@@ -74,5 +77,56 @@ class StoreAccessTest {
             assertTrue(alts.store().loadError().isEmpty());
         }
         assertFalse(reached.get(), "the foreign bridge never saw a key provider or a store");
+    }
+
+    @Test
+    void aBridgeOfTheRightNameFromAnotherClassLoaderIsRefused() {
+        String bridgeName = "lol.trq.alts.store.StoreBridge";
+        ClassLoader foreign = new ChildFirstLoader(StoreAccessTest.class.getClassLoader(), bridgeName);
+
+        // Initializing the copy runs its static initializer, which offers a bridge of the library's own
+        // class name to the library's StoreAccess; only the defining loader tells it apart.
+        ExceptionInInitializerError refused =
+                assertThrows(ExceptionInInitializerError.class, () -> Class.forName(bridgeName, true, foreign));
+
+        assertInstanceOf(IllegalArgumentException.class, refused.getCause());
+        assertNotSame(foreign, StoreAccess.bridge().getClass().getClassLoader());
+    }
+
+    /** Defines one class itself from the parent's bytes, so it shares the name but not the loader. */
+    private static final class ChildFirstLoader extends ClassLoader {
+
+        private final String own;
+
+        ChildFirstLoader(ClassLoader parent, String own) {
+            super(parent);
+            this.own = own;
+        }
+
+        @Override
+        protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+            if (!name.equals(own)) {
+                return super.loadClass(name, resolve);
+            }
+            synchronized (getClassLoadingLock(name)) {
+                Class<?> loaded = findLoadedClass(name);
+                if (loaded == null) {
+                    String resource = name.replace('.', '/') + ".class";
+                    try (InputStream in = getParent().getResourceAsStream(resource)) {
+                        if (in == null) {
+                            throw new ClassNotFoundException(name);
+                        }
+                        byte[] bytes = in.readAllBytes();
+                        loaded = defineClass(name, bytes, 0, bytes.length);
+                    } catch (IOException unreadable) {
+                        throw new ClassNotFoundException(name, unreadable);
+                    }
+                }
+                if (resolve) {
+                    resolveClass(loaded);
+                }
+                return loaded;
+            }
+        }
     }
 }
