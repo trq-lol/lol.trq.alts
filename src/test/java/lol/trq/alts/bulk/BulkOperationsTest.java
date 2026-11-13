@@ -414,6 +414,60 @@ class BulkOperationsTest {
                 TestTransports.direct());
     }
 
+    /** A host's progress callback that throws as an entry finishes changes nothing: the run goes on. */
+    @Test
+    void aThrowingCompletedCallbackNeitherLosesTheEntryNorCutsTheRunShort() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        BulkOperations bulk = bulkOver(account -> {
+            calls.incrementAndGet();
+            return CompletableFuture.completedFuture(AccountStatus.valid(account));
+        });
+        BulkProgress throwingOnFirst = new BulkProgress() {
+            @Override
+            public void started(int index, int total, String label) {}
+
+            @Override
+            public void completed(int index, int total, BulkEntryResult result) {
+                if (index == 0) {
+                    throw new IllegalStateException("the host's list view is gone");
+                }
+            }
+        };
+
+        BulkReport report = bulk.refreshAll(accounts(3), FAST.withConcurrency(1), throwingOnFirst)
+                .report()
+                .get(10, TimeUnit.SECONDS);
+
+        assertEquals(3, report.results().size());
+        for (BulkEntryResult result : report.results()) {
+            assertTrue(result.success(), "entry " + result.index());
+        }
+        assertEquals(3, calls.get());
+        assertFalse(report.cancelled());
+    }
+
+    /**
+     * Cutting a run short claims only entries with no result: one already recorded is kept. No public
+     * route reaches this once callbacks cannot end a chain, so the run is driven directly.
+     */
+    @Test
+    void cuttingARunShortKeepsAnEntryAlreadyRecorded() throws Exception {
+        BulkOperationsImpl.Run run = new BulkOperationsImpl.Run(
+                TestTransports.direct(), 3, FAST, BulkProgress.NONE, index -> "entry " + index, null);
+        BulkEntryResult done = BulkEntryResult.success(0, account(0), "ok", 1);
+        run.record(0, done);
+
+        run.cancelFrom(0, lol.trq.alts.AltsFailure.of(Kind.CANCELLED, "cut short"));
+        run.finish();
+        BulkReport report = run.report().get(10, TimeUnit.SECONDS);
+
+        assertEquals(done, report.results().get(0), "the recorded entry survives");
+        assertEquals(
+                Kind.CANCELLED, report.results().get(1).failure().orElseThrow().kind());
+        assertEquals(
+                Kind.CANCELLED, report.results().get(2).failure().orElseThrow().kind());
+    }
+
     /** A line that is no credential at all is input the host gave, refused without a request. */
     @Test
     void aLineThatIsNoCredentialIsInvalidInput() throws Exception {

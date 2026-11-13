@@ -9,6 +9,10 @@ package lol.trq.alts.bulk;
  * <p>Reported per entry rather than as a percentage on purpose: a bar tells a user how long to wait,
  * while the thing they actually need to know is <em>which</em> alt failed and why.
  *
+ * <p>An exception a callback throws is ignored by the run: {@link #completed} and {@link #finished}
+ * failing changes nothing (the entry stays recorded, the report still completes), and {@link #started}
+ * failing only fails the entry it announced, as that method says.
+ *
  * @author trq
  * @since 0.9.0
  */

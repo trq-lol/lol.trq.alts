@@ -254,10 +254,9 @@ public final class BulkOperationsImpl implements BulkOperations {
                 // this entry and every one no worker has taken yet are reported as cancelled, so the
                 // report still holds every entry and says why the run ended where it did.
                 .exceptionally(failure -> {
-                    AltsFailure cut = FailureText.toFailure("Bulk run", failure);
-                    AltsFailure cancelled = cut.kind() == Kind.CANCELLED
-                            ? cut
-                            : AltsFailure.of(Kind.CANCELLED, "Bulk run: cut short (" + cut.message() + ")");
+                    // FailureText.of describes the cause once, so the message never says "Bulk run" twice.
+                    AltsFailure cancelled =
+                            AltsFailure.of(Kind.CANCELLED, "Bulk run: cut short (" + FailureText.of(failure) + ")");
                     run.cancelFrom(index, cancelled);
                     return null;
                 });
@@ -400,7 +399,9 @@ public final class BulkOperationsImpl implements BulkOperations {
     }
 
     /** The mutable state of one run, and its handle. */
-    private static final class Run implements BulkHandle {
+    // Package-private, not private, so a test can drive cancelFrom against an entry already recorded,
+    // a state no public route can reach once a throwing callback no longer ends a chain.
+    static final class Run implements BulkHandle {
 
         private final HttpTransport transport;
         private final int total;
@@ -475,7 +476,11 @@ public final class BulkOperationsImpl implements BulkOperations {
 
         void record(int index, BulkEntryResult result) {
             results.set(index, result);
-            progress.completed(index, total, result);
+            try {
+                progress.completed(index, total, result);
+            } catch (RuntimeException hostFailure) {
+                // The host's callback failing is not the run's: the entry is recorded, the run goes on.
+            }
         }
 
         /**
