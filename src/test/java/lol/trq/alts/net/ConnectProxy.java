@@ -28,6 +28,7 @@ final class ConnectProxy implements AutoCloseable {
     private final String requiredAuthorization;
     private final List<String> requestLines = Collections.synchronizedList(new ArrayList<>());
     private final List<String> authorizations = Collections.synchronizedList(new ArrayList<>());
+    private final List<String> heads = Collections.synchronizedList(new ArrayList<>());
     private final List<Socket> open = Collections.synchronizedList(new ArrayList<>());
     private final AtomicInteger closedByClient = new AtomicInteger();
 
@@ -56,6 +57,11 @@ final class ConnectProxy implements AutoCloseable {
         return authorizations;
     }
 
+    /** The whole request head of every connection accepted, in order, as the proxy read it. */
+    List<String> heads() {
+        return heads;
+    }
+
     /** How many established tunnels the client itself closed: their client side reached end of stream. */
     int tunnelsClosedByClient() {
         return closedByClient.get();
@@ -75,7 +81,9 @@ final class ConnectProxy implements AutoCloseable {
 
     private void serve(Socket client) {
         try {
-            String[] head = readHead(client.getInputStream()).split("\r\n");
+            String raw = readHead(client.getInputStream());
+            heads.add(raw);
+            String[] head = raw.split("\r\n");
             String requestLine = head[0];
             String authorization = "";
             for (String header : head) {

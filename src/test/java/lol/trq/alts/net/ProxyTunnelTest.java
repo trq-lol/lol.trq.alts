@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.net.ssl.SSLException;
 import org.junit.jupiter.api.AfterAll;
@@ -209,6 +210,56 @@ class ProxyTunnelTest {
                 List.of("CONNECT " + loopback() + ":" + origin.getAddress().getPort() + " HTTP/1.1"),
                 proxy.requestLines());
         assertEquals(List.of(CREDENTIAL), proxy.authorizations());
+    }
+
+    /**
+     * The credential is the proxy's, and the origin is a service the host does not control: it must see
+     * neither the header nor the value under any name, on any request shape, while the proxy reads it
+     * exactly once, on the CONNECT that opens the tunnel.
+     */
+    @Test
+    void theProxyCredentialReachesTheProxyOnceAndTheOriginNever() throws Exception {
+        List<String> seenByOrigin = Collections.synchronizedList(new ArrayList<>());
+        AtomicInteger answered = new AtomicInteger();
+        origin.createContext("/headers", exchange -> {
+            exchange.getRequestHeaders()
+                    .forEach((name, values) -> values.forEach(value -> seenByOrigin.add(name + ": " + value)));
+            exchange.getRequestBody().readAllBytes();
+            answered.incrementAndGet();
+            byte[] bytes = "{}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        String url = "https://" + loopback() + ":" + origin.getAddress().getPort() + "/headers";
+        proxy = new ConnectProxy(CREDENTIAL);
+        bind(scope -> throughProxy().withCredentials("user", "pass".toCharArray()));
+
+        http.get(url, null, PROFILE);
+        http.postJsonForStatus(url, null, "{}", PROFILE);
+        http.sendForStatus("PUT", url, null, Map.of("X-Test", "1"), null, PROFILE);
+        http.getBytes(url, null, 1 << 20, PROFILE);
+
+        assertEquals(4, answered.get(), "the origin answered every request shape");
+        for (String header : seenByOrigin) {
+            String lower = header.toLowerCase(Locale.ROOT);
+            assertFalse(lower.startsWith("proxy-authorization"), "the origin saw the proxy header: " + header);
+            assertFalse(header.contains("dXNlcjpwYXNz"), "the origin saw the credential: " + header);
+            assertFalse(lower.contains("user:pass"), "the origin saw the credential: " + header);
+        }
+        assertEquals(1, proxy.heads().size(), "one tunnel carried all four requests");
+        String connect = proxy.heads().get(0);
+        assertTrue(connect.startsWith("CONNECT "), connect);
+        assertEquals(1, occurrences(connect, CREDENTIAL), "the CONNECT carries the credential exactly once");
+        assertEquals(1, occurrences(connect.toLowerCase(Locale.ROOT), "proxy-authorization:"), "in one header");
+    }
+
+    private static int occurrences(String text, String part) {
+        int count = 0;
+        for (int at = text.indexOf(part); at >= 0; at = text.indexOf(part, at + part.length())) {
+            count++;
+        }
+        return count;
     }
 
     @Test
