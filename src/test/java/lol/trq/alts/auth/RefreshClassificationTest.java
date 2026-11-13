@@ -15,8 +15,8 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
-import lol.trq.alts.auth.AltLoginCallback.LoginResult;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
@@ -109,14 +109,14 @@ class RefreshClassificationTest {
                 .get();
     }
 
-    private void assertBothRoutesReport(FailureReason expected) throws Exception {
+    private void assertBothRoutesReport(Kind expected) throws Exception {
         LoginResult login = imported();
         assertFalse(login.success());
-        assertEquals(expected, login.reason(), "the import route");
+        assertEquals(expected, login.failure().map(AltsFailure::kind).orElse(null), "the import route");
 
         AccountStatus status = renewed();
         assertFalse(status.usable());
-        assertEquals(expected, status.reason(), "the stored-account route");
+        assertEquals(expected, status.failure().map(AltsFailure::kind).orElse(null), "the stored-account route");
         assertEquals(
                 "stored-refresh",
                 localStore.find(UUID).refreshToken(),
@@ -127,35 +127,35 @@ class RefreshClassificationTest {
     void anXboxLiveRefusalIsReportedAsOne() throws Exception {
         answer("/xsts", 401, "{\"XErr\":2148916233}");
 
-        assertBothRoutesReport(FailureReason.XBOX_DENIED);
+        assertBothRoutesReport(Kind.XBOX_DENIED);
     }
 
     @Test
     void anAccountWithNoProfileIsReportedAsNotEntitled() throws Exception {
         answer("/mcprofile", 404, "{}");
 
-        assertBothRoutesReport(FailureReason.NOT_ENTITLED);
+        assertBothRoutesReport(Kind.NOT_ENTITLED);
     }
 
     @Test
     void aThrottleAfterRedemptionIsReportedAsARateLimit() throws Exception {
         answer("/xbl", 429, "{}");
 
-        assertBothRoutesReport(FailureReason.RATE_LIMITED);
+        assertBothRoutesReport(Kind.RATE_LIMITED);
     }
 
     @Test
     void aRefusalFromMinecraftServicesIsReportedAsARefusal() throws Exception {
         answer("/mclogin", 403, "{}");
 
-        assertBothRoutesReport(FailureReason.INVALID_TOKEN);
+        assertBothRoutesReport(Kind.UNAUTHORIZED);
     }
 
     @Test
     void anOutageAfterRedemptionIsStillAnOutage() throws Exception {
         answer("/mclogin", 503, "{}");
 
-        assertBothRoutesReport(FailureReason.NETWORK);
+        assertBothRoutesReport(Kind.NETWORK);
     }
 
     @Test
@@ -164,15 +164,18 @@ class RefreshClassificationTest {
 
         LoginResult login = imported();
         assertFalse(login.success());
-        assertNotEquals(
-                FailureReason.NETWORK,
-                login.reason(),
+        assertEquals(
+                Kind.PROTOCOL,
+                login.failure().map(AltsFailure::kind).orElse(null),
                 "the service answered; calling that an outage sends the host into a retry loop");
-        assertNotEquals(FailureReason.REAUTH_REQUIRED, login.reason(), "and nothing said the token is spent");
+        assertNotEquals(
+                Kind.REAUTH_REQUIRED,
+                login.failure().map(AltsFailure::kind).orElse(null),
+                "and nothing said the token is spent");
 
         AccountStatus status = renewed();
         assertFalse(status.usable());
-        assertNotEquals(FailureReason.NETWORK, status.reason());
+        assertEquals(Kind.PROTOCOL, status.failure().map(AltsFailure::kind).orElse(null));
         assertEquals("stored-refresh", localStore.find(UUID).refreshToken());
     }
 
@@ -180,8 +183,8 @@ class RefreshClassificationTest {
     void aNullAccessTokenIsTheSameFailedStep() throws Exception {
         answer("/token", 200, "{\"access_token\":null,\"refresh_token\":\"rotated\"}");
 
-        assertNotEquals(FailureReason.NETWORK, imported().reason());
-        assertNotEquals(FailureReason.NETWORK, renewed().reason());
+        assertEquals(Kind.PROTOCOL, imported().failure().map(AltsFailure::kind).orElse(null));
+        assertEquals(Kind.PROTOCOL, renewed().failure().map(AltsFailure::kind).orElse(null));
     }
 
     @Test

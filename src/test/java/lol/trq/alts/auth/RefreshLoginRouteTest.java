@@ -18,8 +18,8 @@ import java.time.ZoneOffset;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
-import lol.trq.alts.auth.AltLoginCallback.LoginResult;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.BanInfo;
@@ -226,7 +226,8 @@ class RefreshLoginRouteTest {
                 unconfigured.loginRefreshToken("original", LoginMode.ADD).get();
 
         assertFalse(result.success());
-        assertEquals(FailureReason.NOT_CONFIGURED, result.reason());
+        assertEquals(
+                Kind.NOT_CONFIGURED, result.failure().map(AltsFailure::kind).orElse(null));
     }
 
     @Test
@@ -292,7 +293,10 @@ class RefreshLoginRouteTest {
         LoginResult result = broken.loginAccount(stored).get();
 
         assertFalse(result.success());
-        assertEquals(FailureReason.UNKNOWN, result.reason(), "a broken injector is not a refused token");
+        assertEquals(
+                Kind.UNKNOWN,
+                result.failure().map(AltsFailure::kind).orElse(null),
+                "a broken injector is not a refused token");
         assertEquals(0, tokenCalls.get(), "only a refused token may trigger a renewal");
         assertEquals(
                 "stored-refresh",
@@ -334,7 +338,7 @@ class RefreshLoginRouteTest {
         LoginResult result = service().loginAccount(stored).get();
 
         assertFalse(result.success());
-        assertEquals(FailureReason.NETWORK, result.reason());
+        assertEquals(Kind.NETWORK, result.failure().map(AltsFailure::kind).orElse(null));
         assertEquals(
                 "still-good",
                 localStore.find(UUID).refreshToken(),
@@ -382,7 +386,8 @@ class RefreshLoginRouteTest {
         LoginResult result = service().loginAccount(stored).get();
 
         assertFalse(result.success());
-        assertEquals(FailureReason.REAUTH_REQUIRED, result.reason());
+        assertEquals(
+                Kind.REAUTH_REQUIRED, result.failure().map(AltsFailure::kind).orElse(null));
         assertNull(localStore.find(stored.uuid()).refreshToken(), "a permanently rejected token must not stay on disk");
     }
 
@@ -397,7 +402,7 @@ class RefreshLoginRouteTest {
         LoginResult result = service().loginAccount(stored).get();
 
         assertFalse(result.success());
-        assertEquals(FailureReason.NETWORK, result.reason());
+        assertEquals(Kind.NETWORK, result.failure().map(AltsFailure::kind).orElse(null));
         assertEquals(
                 "still-good",
                 localStore.find(stored.uuid()).refreshToken(),

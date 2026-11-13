@@ -136,7 +136,10 @@ public final class FailureText {
     }
 
     /**
-     * Returns the {@link AltsFailure} {@link #toException(String, Throwable)} would carry.
+     * Returns {@code failure} as an {@link AltsFailure} whose message starts with {@code context}: an
+     * {@link AltsException}'s failure inside it keeps its kind, wait, Xbox Live reason and time under the
+     * message {@code context: <its message>}; anything else is classified as by
+     * {@link #toException(String, Throwable)}.
      *
      * @param context what was being done, for the message
      * @param failure the failure to convert
@@ -144,7 +147,11 @@ public final class FailureText {
      * @since 1.0.0
      */
     public static AltsFailure toFailure(String context, Throwable failure) {
-        return toException(context, failure).failure();
+        Throwable cause = unwrap(failure);
+        if (cause instanceof AltsException classified) {
+            return classified.failure().withMessage(context + ": " + classified.getMessage());
+        }
+        return toException(context, cause).failure();
     }
 
     /**

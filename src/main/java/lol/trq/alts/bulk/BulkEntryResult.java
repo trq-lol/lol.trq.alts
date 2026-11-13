@@ -1,7 +1,9 @@
 package lol.trq.alts.bulk;
 
+import java.util.Objects;
+import java.util.Optional;
+import lol.trq.alts.AltsFailure;
 import lol.trq.alts.account.Entitlements;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
 import lol.trq.alts.model.AltAccount;
 
 /**
@@ -13,10 +15,10 @@ import lol.trq.alts.model.AltAccount;
  *
  * @param index the entry's position in the list it was given, counting from 0
  * @param label a name safe to display and log
- * @param success whether the entry succeeded
  * @param account the resolved or refreshed account, or {@code null} when the entry failed
- * @param reason the classified cause, {@link FailureReason#NONE} on success
- * @param message a short human-readable description
+ * @param failure why the entry failed, or empty when it succeeded; carried since 1.0.0 in place of the
+ *     former success flag and reason
+ * @param message a short human-readable description; on a failure, the failure's message
  * @param attempts how many times this entry was tried, counting the first
  * @param entitlements what the account owns, on a successful entry of an entitlement sweep; {@code null}
  *     for every other kind of run and for a failed entry; added in 0.12.0
@@ -26,35 +28,35 @@ import lol.trq.alts.model.AltAccount;
 public record BulkEntryResult(
         int index,
         String label,
-        boolean success,
         AltAccount account,
-        FailureReason reason,
+        Optional<AltsFailure> failure,
         String message,
         int attempts,
         Entitlements entitlements) {
 
     /**
-     * Creates a result carrying no entitlements — the shape this record had before {@code entitlements}
-     * was added.
+     * Checks that a result is exactly one of a success with an account or a failure without one.
      *
-     * @param index the entry's position
-     * @param label a name safe to display and log
-     * @param success whether the entry succeeded
-     * @param account the resolved or refreshed account, or {@code null}
-     * @param reason the classified cause
-     * @param message a short description
-     * @param attempts how many times it was tried
+     * @throws NullPointerException if {@code failure} is null, or a success carries no account
+     * @throws IllegalArgumentException if a failure carries an account or entitlements
+     */
+    public BulkEntryResult {
+        Objects.requireNonNull(failure, "failure");
+        if (failure.isEmpty()) {
+            Objects.requireNonNull(account, "a successful entry carries its account");
+        } else if (account != null || entitlements != null) {
+            throw new IllegalArgumentException("a failed entry carries no account and no entitlements");
+        }
+    }
+
+    /**
+     * Returns whether the entry succeeded.
+     *
+     * @return true when there is no failure
      * @since 0.9.0
      */
-    public BulkEntryResult(
-            int index,
-            String label,
-            boolean success,
-            AltAccount account,
-            FailureReason reason,
-            String message,
-            int attempts) {
-        this(index, label, success, account, reason, message, attempts, null);
+    public boolean success() {
+        return failure.isEmpty();
     }
 
     /**
@@ -68,7 +70,7 @@ public record BulkEntryResult(
      * @since 0.9.0
      */
     public static BulkEntryResult success(int index, AltAccount account, String message, int attempts) {
-        return new BulkEntryResult(index, account.username(), true, account, FailureReason.NONE, message, attempts);
+        return new BulkEntryResult(index, account.username(), account, Optional.empty(), message, attempts, null);
     }
 
     /**
@@ -85,22 +87,21 @@ public record BulkEntryResult(
     public static BulkEntryResult success(
             int index, AltAccount account, Entitlements entitlements, String message, int attempts) {
         return new BulkEntryResult(
-                index, account.username(), true, account, FailureReason.NONE, message, attempts, entitlements);
+                index, account.username(), account, Optional.empty(), message, attempts, entitlements);
     }
 
     /**
-     * Creates a failed result.
+     * Creates a failed result, whose message is the failure's.
      *
      * @param index the entry's position
      * @param label a name safe to display, never the input line
-     * @param reason the classified cause
-     * @param message a short description
+     * @param failure why the entry failed
      * @param attempts how many times it was tried
      * @return a failed result
-     * @since 0.9.0
+     * @since 1.0.0
      */
-    public static BulkEntryResult failure(int index, String label, FailureReason reason, String message, int attempts) {
-        return new BulkEntryResult(index, label, false, null, reason, message, attempts);
+    public static BulkEntryResult failure(int index, String label, AltsFailure failure, int attempts) {
+        return new BulkEntryResult(index, label, null, Optional.of(failure), failure.message(), attempts, null);
     }
 
     /**

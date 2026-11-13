@@ -21,9 +21,9 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure;
 import lol.trq.alts.auth.MicrosoftAuthConfig;
-import lol.trq.alts.auth.MicrosoftAuthUtil;
 
 /**
  * A temporary local HTTP server that captures the authorization code returned by Microsoft's OAuth2
@@ -255,9 +255,9 @@ public class MicrosoftCallbackServer {
             // message: it is service-supplied and of no use to a host branching on the reason.
             boolean declined = "access_denied".equals(params.get("error"));
             sendResponse(exchange, 400, "Authentication Failed.");
-            codeFuture.completeExceptionally(new MicrosoftAuthUtil.AuthFlowException(
-                    declined ? "Sign-in was declined" : "Authorization was refused",
-                    declined ? FailureReason.DECLINED : FailureReason.UNKNOWN));
+            codeFuture.completeExceptionally(new AltsException(
+                    declined ? AltsFailure.Kind.DECLINED : AltsFailure.Kind.UNKNOWN,
+                    declined ? "Sign-in was declined" : "Authorization was refused"));
             return;
         }
 

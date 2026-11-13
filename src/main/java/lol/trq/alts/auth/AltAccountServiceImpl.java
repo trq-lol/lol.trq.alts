@@ -3,11 +3,11 @@ package lol.trq.alts.auth;
 import java.time.Clock;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.auth.AccountNetworkUtil.ProfileLookup;
 import lol.trq.alts.auth.AccountStatus.State;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
-import lol.trq.alts.auth.MicrosoftAuthUtil.AuthFlowException;
-import lol.trq.alts.auth.MicrosoftAuthUtil.RefreshRejectedException;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.net.FailureText;
@@ -62,7 +62,7 @@ public class AltAccountServiceImpl implements AltAccountService {
     public CompletableFuture<AccountStatus> check(AltAccount account) {
         if (account == null) {
             return CompletableFuture.completedFuture(
-                    AccountStatus.failure(null, State.UNKNOWN, FailureReason.UNKNOWN, "No account given"));
+                    AccountStatus.failure(null, State.UNKNOWN, AltsFailure.of(Kind.INVALID_INPUT, "No account given")));
         }
         if (account.type() == AccountType.OFFLINE) {
             return CompletableFuture.completedFuture(AccountStatus.valid(account));
@@ -72,17 +72,16 @@ public class AltAccountServiceImpl implements AltAccountService {
             return CompletableFuture.completedFuture(AccountStatus.failure(
                     account,
                     renewable(account) ? State.EXPIRED : State.REAUTH_REQUIRED,
-                    FailureReason.INVALID_TOKEN,
-                    "No stored session token"));
+                    AltsFailure.of(Kind.UNAUTHORIZED, "No stored session token")));
         }
-        return CompletableFuture.supplyAsync(() -> validate(account), http.executor());
+        return guarded(account, () -> CompletableFuture.supplyAsync(() -> validate(account), http.executor()));
     }
 
     @Override
     public CompletableFuture<AccountStatus> refresh(AltAccount account) {
         if (account == null) {
             return CompletableFuture.completedFuture(
-                    AccountStatus.failure(null, State.UNKNOWN, FailureReason.UNKNOWN, "No account given"));
+                    AccountStatus.failure(null, State.UNKNOWN, AltsFailure.of(Kind.INVALID_INPUT, "No account given")));
         }
         if (account.type() == AccountType.OFFLINE) {
             return CompletableFuture.completedFuture(AccountStatus.valid(account));
@@ -95,22 +94,51 @@ public class AltAccountServiceImpl implements AltAccountService {
             // A live token on an account that cannot be renewed is taken at its word, so refreshing is
             // no more expensive than logging in was.
             return expired
-                    ? CompletableFuture.supplyAsync(() -> validate(account), http.executor())
+                    ? guarded(account, () -> CompletableFuture.supplyAsync(() -> validate(account), http.executor()))
                     : CompletableFuture.completedFuture(AccountStatus.valid(account));
         }
         if (expired) {
-            return renew(account);
+            return guarded(account, () -> renew(account));
         }
-        return CompletableFuture.supplyAsync(() -> validate(account), http.executor())
-                .thenCompose(status -> {
-                    // Only a refused token is worth a renewal. An unreachable service, or an account with no
-                    // profile, says nothing about the credential -- and the token endpoint rotates the refresh
-                    // token on every redemption, so renewing on those spends a rotation to fix something else.
-                    if (status.state() != State.EXPIRED) {
-                        return CompletableFuture.completedFuture(status);
-                    }
-                    return renew(account);
-                });
+        return guarded(
+                account,
+                () -> CompletableFuture.supplyAsync(() -> validate(account), http.executor())
+                        .thenCompose(status -> {
+                            // Only a refused token is worth a renewal. An unreachable service, or an account with no
+                            // profile, says nothing about the credential -- and the token endpoint rotates the refresh
+                            // token on every redemption, so renewing on those spends a rotation to fix something else.
+                            if (status.state() != State.EXPIRED) {
+                                return CompletableFuture.completedFuture(status);
+                            }
+                            return renew(account);
+                        }));
+    }
+
+    /**
+     * Starts a check or a renewal whose future must hold a status whatever happens: a start that throws
+     * (an executor that refuses the task once the runtime is closed) and a future that fails both become
+     * a classified failed status, never an exception at the caller or a future completed exceptionally.
+     *
+     * @param account the account the status describes
+     * @param start what starts the work
+     * @return a future that always completes with a status
+     */
+    private CompletableFuture<AccountStatus> guarded(
+            AltAccount account, Supplier<CompletableFuture<AccountStatus>> start) {
+        if (http.isClosed()) {
+            return CompletableFuture.completedFuture(AccountStatus.failure(
+                    account, State.UNKNOWN, AltsFailure.of(Kind.CANCELLED, "the runtime is closed")));
+        }
+        try {
+            return start.get().exceptionally(failure -> unexpectedFailure(account, failure));
+        } catch (RuntimeException refused) {
+            return CompletableFuture.completedFuture(unexpectedFailure(account, refused));
+        }
+    }
+
+    private static AccountStatus unexpectedFailure(AltAccount account, Throwable failure) {
+        AltsFailure classified = FailureText.toFailure("Check", failure);
+        return AccountStatus.failure(account, stateFor(classified.kind(), false), classified);
     }
 
     /**
@@ -124,18 +152,14 @@ public class AltAccountServiceImpl implements AltAccountService {
         try {
             lookup = profiles.fetchProfile(account.accessToken(), profileUrl(), scopeFor(account));
         } catch (Exception unreachable) {
-            return AccountStatus.failure(
-                    account,
-                    State.UNREACHABLE,
-                    FailureReason.NETWORK,
-                    "Validation failed: " + FailureText.of(unreachable));
+            AltsFailure failure = FailureText.toFailure("Validation failed", unreachable);
+            return AccountStatus.failure(account, stateFor(failure.kind(), false), failure);
         }
         if (lookup.found()) {
             return AccountStatus.valid(correctUsername(account, lookup.username()));
         }
-        FailureReason reason = reasonFor(lookup);
-        return AccountStatus.failure(
-                account, stateFor(reason, renewable(account)), reason, messageFor(lookup), lookup.retryAfter());
+        AltsFailure failure = failureFor(lookup);
+        return AccountStatus.failure(account, stateFor(failure.kind(), renewable(account)), failure);
     }
 
     /**
@@ -188,37 +212,18 @@ public class AltAccountServiceImpl implements AltAccountService {
      * @return the classified status
      */
     private AccountStatus renewalFailure(Throwable failure, AltAccount account) {
-        Throwable cause = failure.getCause() != null ? failure.getCause() : failure;
-        RefreshRejectedException rejection = cause instanceof RefreshRejectedException rejected ? rejected : null;
-        boolean permanent = rejection != null && rejection.permanent();
-        String message = "Refresh: " + MicrosoftAuthUtil.describe(cause);
+        AltsFailure classified = FailureText.toFailure("Refresh", failure);
 
-        if (rejection != null && rejection.rateLimited()) {
-            return AccountStatus.failure(
-                    account, State.UNREACHABLE, FailureReason.RATE_LIMITED, message, rejection.retryAfter());
-        }
-        if (!permanent) {
+        if (classified.kind() != Kind.REAUTH_REQUIRED) {
             // The token was redeemed, or never got the chance: whatever failed after that is classified by
             // the step that failed. A throttle keeps its stated wait, and a refusal further down the chain
             // -- Xbox Live turning the account away -- is reported as what it is rather than as an outage a
             // caller would retry into.
-            AuthFlowException classified = rejection == null ? MicrosoftAuthUtil.classified(failure) : null;
-            if (classified == null) {
-                return AccountStatus.failure(account, State.UNREACHABLE, FailureReason.NETWORK, message);
-            }
-            return AccountStatus.failure(
-                    account,
-                    renewalStateFor(classified.reason()),
-                    classified.reason(),
-                    message,
-                    classified.retryAfter());
+            return AccountStatus.failure(account, renewalStateFor(classified.kind()), classified);
         }
         store.clearRefreshToken(account.uuid());
         return AccountStatus.failure(
-                account.withTokens(account.accessToken(), null, 0L),
-                State.REAUTH_REQUIRED,
-                FailureReason.REAUTH_REQUIRED,
-                message);
+                account.withTokens(account.accessToken(), null, 0L), State.REAUTH_REQUIRED, classified);
     }
 
     /**
@@ -256,82 +261,71 @@ public class AltAccountServiceImpl implements AltAccountService {
 
     /**
      * Classifies a profile lookup that did not resolve an identity. Package-private because the login
-     * routes classify the same three answers the same way.
+     * routes classify the same answers the same way: a refusal, an account with no profile, a throttle
+     * and an outage each keep their own kind, and a success that named nobody is a protocol failure.
      *
      * @param lookup the lookup that failed
-     * @return the classified cause
+     * @return the classified failure
      */
-    static FailureReason reasonFor(ProfileLookup lookup) {
+    static AltsFailure failureFor(ProfileLookup lookup) {
         if (lookup.refused()) {
-            return FailureReason.INVALID_TOKEN;
+            return AltsFailure.of(Kind.UNAUTHORIZED, "Session token was refused");
         }
         if (lookup.missingProfile()) {
-            return FailureReason.NOT_ENTITLED;
+            return AltsFailure.of(Kind.NOT_ENTITLED, "This account has no Minecraft profile");
         }
         if (lookup.rateLimited()) {
-            return FailureReason.RATE_LIMITED;
+            return AltsFailure.rateLimited("Rate limited by the profile service", lookup.retryAfter());
         }
-        return FailureReason.NETWORK;
+        if (lookup.status() >= 200 && lookup.status() < 300) {
+            return AltsFailure.of(Kind.PROTOCOL, "Profile lookup returned an unexpected response");
+        }
+        return AltsFailure.of(
+                Kind.NETWORK, "Profile lookup failed with status " + lookup.status(), lookup.retryAfter());
     }
 
     /**
-     * Describes a profile lookup that did not resolve an identity.
+     * Maps a failure's kind onto the account state that describes it, given whether renewal is still on
+     * the table. A refused token is only re-authentication material when there is no refresh token left
+     * to try.
      *
-     * @param lookup the lookup that failed
-     * @return a short human-readable description
-     */
-    static String messageFor(ProfileLookup lookup) {
-        if (lookup.refused()) {
-            return "Session token was refused";
-        }
-        if (lookup.missingProfile()) {
-            return "This account has no Minecraft profile";
-        }
-        if (lookup.rateLimited()) {
-            return "Rate limited by the profile service";
-        }
-        return "Profile lookup failed with status " + lookup.status();
-    }
-
-    /**
-     * Maps a cause onto the state that describes it, given whether renewal is still on the table. A
-     * refused token is only re-authentication material when there is no refresh token left to try.
-     *
-     * <p>Exhaustive on purpose, with no {@code default}: a reason added later has to be placed here
+     * <p>Exhaustive on purpose, with no {@code default}: a kind added later has to be placed here
      * deliberately rather than landing on {@link State#UNKNOWN} by omission.
      *
-     * @param reason the classified cause
+     * @param kind the failure's kind
      * @param renewable whether the account could still be renewed
      * @return the matching state
      */
-    static State stateFor(FailureReason reason, boolean renewable) {
-        return switch (reason) {
-            case NONE -> State.VALID;
-            case INVALID_TOKEN -> renewable ? State.EXPIRED : State.REAUTH_REQUIRED;
+    static State stateFor(Kind kind, boolean renewable) {
+        return switch (kind) {
+            case UNAUTHORIZED -> renewable ? State.EXPIRED : State.REAUTH_REQUIRED;
             case REAUTH_REQUIRED -> State.REAUTH_REQUIRED;
             // Xbox Live turning the account away shares the remedy of a missing profile: neither a retry
-            // nor a fresh login changes it, and the reason says which of the two it was.
+            // nor a fresh login changes it, and the kind says which of the two it was.
             case NOT_ENTITLED, XBOX_DENIED -> State.NOT_ENTITLED;
             // A throttle is the service being unavailable to this caller for now. Nothing was spent, and
-            // it is the reason, not the state, that tells a caller to wait rather than retry.
+            // it is the kind, not the state, that tells a caller to wait rather than retry.
             case NETWORK, RATE_LIMITED -> State.UNREACHABLE;
             // Only an interactive sign-in can be declined or run out of time, and neither check nor
             // refresh is one, so there is no account state these describe.
             case DECLINED, TIMED_OUT -> State.UNKNOWN;
-            case NOT_CONFIGURED, UNKNOWN -> State.UNKNOWN;
+            // A closed runtime, a refused argument, an unreadable answer: none says what the account is.
+            case CANCELLED, INVALID_INPUT, PROTOCOL, NOT_CONFIGURED, UNKNOWN -> State.UNKNOWN;
+            // Never raised by a check or a refresh; placed so the switch stays exhaustive.
+            case NOT_FOUND, CONFLICT, STORAGE, CRYPTO -> State.UNKNOWN;
         };
     }
 
     /**
-     * Maps the cause of a failed renewal onto a state. Differs from {@link #stateFor} in one place: a
+     * Maps the kind of a failed renewal onto a state. Differs from {@link #stateFor} in one place: a
      * token refused part-way down the chain is not a verdict on the stored refresh token, which the
-     * token endpoint had just accepted, so it neither asks for another refresh nor claims the credential
-     * was discarded.
+     * token endpoint had just accepted (or refused without stating it spent), so it neither asks for
+     * another refresh nor claims the credential was discarded.
      *
-     * @param reason the classified cause
+     * @param kind the failure's kind
      * @return the matching state
      */
-    private static State renewalStateFor(FailureReason reason) {
-        return reason == FailureReason.INVALID_TOKEN ? State.UNKNOWN : stateFor(reason, false);
+    private static State renewalStateFor(Kind kind) {
+        return kind == Kind.UNAUTHORIZED ? State.UNKNOWN : stateFor(kind, false);
     }
 }

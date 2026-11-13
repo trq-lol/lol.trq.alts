@@ -17,9 +17,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.concurrent.atomic.AtomicInteger;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.AltsRuntime;
 import lol.trq.alts.auth.AccountStatus.State;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.BanInfo;
@@ -151,7 +152,7 @@ class AccountServiceTest {
         AccountStatus status = service().check(account).get();
 
         assertEquals(State.EXPIRED, status.state(), "a refused token on a renewable account is recoverable");
-        assertEquals(FailureReason.INVALID_TOKEN, status.reason());
+        assertEquals(Kind.UNAUTHORIZED, status.failure().map(AltsFailure::kind).orElse(null));
         assertEquals(0, tokenCalls.get(), "check must never redeem the refresh token");
         assertEquals("stored-refresh", localStore.find(UUID).refreshToken(), "check changes nothing at rest");
     }
@@ -163,7 +164,7 @@ class AccountServiceTest {
         AccountStatus status = service().check(unrenewable(NOW - 1)).get();
 
         assertEquals(State.REAUTH_REQUIRED, status.state());
-        assertEquals(FailureReason.INVALID_TOKEN, status.reason());
+        assertEquals(Kind.UNAUTHORIZED, status.failure().map(AltsFailure::kind).orElse(null));
     }
 
     /**
@@ -180,7 +181,7 @@ class AccountServiceTest {
         AccountStatus status = service().refresh(account).get();
 
         assertEquals(State.NOT_ENTITLED, status.state());
-        assertEquals(FailureReason.NOT_ENTITLED, status.reason());
+        assertEquals(Kind.NOT_ENTITLED, status.failure().map(AltsFailure::kind).orElse(null));
         assertEquals(0, tokenCalls.get(), "no amount of renewal produces a profile that does not exist");
         assertEquals(
                 "stored-refresh",
@@ -234,7 +235,7 @@ class AccountServiceTest {
         AccountStatus status = service().check(account).get();
 
         assertEquals(State.UNREACHABLE, status.state());
-        assertEquals(FailureReason.NETWORK, status.reason());
+        assertEquals(Kind.NETWORK, status.failure().map(AltsFailure::kind).orElse(null));
         assertEquals(
                 "stored-refresh",
                 localStore.find(UUID).refreshToken(),
@@ -253,18 +254,22 @@ class AccountServiceTest {
 
         AccountStatus bare = service().check(account).get();
 
-        assertEquals(FailureReason.RATE_LIMITED, bare.reason());
+        assertEquals(Kind.RATE_LIMITED, bare.failure().map(AltsFailure::kind).orElse(null));
         assertEquals(State.UNREACHABLE, bare.state());
-        assertTrue(bare.rateLimited(), "a rate limit that names no wait is still a rate limit");
-        assertNull(bare.retryAfter());
+        assertTrue(
+                bare.failure().map(f -> f.kind() == Kind.RATE_LIMITED).orElse(false),
+                "a rate limit that names no wait is still a rate limit");
+        assertNull(bare.failure().flatMap(AltsFailure::retryAfter).orElse(null));
         assertFalse(bare.usable());
 
         retryAfter = "30";
         AccountStatus stated = service().check(account).get();
 
-        assertEquals(FailureReason.RATE_LIMITED, stated.reason());
-        assertTrue(stated.rateLimited());
-        assertEquals(Duration.ofSeconds(30), stated.retryAfter());
+        assertEquals(Kind.RATE_LIMITED, stated.failure().map(AltsFailure::kind).orElse(null));
+        assertTrue(stated.failure().map(f -> f.kind() == Kind.RATE_LIMITED).orElse(false));
+        assertEquals(
+                Duration.ofSeconds(30),
+                stated.failure().flatMap(AltsFailure::retryAfter).orElse(null));
         assertEquals(0, tokenCalls.get(), "a throttled lookup is no reason to spend a rotation");
     }
 
@@ -276,8 +281,8 @@ class AccountServiceTest {
 
         AccountStatus status = service().refresh(account).get();
 
-        assertEquals(FailureReason.RATE_LIMITED, status.reason());
-        assertTrue(status.rateLimited());
+        assertEquals(Kind.RATE_LIMITED, status.failure().map(AltsFailure::kind).orElse(null));
+        assertTrue(status.failure().map(f -> f.kind() == Kind.RATE_LIMITED).orElse(false));
         assertEquals(0, tokenCalls.get(), "a throttled lookup says nothing about the token");
     }
 
@@ -295,9 +300,11 @@ class AccountServiceTest {
         AccountStatus status = service().refresh(account).get();
 
         assertEquals(State.UNREACHABLE, status.state());
-        assertEquals(FailureReason.RATE_LIMITED, status.reason());
-        assertTrue(status.rateLimited());
-        assertEquals(Duration.ofSeconds(12), status.retryAfter());
+        assertEquals(Kind.RATE_LIMITED, status.failure().map(AltsFailure::kind).orElse(null));
+        assertTrue(status.failure().map(f -> f.kind() == Kind.RATE_LIMITED).orElse(false));
+        assertEquals(
+                Duration.ofSeconds(12),
+                status.failure().flatMap(AltsFailure::retryAfter).orElse(null));
         assertEquals(1, tokenCalls.get());
         assertEquals(
                 "stored-refresh",
@@ -313,11 +320,12 @@ class AccountServiceTest {
         AltLoginServiceImpl logins =
                 new AltLoginServiceImpl(localStore.store(), session -> {}, config, TestTransports.direct());
 
-        AltLoginCallback.LoginResult throttled =
+        LoginResult throttled =
                 logins.loginRefreshToken("M.C123_imported", LoginMode.DIRECT).get();
 
         assertFalse(throttled.success());
-        assertEquals(FailureReason.RATE_LIMITED, throttled.reason());
+        assertEquals(
+                Kind.RATE_LIMITED, throttled.failure().map(AltsFailure::kind).orElse(null));
 
         server.removeContext("/token");
         server.createContext(
@@ -325,11 +333,16 @@ class AccountServiceTest {
         server.removeContext("/xsts");
         server.createContext("/xsts", exchange -> respond(exchange, 401, "{\"XErr\":2148916233}"));
 
-        AltLoginCallback.LoginResult denied =
+        LoginResult denied =
                 logins.loginRefreshToken("M.C123_imported", LoginMode.DIRECT).get();
 
-        assertEquals(FailureReason.XBOX_DENIED, denied.reason(), "a refusal after redemption is not an outage");
-        assertEquals(XstsError.NO_XBOX_ACCOUNT, denied.xstsError());
+        assertEquals(
+                Kind.XBOX_DENIED,
+                denied.failure().map(AltsFailure::kind).orElse(null),
+                "a refusal after redemption is not an outage");
+        assertEquals(
+                XstsError.NO_XBOX_ACCOUNT,
+                denied.failure().flatMap(AltsFailure::xstsError).orElse(null));
     }
 
     /** The token endpoint accepted the refresh token; a throttle further down is still a throttle. */
@@ -342,8 +355,8 @@ class AccountServiceTest {
 
         AccountStatus status = service().refresh(account).get();
 
-        assertEquals(FailureReason.RATE_LIMITED, status.reason());
-        assertTrue(status.rateLimited());
+        assertEquals(Kind.RATE_LIMITED, status.failure().map(AltsFailure::kind).orElse(null));
+        assertTrue(status.failure().map(f -> f.kind() == Kind.RATE_LIMITED).orElse(false));
         assertEquals("stored-refresh", localStore.find(UUID).refreshToken());
     }
 
@@ -357,9 +370,9 @@ class AccountServiceTest {
 
         AccountStatus status = service().refresh(account).get();
 
-        assertEquals(FailureReason.XBOX_DENIED, status.reason());
+        assertEquals(Kind.XBOX_DENIED, status.failure().map(AltsFailure::kind).orElse(null));
         assertEquals(State.NOT_ENTITLED, status.state());
-        assertFalse(status.rateLimited());
+        assertFalse(status.failure().map(f -> f.kind() == Kind.RATE_LIMITED).orElse(false));
         assertEquals(
                 "stored-refresh",
                 localStore.find(UUID).refreshToken(),
@@ -372,16 +385,16 @@ class AccountServiceTest {
      */
     @Test
     void everyFailureReasonMapsOntoADeliberateState() {
-        assertEquals(State.UNREACHABLE, AltAccountServiceImpl.stateFor(FailureReason.RATE_LIMITED, true));
-        assertEquals(State.UNREACHABLE, AltAccountServiceImpl.stateFor(FailureReason.NETWORK, true));
-        assertEquals(State.NOT_ENTITLED, AltAccountServiceImpl.stateFor(FailureReason.XBOX_DENIED, true));
-        assertEquals(State.NOT_ENTITLED, AltAccountServiceImpl.stateFor(FailureReason.NOT_ENTITLED, true));
-        assertEquals(State.UNKNOWN, AltAccountServiceImpl.stateFor(FailureReason.DECLINED, true));
-        assertEquals(State.UNKNOWN, AltAccountServiceImpl.stateFor(FailureReason.TIMED_OUT, true));
-        assertEquals(State.EXPIRED, AltAccountServiceImpl.stateFor(FailureReason.INVALID_TOKEN, true));
-        assertEquals(State.REAUTH_REQUIRED, AltAccountServiceImpl.stateFor(FailureReason.INVALID_TOKEN, false));
-        assertEquals(State.REAUTH_REQUIRED, AltAccountServiceImpl.stateFor(FailureReason.REAUTH_REQUIRED, true));
-        for (FailureReason reason : FailureReason.values()) {
+        assertEquals(State.UNREACHABLE, AltAccountServiceImpl.stateFor(Kind.RATE_LIMITED, true));
+        assertEquals(State.UNREACHABLE, AltAccountServiceImpl.stateFor(Kind.NETWORK, true));
+        assertEquals(State.NOT_ENTITLED, AltAccountServiceImpl.stateFor(Kind.XBOX_DENIED, true));
+        assertEquals(State.NOT_ENTITLED, AltAccountServiceImpl.stateFor(Kind.NOT_ENTITLED, true));
+        assertEquals(State.UNKNOWN, AltAccountServiceImpl.stateFor(Kind.DECLINED, true));
+        assertEquals(State.UNKNOWN, AltAccountServiceImpl.stateFor(Kind.TIMED_OUT, true));
+        assertEquals(State.EXPIRED, AltAccountServiceImpl.stateFor(Kind.UNAUTHORIZED, true));
+        assertEquals(State.REAUTH_REQUIRED, AltAccountServiceImpl.stateFor(Kind.UNAUTHORIZED, false));
+        assertEquals(State.REAUTH_REQUIRED, AltAccountServiceImpl.stateFor(Kind.REAUTH_REQUIRED, true));
+        for (Kind reason : Kind.values()) {
             // Throws for a constant the mapping does not place.
             AltAccountServiceImpl.stateFor(reason, false);
         }
@@ -400,7 +413,8 @@ class AccountServiceTest {
         AccountStatus status = service().refresh(account).get();
 
         assertEquals(State.REAUTH_REQUIRED, status.state());
-        assertEquals(FailureReason.REAUTH_REQUIRED, status.reason());
+        assertEquals(
+                Kind.REAUTH_REQUIRED, status.failure().map(AltsFailure::kind).orElse(null));
         assertNull(status.account().refreshToken(), "the status must not hand back a token that is gone");
         assertNull(localStore.find(UUID).refreshToken(), "a spent credential must not stay at rest");
     }

@@ -17,7 +17,6 @@ import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import lol.trq.alts.auth.AltLoginCallback.LoginResult;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.model.SessionData;
 import lol.trq.alts.net.TestTransports;

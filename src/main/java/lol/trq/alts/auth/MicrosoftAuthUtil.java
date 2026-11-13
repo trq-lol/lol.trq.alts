@@ -5,14 +5,12 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.annotations.SerializedName;
 import java.awt.Desktop;
-import java.io.Serial;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Locale;
@@ -23,7 +21,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.net.FailureText;
 import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.MicrosoftCallbackServer;
@@ -84,6 +84,10 @@ public final class MicrosoftAuthUtil {
     // Exists so the interactive flow can be driven in tests without launching a real browser.
     CompletableFuture<MinecraftProfile> authenticate(MicrosoftAuthConfig config, Consumer<String> browser) {
         Objects.requireNonNull(config, "config");
+        if (http.isClosed()) {
+            // Neither bind a port nor open a browser for a sign-in nothing can finish.
+            return CompletableFuture.failedFuture(new AltsException(Kind.CANCELLED, "the runtime is closed"));
+        }
         String state = generateState();
         String verifier = generateCodeVerifier();
         MicrosoftCallbackServer server =
@@ -138,7 +142,8 @@ public final class MicrosoftAuthUtil {
             MicrosoftAuthConfig config, String refreshToken, NetworkScope account) {
         Objects.requireNonNull(config, "config");
         if (refreshToken == null || refreshToken.isBlank()) {
-            return CompletableFuture.failedFuture(new RefreshRejectedException("refresh token is blank", true));
+            return CompletableFuture.failedFuture(
+                    new AltsException(Kind.REAUTH_REQUIRED, "Token refresh: no refresh token"));
         }
         return exchangeRefreshForToken(config, refreshToken, account)
                 .thenCompose(tokens -> completeFrom(config, tokens, account));
@@ -240,7 +245,7 @@ public final class MicrosoftAuthUtil {
             prompt.show(
                     issued.userCode(), issued.verificationUri(), Instant.now().plusMillis(lifetimeMillis));
         } catch (RuntimeException promptFailure) {
-            throw new AuthFlowException("Device code prompt failed", FailureReason.UNKNOWN, promptFailure);
+            throw new AltsException(AltsFailure.of(Kind.UNKNOWN, "Device code prompt failed"), promptFailure);
         }
 
         new DeviceCodePoll(
@@ -306,7 +311,7 @@ public final class MicrosoftAuthUtil {
 
         private void poll() {
             if (System.nanoTime() - deadlineNanos >= 0) {
-                throw new AuthFlowException("Device code expired before it was used", FailureReason.TIMED_OUT);
+                throw new AltsException(Kind.TIMED_OUT, "Device code expired before it was used");
             }
 
             HttpTransport.HttpResponse response;
@@ -330,11 +335,11 @@ public final class MicrosoftAuthUtil {
                 case "authorization_pending" -> again();
                 case "slow_down" -> slowDown();
                 case "authorization_declined", "access_denied" ->
-                    throw new AuthFlowException("Device code sign-in was declined", FailureReason.DECLINED);
+                    throw new AltsException(Kind.DECLINED, "Device code sign-in was declined");
                 case "expired_token" ->
-                    throw new AuthFlowException("Device code expired before it was used", FailureReason.TIMED_OUT);
+                    throw new AltsException(Kind.TIMED_OUT, "Device code expired before it was used");
                 case "bad_verification_code" ->
-                    throw new AuthFlowException("Device code was not recognised", FailureReason.INVALID_TOKEN);
+                    throw new AltsException(Kind.UNAUTHORIZED, "Device code was not recognised");
                 default -> {
                     if (response.rateLimited()) {
                         slowDown();
@@ -361,7 +366,7 @@ public final class MicrosoftAuthUtil {
 
         // A dropped connection or a 5xx says nothing about the code, and the user may be halfway through
         // typing it, so one bad poll must not end the login. A run of them means the service is gone.
-        private void unanswered(AuthFlowException failure) {
+        private void unanswered(AltsException failure) {
             if (++unanswered >= MAX_UNANSWERED_POLLS) {
                 throw failure;
             }
@@ -453,14 +458,14 @@ public final class MicrosoftAuthUtil {
     }
 
     /**
-     * Fails {@code waiting} with an {@link java.io.IOException} saying the runtime is closed when the
+     * Fails {@code waiting} with an {@link AltsException} of kind {@link Kind#CANCELLED} when the
      * transport closes first, and forgets it once it completes some other way.
      *
      * @param waiting the future a sign-in is waiting on
      */
     private void endWhenClosed(CompletableFuture<?> waiting) {
-        AutoCloseable registration =
-                http.whenClosed(() -> waiting.completeExceptionally(new java.io.IOException("the runtime is closed")));
+        AutoCloseable registration = http.whenClosed(
+                () -> waiting.completeExceptionally(new AltsException(Kind.CANCELLED, "the runtime is closed")));
         waiting.whenComplete((value, failure) -> {
             try {
                 registration.close();
@@ -668,18 +673,20 @@ public final class MicrosoftAuthUtil {
                         response = http.postFormForStatus(
                                 config.tokenUrl(), null, body, scope(NetworkScope.Purpose.AUTH, account));
                     } catch (Exception transportFailure) {
-                        throw new RefreshRejectedException("refresh transport failure", false, transportFailure);
+                        throw unreachable("Token refresh", transportFailure);
                     }
 
                     if (response.rateLimited()) {
                         // Said apart from an outage: the remedy is to wait, and a caller working through
                         // many accounts must stop sending rather than retry into the limit.
-                        throw RefreshRejectedException.rateLimited(
-                                "refresh rate limited with status " + response.status(), response.retryAfter());
+                        throw new AltsException(AltsFailure.rateLimited(
+                                "Token refresh rate limited with status " + response.status(), response.retryAfter()));
                     }
-                    if (!response.successful() || response.body() == null) {
-                        throw new RefreshRejectedException(
-                                "refresh rejected with status " + response.status(), tokenIsSpent(response));
+                    if (!response.successful()) {
+                        throw refreshRejected(response);
+                    }
+                    if (response.body() == null) {
+                        throw unexpected("Token refresh", null);
                     }
 
                     // Read defensively: a 2xx whose body lacks the access token, or names a null refresh
@@ -688,8 +695,7 @@ public final class MicrosoftAuthUtil {
                     JsonObject json = response.body();
                     String access = stringOrNull(json, "access_token");
                     if (isBlank(access)) {
-                        throw new AuthFlowException(
-                                "Token refresh returned an unexpected response", FailureReason.UNKNOWN);
+                        throw unexpected("Token refresh", null);
                     }
                     String rotated = stringOrNull(json, "refresh_token");
                     return new MsTokens(access, isBlank(rotated) ? refreshToken : rotated);
@@ -848,8 +854,7 @@ public final class MicrosoftAuthUtil {
                     }
                     if (response.status() == 404) {
                         // Signed in, but there is no Minecraft profile behind the account.
-                        throw new AuthFlowException(
-                                "This account has no Minecraft profile", FailureReason.NOT_ENTITLED);
+                        throw new AltsException(Kind.NOT_ENTITLED, "This account has no Minecraft profile");
                     }
                     if (!response.successful() || response.body() == null) {
                         throw stepFailure("Profile fetch", response);
@@ -934,11 +939,11 @@ public final class MicrosoftAuthUtil {
      * @param response the failing response
      * @return the exception to fail the flow with
      */
-    static AuthFlowException stepFailure(String step, HttpTransport.HttpResponse response) {
-        AuthFlowException classified = stepFailure(step, response.status());
-        return response.retryAfter() == null
-                ? classified
-                : new AuthFlowException(classified.getMessage(), classified.reason(), response.retryAfter(), null);
+    static AltsException stepFailure(String step, HttpTransport.HttpResponse response) {
+        return new AltsException(AltsFailure.of(
+                kindForStatus(response.status()),
+                step + " failed with status " + response.status(),
+                response.retryAfter()));
     }
 
     /**
@@ -948,41 +953,65 @@ public final class MicrosoftAuthUtil {
      * @param status the failing HTTP status
      * @return the exception to fail the flow with
      */
-    static AuthFlowException stepFailure(String step, int status) {
-        FailureReason reason;
-        if (status == 429) {
-            reason = FailureReason.RATE_LIMITED;
-        } else if (status >= 500 || status == 408) {
-            reason = FailureReason.NETWORK;
-        } else {
-            reason = FailureReason.INVALID_TOKEN;
-        }
-        return new AuthFlowException(step + " failed with status " + status, reason);
-    }
-
-    static AuthFlowException unreachable(String step, Exception transportFailure) {
-        return new AuthFlowException(step + " could not be reached", FailureReason.NETWORK, transportFailure);
-    }
-
-    static AuthFlowException unexpected(String step, RuntimeException malformed) {
-        return new AuthFlowException(step + " returned an unexpected response", FailureReason.UNKNOWN, malformed);
+    static AltsException stepFailure(String step, int status) {
+        return new AltsException(kindForStatus(status), step + " failed with status " + status);
     }
 
     /**
-     * Describes a failed sign-in step for a message a host will see. A failure this class classified
-     * carries a message written here, from the step's name and a status, and that is used as it is. Any
-     * other failure is described by its kind only: its own message was written by the JDK or the
-     * transport, and may quote a token.
+     * Returns the kind a sign-in step's failure status is: {@code 429} a throttle, a {@code 5xx} or a
+     * {@code 408} an outage, and any other a refusal of the credential.
      *
-     * @param failure the failure a step completed with
-     * @return a description safe to show and to log
+     * @param status the failing HTTP status
+     * @return the kind
      */
-    static String describe(Throwable failure) {
-        if ((failure instanceof AuthFlowException || failure instanceof RefreshRejectedException)
-                && failure.getMessage() != null) {
-            return failure.getMessage();
+    private static Kind kindForStatus(int status) {
+        if (status == 429) {
+            return Kind.RATE_LIMITED;
         }
-        return FailureText.of(failure);
+        if (status >= 500 || status == 408) {
+            return Kind.NETWORK;
+        }
+        return Kind.UNAUTHORIZED;
+    }
+
+    /**
+     * Classifies a step whose request never got an answer, by the failure's type; its text is never
+     * repeated.
+     *
+     * @param step the step's name
+     * @param transportFailure what the transport threw
+     * @return the exception to fail the flow with
+     */
+    static AltsException unreachable(String step, Exception transportFailure) {
+        return FailureText.toException(step, transportFailure);
+    }
+
+    /**
+     * Classifies a step that answered successfully with a body the flow could not read.
+     *
+     * @param step the step's name
+     * @param malformed what reading it threw, or {@code null} when a field was simply absent
+     * @return the exception to fail the flow with
+     */
+    static AltsException unexpected(String step, RuntimeException malformed) {
+        return new AltsException(AltsFailure.of(Kind.PROTOCOL, step + " returned an unexpected response"), malformed);
+    }
+
+    /**
+     * Classifies a refused refresh-token redemption. Only a stated {@code invalid_grant} (see
+     * {@link #tokenIsSpent}) is {@link Kind#REAUTH_REQUIRED}; an outage stays {@link Kind#NETWORK} and
+     * any other refusal, a misconfigured host's included, is {@link Kind#UNAUTHORIZED}, which costs the
+     * stored credential nothing.
+     *
+     * @param response the token endpoint's rejection, not a {@code 429}
+     * @return the exception to fail the flow with
+     */
+    private static AltsException refreshRejected(HttpTransport.HttpResponse response) {
+        String message = "Token refresh rejected with status " + response.status();
+        if (tokenIsSpent(response)) {
+            return new AltsException(Kind.REAUTH_REQUIRED, message);
+        }
+        return new AltsException(AltsFailure.of(kindForStatus(response.status()), message, response.retryAfter()));
     }
 
     private static String encode(String value) {
@@ -1002,24 +1031,6 @@ public final class MicrosoftAuthUtil {
     }
 
     /**
-     * Finds the classified failure inside whatever a failed stage completed with. A stage wraps its
-     * cause in a {@code CompletionException}, sometimes more than once, so the chain is walked.
-     *
-     * @param failure the throwable a stage completed with
-     * @return the classified failure, or {@code null} when the chain holds none
-     * @since 0.12.0
-     */
-    public static AuthFlowException classified(Throwable failure) {
-        int depth = 0;
-        for (Throwable current = failure; current != null && depth < 16; current = current.getCause(), depth++) {
-            if (current instanceof AuthFlowException classified) {
-                return classified;
-            }
-        }
-        return null;
-    }
-
-    /**
      * Converts an advertised lifetime in seconds into an absolute epoch-millis expiry.
      *
      * @param expiresInSeconds the lifetime in seconds, or a non-positive value when unknown
@@ -1029,128 +1040,16 @@ public final class MicrosoftAuthUtil {
         return expiresInSeconds <= 0 ? 0L : System.currentTimeMillis() + (expiresInSeconds * 1000L);
     }
 
-    /**
-     * Signals that a refresh-token redemption failed, distinguishing a token that will never work
-     * again from a failure worth retrying.
-     *
-     * @author trq
-     * @since 0.6.0
-     */
-    public static final class RefreshRejectedException extends RuntimeException {
-
-        @Serial
-        private static final long serialVersionUID = 1L;
-
-        /**
-         * Whether the refresh token is permanently spent.
-         *
-         * @serial
-         */
-        private final boolean permanent;
-
-        /**
-         * Whether the redemption was throttled.
-         *
-         * @serial
-         */
-        private final boolean rateLimited;
-
-        /**
-         * How long the service asked the caller to wait, or null.
-         *
-         * @serial
-         */
-        private final Duration retryAfter;
-
-        /**
-         * Creates a rejection.
-         *
-         * @param message the failure description
-         * @param permanent whether the refresh token is permanently spent
-         * @since 0.6.0
-         */
-        public RefreshRejectedException(String message, boolean permanent) {
-            this(message, permanent, null);
-        }
-
-        /**
-         * Creates a rejection carrying the underlying failure, so a connection error keeps its
-         * diagnostic instead of being reported as a bare message.
-         *
-         * @param message the failure description
-         * @param permanent whether the refresh token is permanently spent
-         * @param cause the underlying failure, or {@code null}
-         * @since 0.6.0
-         */
-        public RefreshRejectedException(String message, boolean permanent, Throwable cause) {
-            super(message, cause);
-            this.permanent = permanent;
-            this.rateLimited = false;
-            this.retryAfter = null;
-        }
-
-        private RefreshRejectedException(String message, Duration retryAfter) {
-            super(message);
-            this.permanent = false;
-            this.rateLimited = true;
-            this.retryAfter = retryAfter;
-        }
-
-        /**
-         * Creates a rejection for a redemption the token endpoint throttled. Never permanent: a rate
-         * limit says nothing about the refresh token.
-         *
-         * @param message the failure description
-         * @param retryAfter how long the service asked the caller to wait, or {@code null} when it named
-         *     no wait
-         * @return the rejection
-         * @since 0.12.0
-         */
-        public static RefreshRejectedException rateLimited(String message, Duration retryAfter) {
-            return new RefreshRejectedException(message, retryAfter);
-        }
-
-        /**
-         * Returns whether the token endpoint answered that the caller is sending too many requests.
-         *
-         * @return true if the redemption was throttled
-         * @since 0.12.0
-         */
-        public boolean rateLimited() {
-            return rateLimited;
-        }
-
-        /**
-         * Returns how long the service asked the caller to wait before trying again, when it said.
-         *
-         * @return the stated wait, or {@code null} when none was given
-         * @since 0.12.0
-         */
-        public Duration retryAfter() {
-            return retryAfter;
-        }
-
-        /**
-         * Returns whether the refresh token is permanently spent and must be discarded.
-         *
-         * @return true if the token will never succeed again
-         * @since 0.6.0
-         */
-        public boolean permanent() {
-            return permanent;
-        }
-    }
-
     // The Microsoft token's own lifetime is deliberately absent: the expiry that matters downstream is
     // the Minecraft services token's, which lasts far longer and is what the account is stamped with.
     /**
      * Builds a classified failure from an XSTS rejection, reading the {@code XErr} code out of the error
-     * body so the reason survives to the caller.
+     * body so the reason survives to the caller as {@link AltsFailure#xstsError()}.
      *
      * @param response the XSTS rejection
      * @return the exception to fail the flow with
      */
-    private static AuthFlowException xstsFailure(HttpTransport.HttpResponse response) {
+    private static AltsException xstsFailure(HttpTransport.HttpResponse response) {
         long xerr = 0L;
         JsonObject body = response.body();
         if (body != null && body.has("XErr") && body.get("XErr").isJsonPrimitive()) {
@@ -1166,137 +1065,8 @@ public final class MicrosoftAuthUtil {
             // No stated refusal: the service is throttling or failing, which is no verdict on the account.
             return stepFailure("XSTS auth", response);
         }
-        return new XstsAuthException("XSTS auth failed (" + error + ", status " + status + ")", error);
-    }
-
-    /**
-     * Signals that a step of the Microsoft sign-in chain failed, carrying a {@link FailureReason} so a
-     * caller can tell an unreachable service from a throttled one from a refused credential without
-     * reading the message. The message names the step and the status and never carries a token or code.
-     *
-     * @author trq
-     * @since 0.12.0
-     */
-    public static class AuthFlowException extends RuntimeException {
-
-        @Serial
-        private static final long serialVersionUID = 1L;
-
-        /**
-         * The classified cause.
-         *
-         * @serial
-         */
-        private final FailureReason reason;
-
-        /**
-         * How long the service asked the caller to wait, or null.
-         *
-         * @serial
-         */
-        private final Duration retryAfter;
-
-        /**
-         * Creates a classified failure.
-         *
-         * @param message the failure description
-         * @param reason the classified cause
-         * @since 0.12.0
-         */
-        public AuthFlowException(String message, FailureReason reason) {
-            this(message, reason, null);
-        }
-
-        /**
-         * Creates a classified failure carrying the underlying one.
-         *
-         * @param message the failure description
-         * @param reason the classified cause
-         * @param cause the underlying failure, or {@code null}
-         * @since 0.12.0
-         */
-        public AuthFlowException(String message, FailureReason reason, Throwable cause) {
-            super(message, cause);
-            this.reason = reason == null ? FailureReason.UNKNOWN : reason;
-            this.retryAfter = null;
-        }
-
-        /**
-         * Creates a classified failure carrying the wait the service asked for.
-         *
-         * @param message the failure description
-         * @param reason the classified cause
-         * @param retryAfter how long the service asked the caller to wait, or {@code null}
-         * @param cause the underlying failure, or {@code null}
-         * @since 0.12.0
-         */
-        public AuthFlowException(String message, FailureReason reason, Duration retryAfter, Throwable cause) {
-            super(message, cause);
-            this.reason = reason == null ? FailureReason.UNKNOWN : reason;
-            this.retryAfter = retryAfter;
-        }
-
-        /**
-         * Returns the classified cause.
-         *
-         * @return the reason, never {@code null}
-         * @since 0.12.0
-         */
-        public FailureReason reason() {
-            return reason;
-        }
-
-        /**
-         * Returns how long the service asked the caller to wait before trying again, when it said.
-         *
-         * @return the stated wait, or {@code null} when none was given
-         * @since 0.12.0
-         */
-        public Duration retryAfter() {
-            return retryAfter;
-        }
-    }
-
-    /**
-     * Signals an XSTS authorization refusal, carrying the classified {@link XstsError} so a host can tell
-     * the user what to fix rather than reporting a bare failure.
-     *
-     * @author trq
-     * @since 1.0.0
-     */
-    public static final class XstsAuthException extends AuthFlowException {
-
-        @Serial
-        private static final long serialVersionUID = 1L;
-
-        /**
-         * The classified cause of the refusal.
-         *
-         * @serial
-         */
-        private final XstsError error;
-
-        /**
-         * Creates an XSTS failure.
-         *
-         * @param message the failure description
-         * @param error the classified cause
-         * @since 1.0.0
-         */
-        public XstsAuthException(String message, XstsError error) {
-            super(message, FailureReason.XBOX_DENIED);
-            this.error = error;
-        }
-
-        /**
-         * Returns the classified cause of the refusal.
-         *
-         * @return the XSTS error
-         * @since 1.0.0
-         */
-        public XstsError error() {
-            return error;
-        }
+        return new AltsException(
+                AltsFailure.xboxDenied("XSTS auth failed (" + error + ", status " + status + ")", error));
     }
 
     /** Holds the Microsoft OAuth access and refresh tokens. */

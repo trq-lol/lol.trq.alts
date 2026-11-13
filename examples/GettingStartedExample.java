@@ -1,6 +1,7 @@
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import lol.trq.alts.AltsFailure;
 import lol.trq.alts.AltsRuntime;
 import lol.trq.alts.account.AccountException;
 import lol.trq.alts.account.AccountServices;
@@ -11,7 +12,6 @@ import lol.trq.alts.account.NameChangeResult;
 import lol.trq.alts.account.PlayerAttributes;
 import lol.trq.alts.account.PlayerProfile;
 import lol.trq.alts.account.PublicProfile;
-import lol.trq.alts.auth.AltLoginCallback;
 import lol.trq.alts.auth.MicrosoftAuthConfig;
 import lol.trq.alts.bulk.BulkEntryResult;
 import lol.trq.alts.bulk.BulkHandle;
@@ -176,10 +176,10 @@ public final class GettingStartedExample {
                     // Try again later. Nothing was spent. A rate limit lands here too, and says how long
                     // to wait when the service named a wait.
                     case UNREACHABLE ->
-                        showRetry(
-                                status.rateLimited() && status.retryAfter() != null
-                                        ? "Rate limited for " + status.retryAfter()
-                                        : status.message());
+                        showRetry(status.failure()
+                                .flatMap(AltsFailure::retryAfter)
+                                .map(wait -> "Rate limited for " + wait)
+                                .orElse(status.message()));
                     default -> showError(status.message());
                 }
             });
@@ -260,7 +260,8 @@ public final class GettingStartedExample {
                 render(result.account().username());
                 return;
             }
-            switch (result.reason()) {
+            AltsFailure failure = result.failure().orElseThrow();
+            switch (failure.kind()) {
                 // The user said no. Nothing to retry until they ask again.
                 case DECLINED -> render("Sign-in cancelled");
                 // The code ran out before it was entered; starting again issues a fresh one.
@@ -268,7 +269,9 @@ public final class GettingStartedExample {
                 // The service asked to be left alone. Wait before starting another.
                 case RATE_LIMITED -> showRetry("Too many attempts; try again shortly");
                 // Signed in, but Xbox Live will not authorize the account; xstsError() says why.
-                case XBOX_DENIED -> showError("Xbox Live refused this account: " + result.xstsError());
+                case XBOX_DENIED ->
+                    showError("Xbox Live refused this account: "
+                            + failure.xstsError().orElseThrow());
                 default -> showError(result.message());
             }
         });
@@ -349,7 +352,7 @@ public final class GettingStartedExample {
             if (result.success()) {
                 // Always the rotated value; persist it for any account the store does not hold.
                 persist(result.account().refreshToken());
-            } else if (result.reason() == AltLoginCallback.FailureReason.NOT_CONFIGURED) {
+            } else if (result.failure().orElseThrow().kind() == AltsFailure.Kind.NOT_CONFIGURED) {
                 // Only the routes that talk to Microsoft can report this one.
                 showError("Microsoft login is not configured");
             }
@@ -368,7 +371,7 @@ public final class GettingStartedExample {
             if (result.success()) {
                 return;
             }
-            switch (result.reason()) {
+            switch (result.failure().orElseThrow().kind()) {
                 // The credential is permanently spent and has been discarded. Send the user
                 // through a fresh interactive login.
                 case REAUTH_REQUIRED -> promptMicrosoftLogin(account);

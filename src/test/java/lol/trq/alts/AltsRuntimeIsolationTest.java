@@ -23,7 +23,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import lol.trq.alts.auth.AltLoginCallback.LoginResult;
+import lol.trq.alts.auth.LoginResult;
 import lol.trq.alts.auth.MicrosoftAuthConfig;
 import lol.trq.alts.bulk.BulkOptions;
 import lol.trq.alts.bulk.BulkReport;

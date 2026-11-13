@@ -15,8 +15,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Pattern;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
-import lol.trq.alts.auth.MicrosoftAuthUtil.AuthFlowException;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure;
 import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 
@@ -121,7 +121,7 @@ public final class CookieAuthUtil {
      * @param account a scope naming the account the requests are for, or {@code null} for none
      * @return a {@link MinecraftProfile} containing the authenticated session data
      * @throws Exception if parsing fails or the redirect chain is interrupted; a failure the flow could
-     *     classify is an {@link AuthFlowException}
+     *     classify is an {@link lol.trq.alts.AltsException}
      * @since 0.12.0
      */
     public MinecraftProfile authenticate(String cookieData, MicrosoftAuthConfig config, NetworkScope account)
@@ -193,7 +193,7 @@ public final class CookieAuthUtil {
             URI target = httpsTarget(url);
             String next = fetcher.location(url, cookieHeaderFor(target.getHost(), cookies));
             if (next == null || next.isBlank()) {
-                throw new AuthFlowException("Cookie sign-in did not redirect", FailureReason.INVALID_TOKEN);
+                throw new AltsException(AltsFailure.Kind.UNAUTHORIZED, "Cookie sign-in did not redirect");
             }
             if (next.contains(ACCESS_TOKEN_PARAM)) {
                 // The bundle is only as good as whoever handed it over. The chain passes through hosts
@@ -201,8 +201,8 @@ public final class CookieAuthUtil {
                 // a token in it" proves nothing; the service that started the sign-in is the one that
                 // ends it.
                 if (!TOKEN_ISSUER_HOST.equalsIgnoreCase(target.getHost())) {
-                    throw new AuthFlowException(
-                            "Cookie sign-in produced a token from an unexpected host", FailureReason.UNKNOWN);
+                    throw new AltsException(
+                            AltsFailure.Kind.UNKNOWN, "Cookie sign-in produced a token from an unexpected host");
                 }
                 return next;
             }
@@ -211,12 +211,11 @@ public final class CookieAuthUtil {
             try {
                 url = target.resolve(next.replace(" ", "%20")).toString();
             } catch (IllegalArgumentException unparseable) {
-                throw new AuthFlowException(
-                        "Cookie sign-in redirected to an unreadable address", FailureReason.UNKNOWN);
+                throw new AltsException(AltsFailure.Kind.UNKNOWN, "Cookie sign-in redirected to an unreadable address");
             }
         }
         // The usual cause is cookies that no longer sign in: the chain loops through the sign-in page.
-        throw new AuthFlowException("Cookie sign-in never produced a token", FailureReason.INVALID_TOKEN);
+        throw new AltsException(AltsFailure.Kind.UNAUTHORIZED, "Cookie sign-in never produced a token");
     }
 
     /**
@@ -231,10 +230,10 @@ public final class CookieAuthUtil {
         try {
             target = URI.create(url);
         } catch (IllegalArgumentException unparseable) {
-            throw new AuthFlowException("Cookie sign-in redirected to an unreadable address", FailureReason.UNKNOWN);
+            throw new AltsException(AltsFailure.Kind.UNKNOWN, "Cookie sign-in redirected to an unreadable address");
         }
         if (!"https".equalsIgnoreCase(target.getScheme()) || target.getHost() == null) {
-            throw new AuthFlowException("Cookie sign-in was redirected off HTTPS", FailureReason.UNKNOWN);
+            throw new AltsException(AltsFailure.Kind.UNKNOWN, "Cookie sign-in was redirected off HTTPS");
         }
         return target;
     }
@@ -514,7 +513,7 @@ public final class CookieAuthUtil {
      * @param cookies the cookies to send with the request, or {@code null} for none
      * @param scope what the request is for, and on whose behalf
      * @return the target redirection URL
-     * @throws AuthFlowException if the server does not return a redirect or cannot be reached
+     * @throws lol.trq.alts.AltsException if the server does not return a redirect or cannot be reached
      */
     private String followRedirect(String urlString, String cookies, NetworkScope scope) {
         Map<String, String> headers = new LinkedHashMap<>();
@@ -540,7 +539,7 @@ public final class CookieAuthUtil {
                 throw MicrosoftAuthUtil.stepFailure("Cookie sign-in", response.status());
             }
             // A page instead of a redirect is the sign-in form: the cookies no longer sign anyone in.
-            throw new AuthFlowException("Cookie sign-in did not redirect", FailureReason.INVALID_TOKEN);
+            throw new AltsException(AltsFailure.Kind.UNAUTHORIZED, "Cookie sign-in did not redirect");
         }
         return response.value();
     }
@@ -556,11 +555,11 @@ public final class CookieAuthUtil {
      *
      * @param redirectUrl the URL containing the encoded access token
      * @return a record containing the XSTS token and user hash
-     * @throws AuthFlowException if the token is missing or incorrectly encoded
+     * @throws lol.trq.alts.AltsException if the token is missing or incorrectly encoded
      */
     static XstsTokenData extractXstsFromRedirect(String redirectUrl) {
         if (redirectUrl == null || !redirectUrl.contains(ACCESS_TOKEN_PARAM)) {
-            throw new AuthFlowException("Invalid redirect: No accessToken", FailureReason.INVALID_TOKEN);
+            throw new AltsException(AltsFailure.Kind.UNAUTHORIZED, "Invalid redirect: No accessToken");
         }
 
         String raw = redirectUrl.substring(redirectUrl.indexOf(ACCESS_TOKEN_PARAM) + ACCESS_TOKEN_PARAM.length());
@@ -580,8 +579,8 @@ public final class CookieAuthUtil {
             bundle = JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8))
                     .getAsJsonArray();
         } catch (RuntimeException malformed) {
-            throw new AuthFlowException(
-                    "Invalid redirect: accessToken could not be decoded", FailureReason.INVALID_TOKEN);
+            throw new AltsException(
+                    AltsFailure.Kind.UNAUTHORIZED, "Invalid redirect: accessToken could not be decoded");
         }
 
         try {
@@ -600,11 +599,11 @@ public final class CookieAuthUtil {
                 return new XstsTokenData(token, uhs);
             }
         } catch (RuntimeException malformed) {
-            throw new AuthFlowException(
-                    "Invalid redirect: accessToken is not a token bundle", FailureReason.INVALID_TOKEN);
+            throw new AltsException(
+                    AltsFailure.Kind.UNAUTHORIZED, "Invalid redirect: accessToken is not a token bundle");
         }
 
-        throw new AuthFlowException("Invalid redirect: No Minecraft token in accessToken", FailureReason.INVALID_TOKEN);
+        throw new AltsException(AltsFailure.Kind.UNAUTHORIZED, "Invalid redirect: No Minecraft token in accessToken");
     }
 
     /** {@return the first index of either character in {@code text}, or -1 if it holds neither} */
@@ -647,7 +646,7 @@ public final class CookieAuthUtil {
      * @param loginUrl the Minecraft services login-with-Xbox endpoint
      * @param scope what the request is for, and on whose behalf
      * @return the Minecraft services bearer token
-     * @throws AuthFlowException if Minecraft services reject the identity token or cannot be reached
+     * @throws lol.trq.alts.AltsException if Minecraft services reject the identity token or cannot be reached
      */
     private String authenticateWithMinecraft(XstsTokenData xstsData, String loginUrl, NetworkScope scope) {
         JsonObject body = new JsonObject();
@@ -685,7 +684,7 @@ public final class CookieAuthUtil {
      * @param profileUrl the Minecraft services profile endpoint
      * @param scope what the request is for, and on whose behalf
      * @return the populated {@link MinecraftProfile}
-     * @throws AuthFlowException if the profile could not be retrieved
+     * @throws lol.trq.alts.AltsException if the profile could not be retrieved
      */
     private MinecraftProfile getMinecraftProfile(String mcToken, String profileUrl, NetworkScope scope) {
         AccountNetworkUtil.ProfileLookup lookup;
@@ -695,7 +694,7 @@ public final class CookieAuthUtil {
             throw MicrosoftAuthUtil.unreachable("Profile fetch", transportFailure);
         }
         if (lookup.missingProfile()) {
-            throw new AuthFlowException("This account has no Minecraft profile", FailureReason.NOT_ENTITLED);
+            throw new AltsException(AltsFailure.Kind.NOT_ENTITLED, "This account has no Minecraft profile");
         }
         if (!lookup.found()) {
             throw lookup.status() >= 200 && lookup.status() < 300

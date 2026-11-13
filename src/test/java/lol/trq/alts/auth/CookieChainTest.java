@@ -13,8 +13,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
-import lol.trq.alts.auth.MicrosoftAuthUtil.AuthFlowException;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.net.ProxyRoute;
@@ -165,8 +165,7 @@ class CookieChainTest {
         hops.redirects.put("https://login.live.com/a", "https://elsewhere.example/open-redirect");
         hops.redirects.put("https://elsewhere.example/open-redirect", landing());
 
-        AuthFlowException failure =
-                assertThrows(AuthFlowException.class, () -> CookieAuthUtil.followChain(List.of(), hops));
+        AltsException failure = assertThrows(AltsException.class, () -> CookieAuthUtil.followChain(List.of(), hops));
 
         assertFalse(
                 failure.getMessage().contains("accessToken"),
@@ -177,7 +176,7 @@ class CookieChainTest {
         live.redirects.put("https://login.live.com/a", landing());
 
         assertThrows(
-                AuthFlowException.class,
+                AltsException.class,
                 () -> CookieAuthUtil.followChain(List.of(), live),
                 "not even a host the chain legitimately visits may end it");
     }
@@ -208,8 +207,8 @@ class CookieChainTest {
         hops.firstHopTarget = "https://login.live.com/a";
         hops.redirects.put("https://login.live.com/a", "http://login.live.com/downgraded");
 
-        AuthFlowException failure = assertThrows(
-                AuthFlowException.class,
+        AltsException failure = assertThrows(
+                AltsException.class,
                 () -> CookieAuthUtil.followChain(CookieAuthUtil.parseCookieList(FULL_BROWSER_EXPORT), hops));
 
         assertFalse(hops.fetched.contains("http://login.live.com/downgraded"), "the plain-HTTP hop is never requested");
@@ -220,10 +219,9 @@ class CookieChainTest {
     void aChainThatNeverProducesATokenIsARejectedCredential() {
         CookieAuthUtil.RedirectFetcher loop = (url, cookies) -> "https://login.live.com/signin";
 
-        AuthFlowException failure =
-                assertThrows(AuthFlowException.class, () -> CookieAuthUtil.followChain(List.of(), loop));
+        AltsException failure = assertThrows(AltsException.class, () -> CookieAuthUtil.followChain(List.of(), loop));
 
-        assertEquals(FailureReason.INVALID_TOKEN, failure.reason());
+        assertEquals(Kind.UNAUTHORIZED, failure.kind());
     }
 
     @Test
@@ -300,23 +298,23 @@ class CookieChainTest {
     void theTailClassifiesAnOutageAndAThrottleApartFromARefusal() throws Exception {
         try (AuthChainServer chain = new AuthChainServer()) {
             chain.fail("/mclogin", 503);
-            assertEquals(FailureReason.NETWORK, tailFailure(chain).reason());
+            assertEquals(Kind.NETWORK, tailFailure(chain).kind());
 
             chain.fail("/mclogin", 429);
-            assertEquals(FailureReason.RATE_LIMITED, tailFailure(chain).reason());
+            assertEquals(Kind.RATE_LIMITED, tailFailure(chain).kind());
 
             chain.fail("/mclogin", 401);
-            assertEquals(FailureReason.INVALID_TOKEN, tailFailure(chain).reason());
+            assertEquals(Kind.UNAUTHORIZED, tailFailure(chain).kind());
 
             chain.fail("/mclogin", 200);
             chain.fail("/mcprofile", 404);
-            assertEquals(FailureReason.NOT_ENTITLED, tailFailure(chain).reason());
+            assertEquals(Kind.NOT_ENTITLED, tailFailure(chain).kind());
         }
     }
 
-    private static AuthFlowException tailFailure(AuthChainServer chain) {
+    private static AltsException tailFailure(AuthChainServer chain) {
         return assertThrows(
-                AuthFlowException.class,
+                AltsException.class,
                 () -> new CookieAuthUtil(TestTransports.direct()).completeFromLanding(landing(), chain.config(), null));
     }
 

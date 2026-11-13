@@ -12,10 +12,12 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
-import lol.trq.alts.auth.MicrosoftAuthUtil.AuthFlowException;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.auth.MicrosoftAuthUtil.DeviceCodeTiming;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
@@ -136,47 +138,40 @@ public class AltLoginServiceImpl implements AltLoginService {
      * @return a future containing the result of the login attempt
      */
     @Override
-    public CompletableFuture<AltLoginCallback.LoginResult> loginSession(String sessionToken, LoginMode mode) {
-        return CompletableFuture.supplyAsync(
-                () -> {
-                    if (sessionToken == null || sessionToken.isBlank()) {
-                        return AltLoginCallback.LoginResult.failure("Token empty", FailureReason.INVALID_TOKEN);
-                    }
+    public CompletableFuture<LoginResult> loginSession(String sessionToken, LoginMode mode) {
+        return async("Session", () -> {
+            if (sessionToken == null || sessionToken.isBlank()) {
+                return LoginResult.failure(Kind.UNAUTHORIZED, "Token empty");
+            }
 
-                    String cleanToken = cleanToken(sessionToken);
+            String cleanToken = cleanToken(sessionToken);
 
-                    // Optimization: try to extract identity from the JWT payload without a network request.
-                    // Only when nothing is being saved: the payload is unsigned text anyone can write, so it is
-                    // good enough to try a session with but not to store an identity on, and in ADD mode it
-                    // would be merged over whatever account the store already holds under the UUID it claims.
-                    // Saving therefore always goes through the profile lookup below, which asks the service who
-                    // the token really belongs to.
-                    if (mode != LoginMode.ADD && cleanToken.startsWith("eyJ")) {
-                        Optional<AltLoginCallback.LoginResult> fastResult = attemptFastJwtLogin(cleanToken, mode);
-                        if (fastResult.isPresent()) return fastResult.get();
-                    }
+            // Optimization: try to extract identity from the JWT payload without a network request.
+            // Only when nothing is being saved: the payload is unsigned text anyone can write, so it is
+            // good enough to try a session with but not to store an identity on, and in ADD mode it
+            // would be merged over whatever account the store already holds under the UUID it claims.
+            // Saving therefore always goes through the profile lookup below, which asks the service who
+            // the token really belongs to.
+            if (mode != LoginMode.ADD && cleanToken.startsWith("eyJ")) {
+                Optional<LoginResult> fastResult = attemptFastJwtLogin(cleanToken, mode);
+                if (fastResult.isPresent()) return fastResult.get();
+            }
 
-                    // Fallback: perform an API request to validate the token and get profile data. A refusal, an
-                    // account with no Minecraft profile, and an unreachable service are three different answers
-                    // with three different remedies, so they are classified apart rather than collapsed.
-                    AccountNetworkUtil.ProfileLookup profile;
-                    try {
-                        profile = profiles.fetchProfile(
-                                cleanToken, profileUrl(), NetworkScope.of(NetworkScope.Purpose.PROFILE));
-                    } catch (Exception unreachable) {
-                        return AltLoginCallback.LoginResult.failure(
-                                "Login failed: " + FailureText.of(unreachable), FailureReason.NETWORK);
-                    }
-                    if (profile.found()) {
-                        return finalizeLogin(profile.username(), profile.uuid(), cleanToken, AccountType.SESSION, mode);
-                    }
-                    return AltLoginCallback.LoginResult.failure(
-                            AltAccountServiceImpl.messageFor(profile),
-                            AltAccountServiceImpl.reasonFor(profile),
-                            null,
-                            profile.retryAfter());
-                },
-                http.executor());
+            // Fallback: perform an API request to validate the token and get profile data. A refusal, an
+            // account with no Minecraft profile, and an unreachable service are three different answers
+            // with three different remedies, so they are classified apart rather than collapsed.
+            AccountNetworkUtil.ProfileLookup profile;
+            try {
+                profile =
+                        profiles.fetchProfile(cleanToken, profileUrl(), NetworkScope.of(NetworkScope.Purpose.PROFILE));
+            } catch (Exception unreachable) {
+                return LoginResult.failure(FailureText.toFailure("Login failed", unreachable));
+            }
+            if (profile.found()) {
+                return finalizeLogin(profile.username(), profile.uuid(), cleanToken, AccountType.SESSION, mode);
+            }
+            return LoginResult.failure(AltAccountServiceImpl.failureFor(profile));
+        });
     }
 
     /**
@@ -187,26 +182,17 @@ public class AltLoginServiceImpl implements AltLoginService {
      * @return a future containing the result of the login attempt
      */
     @Override
-    public CompletableFuture<AltLoginCallback.LoginResult> loginOffline(String name, LoginMode mode) {
-        return CompletableFuture.supplyAsync(
-                () -> {
-                    try {
-                        String cleanName = name == null
-                                ? ""
-                                : NOT_USERNAME.matcher(name.trim()).replaceAll("");
-                        if (cleanName.isEmpty() || cleanName.length() > 16) {
-                            return AltLoginCallback.LoginResult.failure(
-                                    "Invalid username length (1-16 chars)", FailureReason.INVALID_TOKEN);
-                        }
+    public CompletableFuture<LoginResult> loginOffline(String name, LoginMode mode) {
+        return async("Offline", () -> {
+            String cleanName =
+                    name == null ? "" : NOT_USERNAME.matcher(name.trim()).replaceAll("");
+            if (cleanName.isEmpty() || cleanName.length() > 16) {
+                return LoginResult.failure(Kind.UNAUTHORIZED, "Invalid username length (1-16 chars)");
+            }
 
-                        UUID uuid =
-                                UUID.nameUUIDFromBytes(("OfflinePlayer:" + cleanName).getBytes(StandardCharsets.UTF_8));
-                        return finalizeLogin(cleanName, uuid.toString(), "", AccountType.OFFLINE, mode);
-                    } catch (Exception e) {
-                        return AltLoginCallback.LoginResult.failure("Error: " + e.getMessage(), FailureReason.UNKNOWN);
-                    }
-                },
-                http.executor());
+            UUID uuid = UUID.nameUUIDFromBytes(("OfflinePlayer:" + cleanName).getBytes(StandardCharsets.UTF_8));
+            return finalizeLogin(cleanName, uuid.toString(), "", AccountType.OFFLINE, mode);
+        });
     }
 
     /**
@@ -217,12 +203,14 @@ public class AltLoginServiceImpl implements AltLoginService {
      * @return a future containing the result of the login attempt
      */
     @Override
-    public CompletableFuture<AltLoginCallback.LoginResult> loginMicrosoft(LoginMode mode) {
+    public CompletableFuture<LoginResult> loginMicrosoft(LoginMode mode) {
         if (microsoftAuth == null) {
-            return CompletableFuture.completedFuture(AltLoginCallback.LoginResult.failure(
-                    "Microsoft login not configured", FailureReason.NOT_CONFIGURED));
+            return CompletableFuture.completedFuture(
+                    LoginResult.failure(Kind.NOT_CONFIGURED, "Microsoft login not configured"));
         }
-        return interactive(microsoft.authenticate(microsoftAuth, browser), "Microsoft Auth", mode);
+        return started(
+                "Microsoft Auth",
+                () -> interactive(microsoft.authenticate(microsoftAuth, browser), "Microsoft Auth", mode));
     }
 
     /**
@@ -239,17 +227,21 @@ public class AltLoginServiceImpl implements AltLoginService {
      * @since 0.12.0
      */
     @Override
-    public CompletableFuture<AltLoginCallback.LoginResult> loginDeviceCode(DeviceCodePrompt prompt, LoginMode mode) {
+    public CompletableFuture<LoginResult> loginDeviceCode(DeviceCodePrompt prompt, LoginMode mode) {
         if (microsoftAuth == null) {
-            return CompletableFuture.completedFuture(AltLoginCallback.LoginResult.failure(
-                    "Microsoft login not configured", FailureReason.NOT_CONFIGURED));
+            return CompletableFuture.completedFuture(
+                    LoginResult.failure(Kind.NOT_CONFIGURED, "Microsoft login not configured"));
         }
         if (prompt == null) {
             return CompletableFuture.completedFuture(
-                    AltLoginCallback.LoginResult.failure("No device code prompt given", FailureReason.NOT_CONFIGURED));
+                    LoginResult.failure(Kind.NOT_CONFIGURED, "No device code prompt given"));
         }
-        return interactive(
-                microsoft.authenticateWithDeviceCode(microsoftAuth, prompt, deviceCodeTiming), "Device code", mode);
+        return started(
+                "Device code",
+                () -> interactive(
+                        microsoft.authenticateWithDeviceCode(microsoftAuth, prompt, deviceCodeTiming),
+                        "Device code",
+                        mode));
     }
 
     /**
@@ -262,49 +254,82 @@ public class AltLoginServiceImpl implements AltLoginService {
      * @param mode the login mode
      * @return a future containing the result of the login attempt
      */
-    private CompletableFuture<AltLoginCallback.LoginResult> interactive(
+    private CompletableFuture<LoginResult> interactive(
             CompletableFuture<MinecraftProfile> authentication, String label, LoginMode mode) {
-        CompletableFuture<AltLoginCallback.LoginResult> result = authentication
+        CompletableFuture<LoginResult> result = authentication
                 .thenApply(profile -> finalizeLogin(profile, AccountType.MICROSOFT, mode))
                 .exceptionally(failure -> classifiedFailure(label, failure));
         return MicrosoftAuthUtil.cancelling(result, authentication);
     }
 
     /**
-     * Maps a failed sign-in onto a result whose reason says what kind of failure it was. An unreachable
-     * service, a throttled one, a refused credential, and an Xbox Live refusal each have a different
-     * remedy, so none of them may be reported as another.
+     * Maps a failed sign-in onto a result whose failure says what kind it was. An unreachable service, a
+     * throttled one, a refused credential, and an Xbox Live refusal each have a different remedy, so none
+     * of them may be reported as another. A failure a step already classified keeps its kind, wait and
+     * Xbox Live reason, with the route's name put in front of its message.
      *
      * @param label the route's name, prefixed to the message
      * @param failure the throwable the flow failed with
      * @return the classified failure result
      */
-    private static AltLoginCallback.LoginResult classifiedFailure(String label, Throwable failure) {
-        AuthFlowException classified = MicrosoftAuthUtil.classified(failure);
-        if (classified != null) {
-            XstsError xstsError = classified instanceof MicrosoftAuthUtil.XstsAuthException xsts ? xsts.error() : null;
-            return AltLoginCallback.LoginResult.failure(
-                    label + ": " + classified.getMessage(), classified.reason(), xstsError, classified.retryAfter());
-        }
-
+    static LoginResult classifiedFailure(String label, Throwable failure) {
         Throwable cause = failure;
         while (cause instanceof CompletionException && cause.getCause() != null) {
             cause = cause.getCause();
         }
+        if (cause instanceof AltsException classified) {
+            return LoginResult.failure(classified.failure().withMessage(label + ": " + classified.getMessage()));
+        }
         if (cause instanceof TimeoutException) {
-            return AltLoginCallback.LoginResult.failure(label + ": sign-in timed out", FailureReason.TIMED_OUT);
+            return LoginResult.failure(Kind.TIMED_OUT, label + ": sign-in timed out");
         }
         // From here on the failure is one the library did not write, so its message is not repeated: the
         // JDK quotes the input that offended it, and here that input is a cookie, a token, or an address
         // carrying one.
         if (cause instanceof IllegalArgumentException) {
             // The credential text itself could not be read.
-            return AltLoginCallback.LoginResult.failure(label + ": unreadable credential", FailureReason.INVALID_TOKEN);
+            return LoginResult.failure(Kind.UNAUTHORIZED, label + ": unreadable credential");
         }
-        if (cause instanceof IOException) {
-            return AltLoginCallback.LoginResult.failure(label + ": " + FailureText.of(cause), FailureReason.NETWORK);
+        return LoginResult.failure(FailureText.toFailure(label, cause));
+    }
+
+    /**
+     * Runs a sign-in step on the library executor. A failure it throws, and the executor refusing it
+     * (the runtime closed), become a classified result rather than an exception at the caller or a
+     * future completed exceptionally.
+     *
+     * @param label the route's name, prefixed to a failure message
+     * @param step the step, which returns the result
+     * @return a future holding the result
+     */
+    private CompletableFuture<LoginResult> async(String label, Supplier<LoginResult> step) {
+        return started(label, () -> CompletableFuture.supplyAsync(step, http.executor()));
+    }
+
+    /**
+     * Starts a sign-in whose future must hold a result whatever happens: a start that throws (an
+     * executor that refuses the task once the runtime is closed) and a future that fails both become a
+     * classified failure result.
+     *
+     * @param label the route's name, prefixed to a failure message
+     * @param start what starts the sign-in
+     * @return a future that always completes with a result
+     */
+    private CompletableFuture<LoginResult> started(String label, Supplier<CompletableFuture<LoginResult>> start) {
+        if (http.isClosed()) {
+            // Nothing a closed runtime starts can finish: say so before parsing, prompting or binding.
+            return CompletableFuture.completedFuture(
+                    LoginResult.failure(Kind.CANCELLED, label + ": the runtime is closed"));
         }
-        return AltLoginCallback.LoginResult.failure(label + ": " + FailureText.of(cause), FailureReason.UNKNOWN);
+        CompletableFuture<LoginResult> running;
+        try {
+            running = start.get();
+        } catch (RuntimeException refused) {
+            return CompletableFuture.completedFuture(classifiedFailure(label, refused));
+        }
+        CompletableFuture<LoginResult> result = running.exceptionally(failure -> classifiedFailure(label, failure));
+        // A cancellation of the result is passed back so a callback server or a polling loop stops.
+        return MicrosoftAuthUtil.cancelling(result, running);
     }
 
     /**
@@ -315,22 +340,19 @@ public class AltLoginServiceImpl implements AltLoginService {
      * @return a future containing the result of the login attempt
      */
     @Override
-    public CompletableFuture<AltLoginCallback.LoginResult> loginCookie(String cookieData, LoginMode mode) {
-        return CompletableFuture.supplyAsync(
-                () -> {
-                    if (cookieData == null || cookieData.isBlank()) {
-                        return AltLoginCallback.LoginResult.failure("Cookie data empty", FailureReason.INVALID_TOKEN);
-                    }
-                    MinecraftProfile profile;
-                    try {
-                        profile = cookies.authenticate(cookieData, microsoftAuth, null);
-                    } catch (Exception e) {
-                        return classifiedFailure("Cookie Auth", e);
-                    }
-                    return finalizeLogin(
-                            profile.username(), profile.uuid(), profile.accessToken(), AccountType.COOKIE, mode);
-                },
-                http.executor());
+    public CompletableFuture<LoginResult> loginCookie(String cookieData, LoginMode mode) {
+        return async("Cookie Auth", () -> {
+            if (cookieData == null || cookieData.isBlank()) {
+                return LoginResult.failure(Kind.UNAUTHORIZED, "Cookie data empty");
+            }
+            MinecraftProfile profile;
+            try {
+                profile = cookies.authenticate(cookieData, microsoftAuth, null);
+            } catch (Exception e) {
+                return classifiedFailure("Cookie Auth", e);
+            }
+            return finalizeLogin(profile.username(), profile.uuid(), profile.accessToken(), AccountType.COOKIE, mode);
+        });
     }
 
     /**
@@ -344,27 +366,29 @@ public class AltLoginServiceImpl implements AltLoginService {
      * @since 0.7.0
      */
     @Override
-    public CompletableFuture<AltLoginCallback.LoginResult> loginCookieFile(Path file, LoginMode mode) {
+    public CompletableFuture<LoginResult> loginCookieFile(Path file, LoginMode mode) {
         if (file == null) {
-            return CompletableFuture.completedFuture(
-                    AltLoginCallback.LoginResult.failure("No cookie file given", FailureReason.INVALID_TOKEN));
+            return CompletableFuture.completedFuture(LoginResult.failure(Kind.UNAUTHORIZED, "No cookie file given"));
         }
-        return CompletableFuture.supplyAsync(
-                        () -> {
-                            try {
-                                return CookieFile.read(file);
-                            } catch (IOException e) {
-                                // Not a network failure: the file is the credential, and it could not be read.
-                                throw new AuthFlowException(
-                                        // CookieFile writes its own messages: a file name and a fixed phrase.
-                                        e.getMessage() != null ? e.getMessage() : "could not be read",
-                                        FailureReason.INVALID_TOKEN,
-                                        e);
-                            }
-                        },
-                        http.executor())
-                .thenCompose(cookieData -> loginCookie(cookieData, mode))
-                .exceptionally(failure -> classifiedFailure("Cookie file", failure));
+        return started(
+                "Cookie file",
+                () -> CompletableFuture.supplyAsync(
+                                () -> {
+                                    try {
+                                        return CookieFile.read(file);
+                                    } catch (IOException e) {
+                                        // Not a network failure: the file is the credential, and it could not
+                                        // be read. CookieFile writes its own messages: a file name and a fixed
+                                        // phrase.
+                                        throw new AltsException(
+                                                AltsFailure.of(
+                                                        Kind.UNAUTHORIZED,
+                                                        e.getMessage() != null ? e.getMessage() : "could not be read"),
+                                                e);
+                                    }
+                                },
+                                http.executor())
+                        .thenCompose(cookieData -> loginCookie(cookieData, mode)));
     }
 
     /**
@@ -376,24 +400,26 @@ public class AltLoginServiceImpl implements AltLoginService {
      * @since 0.6.0
      */
     @Override
-    public CompletableFuture<AltLoginCallback.LoginResult> loginRefreshToken(String refreshToken, LoginMode mode) {
+    public CompletableFuture<LoginResult> loginRefreshToken(String refreshToken, LoginMode mode) {
         if (microsoftAuth == null) {
-            return CompletableFuture.completedFuture(AltLoginCallback.LoginResult.failure(
-                    "Microsoft login not configured", FailureReason.NOT_CONFIGURED));
+            return CompletableFuture.completedFuture(
+                    LoginResult.failure(Kind.NOT_CONFIGURED, "Microsoft login not configured"));
         }
         if (refreshToken == null || refreshToken.isBlank()) {
-            return CompletableFuture.completedFuture(
-                    AltLoginCallback.LoginResult.failure("Refresh token empty", FailureReason.INVALID_TOKEN));
+            return CompletableFuture.completedFuture(LoginResult.failure(Kind.UNAUTHORIZED, "Refresh token empty"));
         }
         String cleaned = cleanRefreshToken(refreshToken);
         if (cleaned.isBlank()) {
-            return CompletableFuture.completedFuture(
-                    AltLoginCallback.LoginResult.failure("Refresh token empty", FailureReason.INVALID_TOKEN));
+            return CompletableFuture.completedFuture(LoginResult.failure(Kind.UNAUTHORIZED, "Refresh token empty"));
         }
-        return microsoft
-                .authenticateWithRefreshToken(microsoftAuth, cleaned)
-                .thenApply(profile -> finalizeLogin(profile, AccountType.MICROSOFT, mode))
-                .exceptionally(AltLoginServiceImpl::importFailure);
+        // Nothing is discarded on failure: the token came from the caller rather than from the store, so
+        // there is no stored credential this failure could cost. Renewing a stored account is
+        // AltAccountServiceImpl's job, and it does clear a permanently spent one.
+        return started(
+                "Refresh",
+                () -> microsoft
+                        .authenticateWithRefreshToken(microsoftAuth, cleaned)
+                        .thenApply(profile -> finalizeLogin(profile, AccountType.MICROSOFT, mode)));
     }
 
     /**
@@ -408,19 +434,19 @@ public class AltLoginServiceImpl implements AltLoginService {
      * @return a future containing the result of the login attempt
      */
     @Override
-    public CompletableFuture<AltLoginCallback.LoginResult> loginAccount(AltAccount account) {
+    public CompletableFuture<LoginResult> loginAccount(AltAccount account) {
         if (account == null) {
-            return CompletableFuture.completedFuture(
-                    AltLoginCallback.LoginResult.failure("No account given", FailureReason.UNKNOWN));
+            return CompletableFuture.completedFuture(LoginResult.failure(Kind.INVALID_INPUT, "No account given"));
         }
         if (account.type() == AccountType.OFFLINE) {
             return loginOffline(account.username(), LoginMode.DIRECT);
         }
-        return accounts.refresh(account)
-                .thenApply(status -> status.usable()
-                        ? inject(status.account())
-                        : AltLoginCallback.LoginResult.failure(
-                                status.message(), status.reason(), null, status.retryAfter()));
+        return started(
+                "Account",
+                () -> accounts.refresh(account)
+                        .thenApply(status -> status.usable()
+                                ? inject(status.account())
+                                : LoginResult.failure(status.failure().orElseThrow())));
     }
 
     /**
@@ -429,14 +455,15 @@ public class AltLoginServiceImpl implements AltLoginService {
      * @param account the account to install
      * @return the login result
      */
-    private AltLoginCallback.LoginResult inject(AltAccount account) {
+    private LoginResult inject(AltAccount account) {
         try {
             sessionInjector.inject(
                     new SessionData(account.username(), account.uuid(), account.accessToken(), account.type()));
             store.useAccount(account);
-            return AltLoginCallback.LoginResult.success(account);
+            return LoginResult.success(account);
         } catch (Exception e) {
-            return AltLoginCallback.LoginResult.failure("Session Injection: " + e.getMessage(), FailureReason.UNKNOWN);
+            // The host's injector wrote that message, and it may quote the session it was handed.
+            return LoginResult.failure(Kind.UNKNOWN, "Session Injection: the host's session injector failed");
         }
     }
 
@@ -453,38 +480,6 @@ public class AltLoginServiceImpl implements AltLoginService {
     }
 
     /**
-     * Maps a failed refresh-token <em>import</em> onto a classified result. Nothing is discarded here:
-     * the token came from the caller rather than from the store, so there is no stored credential this
-     * failure could cost. Renewing a stored account is {@link AltAccountServiceImpl}'s job, and it does
-     * clear a permanently spent one.
-     *
-     * @param ex the failure the redemption completed with
-     * @return the classified failure result
-     */
-    private static AltLoginCallback.LoginResult importFailure(Throwable ex) {
-        Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-        if (!(cause instanceof MicrosoftAuthUtil.RefreshRejectedException rejection)) {
-            // The token was redeemed and a later step failed, which that step has already classified: a
-            // throttle, an Xbox Live refusal, and an outage each keep their own reason.
-            if (MicrosoftAuthUtil.classified(ex) != null) {
-                return classifiedFailure("Refresh", ex);
-            }
-            return AltLoginCallback.LoginResult.failure(
-                    "Refresh: " + MicrosoftAuthUtil.describe(cause), FailureReason.NETWORK);
-        }
-        FailureReason reason;
-        if (rejection.permanent()) {
-            reason = FailureReason.REAUTH_REQUIRED;
-        } else if (rejection.rateLimited()) {
-            reason = FailureReason.RATE_LIMITED;
-        } else {
-            reason = FailureReason.NETWORK;
-        }
-        return AltLoginCallback.LoginResult.failure(
-                "Refresh: " + MicrosoftAuthUtil.describe(cause), reason, null, rejection.retryAfter());
-    }
-
-    /**
      * Finalizes a flow that produced a freshly authenticated account, carrying the issued credentials
      * onto it. When the account is being saved and the store already holds the same alt, the issued
      * credentials are merged onto the stored record, so importing a credential for an alt the user
@@ -495,7 +490,7 @@ public class AltLoginServiceImpl implements AltLoginService {
      * @param mode the login mode
      * @return the login result
      */
-    private AltLoginCallback.LoginResult finalizeLogin(MinecraftProfile profile, AccountType type, LoginMode mode) {
+    private LoginResult finalizeLogin(MinecraftProfile profile, AccountType type, LoginMode mode) {
         AltAccount account = AltAccount.of(
                         AuthFormats.dashedUuid(profile.uuid()), profile.username(), profile.accessToken(), type)
                 .withTokens(profile.accessToken(), profile.refreshToken(), profile.expiresAt());
@@ -533,8 +528,7 @@ public class AltLoginServiceImpl implements AltLoginService {
      * @param mode the login mode
      * @return a result object containing success status and the account data
      */
-    private AltLoginCallback.LoginResult finalizeLogin(
-            String username, String uuid, String token, AccountType type, LoginMode mode) {
+    private LoginResult finalizeLogin(String username, String uuid, String token, AccountType type, LoginMode mode) {
         try {
             String fmtUuid = AuthFormats.dashedUuid(uuid);
             AltAccount account = AltAccount.of(fmtUuid, username, token, type);
@@ -548,9 +542,10 @@ public class AltLoginServiceImpl implements AltLoginService {
             if (mode == LoginMode.ADD) store.addAccount(account);
             store.useAccount(account);
 
-            return AltLoginCallback.LoginResult.success(account);
+            return LoginResult.success(account);
         } catch (Exception e) {
-            return AltLoginCallback.LoginResult.failure("Session Injection: " + e.getMessage(), FailureReason.UNKNOWN);
+            // The host's injector wrote that message, and it may quote the session it was handed.
+            return LoginResult.failure(Kind.UNKNOWN, "Session Injection: the host's session injector failed");
         }
     }
 
@@ -566,7 +561,7 @@ public class AltLoginServiceImpl implements AltLoginService {
      * @param mode the login mode
      * @return an optional result if the JWT was valid and contained profile data
      */
-    private Optional<AltLoginCallback.LoginResult> attemptFastJwtLogin(String token, LoginMode mode) {
+    private Optional<LoginResult> attemptFastJwtLogin(String token, LoginMode mode) {
         try {
             long expiry = TokenExpiry.jwtExpiryMillis(token);
             if (expiry <= 0 || clock.millis() >= expiry - TokenExpiry.SKEW_MILLIS) {

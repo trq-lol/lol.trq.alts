@@ -13,8 +13,8 @@ import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
-import lol.trq.alts.auth.AltLoginCallback.LoginResult;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.model.SessionData;
 import lol.trq.alts.net.TestTransports;
@@ -74,7 +74,7 @@ class LoginHardeningTest {
                 service().loginCookie("nothing useful here", LoginMode.DIRECT).get(10, TimeUnit.SECONDS);
 
         assertFalse(result.success());
-        assertEquals(FailureReason.INVALID_TOKEN, result.reason());
+        assertEquals(Kind.UNAUTHORIZED, result.failure().map(AltsFailure::kind).orElse(null));
     }
 
     @Test
@@ -85,19 +85,19 @@ class LoginHardeningTest {
                 service().loginCookieFile(missing, LoginMode.DIRECT).get(10, TimeUnit.SECONDS);
 
         assertFalse(result.success());
-        assertEquals(FailureReason.INVALID_TOKEN, result.reason());
+        assertEquals(Kind.UNAUTHORIZED, result.failure().map(AltsFailure::kind).orElse(null));
         assertFalse(result.message().contains(vaultDir.toString()), "an absolute path leaked: " + result.message());
     }
 
     @Test
     void aResultCarriesAnXboxCauseOnlyWhenThereWasOne() {
-        LoginResult plain = LoginResult.failure("refused", FailureReason.INVALID_TOKEN);
-        LoginResult xbox = LoginResult.failure("denied", FailureReason.XBOX_DENIED, XstsError.CHILD_ACCOUNT);
-        LoginResult positional = new LoginResult(false, "old shape", null, FailureReason.UNKNOWN);
+        LoginResult plain = LoginResult.failure(Kind.UNAUTHORIZED, "refused");
+        LoginResult xbox = LoginResult.failure(AltsFailure.xboxDenied("denied", XstsError.CHILD_ACCOUNT));
 
-        assertNull(plain.xstsError());
-        assertEquals(XstsError.CHILD_ACCOUNT, xbox.xstsError());
-        assertNull(positional.xstsError(), "the four-argument constructor still exists and carries no cause");
+        assertNull(plain.failure().flatMap(AltsFailure::xstsError).orElse(null));
+        assertEquals(
+                XstsError.CHILD_ACCOUNT,
+                xbox.failure().flatMap(AltsFailure::xstsError).orElse(null));
     }
 
     @Test

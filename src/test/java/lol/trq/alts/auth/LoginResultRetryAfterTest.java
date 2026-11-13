@@ -14,8 +14,8 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
-import lol.trq.alts.auth.AltLoginCallback.LoginResult;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
@@ -97,8 +97,10 @@ class LoginResultRetryAfterTest {
 
         LoginResult result = importRefreshToken();
 
-        assertTrue(result.rateLimited());
-        assertEquals(Duration.ofSeconds(12), result.retryAfter());
+        assertTrue(result.failure().map(f -> f.kind() == Kind.RATE_LIMITED).orElse(false));
+        assertEquals(
+                Duration.ofSeconds(12),
+                result.failure().flatMap(AltsFailure::retryAfter).orElse(null));
     }
 
     @Test
@@ -107,8 +109,10 @@ class LoginResultRetryAfterTest {
 
         LoginResult result = importRefreshToken();
 
-        assertTrue(result.rateLimited());
-        assertEquals(Duration.ofSeconds(7), result.retryAfter());
+        assertTrue(result.failure().map(f -> f.kind() == Kind.RATE_LIMITED).orElse(false));
+        assertEquals(
+                Duration.ofSeconds(7),
+                result.failure().flatMap(AltsFailure::retryAfter).orElse(null));
     }
 
     @Test
@@ -119,8 +123,10 @@ class LoginResultRetryAfterTest {
                 .loginSession("not-a-jwt-so-the-profile-is-asked", LoginMode.DIRECT)
                 .get();
 
-        assertTrue(result.rateLimited());
-        assertEquals(Duration.ofSeconds(30), result.retryAfter());
+        assertTrue(result.failure().map(f -> f.kind() == Kind.RATE_LIMITED).orElse(false));
+        assertEquals(
+                Duration.ofSeconds(30),
+                result.failure().flatMap(AltsFailure::retryAfter).orElse(null));
     }
 
     @Test
@@ -129,8 +135,10 @@ class LoginResultRetryAfterTest {
 
         LoginResult result = importRefreshToken();
 
-        assertTrue(result.rateLimited(), "the reason is what says to stop; the wait is extra");
-        assertNull(result.retryAfter());
+        assertTrue(
+                result.failure().map(f -> f.kind() == Kind.RATE_LIMITED).orElse(false),
+                "the reason is what says to stop; the wait is extra");
+        assertNull(result.failure().flatMap(AltsFailure::retryAfter).orElse(null));
     }
 
     @Test
@@ -139,15 +147,21 @@ class LoginResultRetryAfterTest {
 
         LoginResult refused = importRefreshToken();
 
-        assertFalse(refused.rateLimited());
-        assertNull(refused.retryAfter());
-        assertNull(LoginResult.failure("refused", FailureReason.INVALID_TOKEN).retryAfter());
-        assertNull(new LoginResult(false, "four arguments", null, FailureReason.UNKNOWN).retryAfter());
-        assertNull(new LoginResult(false, "five arguments", null, FailureReason.XBOX_DENIED, XstsError.CHILD_ACCOUNT)
-                .retryAfter());
+        assertFalse(refused.failure().map(f -> f.kind() == Kind.RATE_LIMITED).orElse(false));
+        assertNull(refused.failure().flatMap(AltsFailure::retryAfter).orElse(null));
+        assertNull(LoginResult.failure(Kind.UNAUTHORIZED, "refused")
+                .failure()
+                .flatMap(AltsFailure::retryAfter)
+                .orElse(null));
+        assertNull(LoginResult.failure(AltsFailure.xboxDenied("denied", XstsError.CHILD_ACCOUNT))
+                .failure()
+                .flatMap(AltsFailure::retryAfter)
+                .orElse(null));
         assertEquals(
                 Duration.ofSeconds(3),
-                LoginResult.failure("slow down", FailureReason.RATE_LIMITED, null, Duration.ofSeconds(3))
-                        .retryAfter());
+                LoginResult.failure(AltsFailure.rateLimited("slow down", Duration.ofSeconds(3)))
+                        .failure()
+                        .flatMap(AltsFailure::retryAfter)
+                        .orElse(null));
     }
 }

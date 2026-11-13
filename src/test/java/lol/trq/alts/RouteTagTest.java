@@ -13,7 +13,7 @@ import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import lol.trq.alts.auth.AltLoginCallback.LoginResult;
+import lol.trq.alts.auth.LoginResult;
 import lol.trq.alts.auth.MicrosoftAuthConfig;
 import lol.trq.alts.bulk.BulkOptions;
 import lol.trq.alts.bulk.BulkProgress;

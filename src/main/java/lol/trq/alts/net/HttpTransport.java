@@ -204,6 +204,17 @@ public final class HttpTransport implements AutoCloseable {
     }
 
     /**
+     * Returns whether this transport, or the one it is a view of, has been closed: whether something
+     * about to start (a callback listener, a browser) should not.
+     *
+     * @return true once {@link #close()} has been called
+     * @since 1.0.0
+     */
+    public boolean isClosed() {
+        return tunnels.closed;
+    }
+
+    /**
      * Registers an action to run when this transport closes, or at once if it already has: the way
      * something waiting on the runtime (a sign-in's callback listener, a scheduled wait) is ended by
      * {@link #close()} rather than left waiting for an event that will not come.

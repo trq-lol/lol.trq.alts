@@ -12,10 +12,11 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.auth.AccountStatus;
 import lol.trq.alts.auth.AltAccountService;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
-import lol.trq.alts.auth.AltLoginCallback.LoginResult;
+import lol.trq.alts.auth.LoginResult;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
@@ -144,7 +145,7 @@ class BulkOperationsTest {
         BulkOperations bulk = bulkOver(account -> {
             calls.incrementAndGet();
             return CompletableFuture.completedFuture(AccountStatus.failure(
-                    account, AccountStatus.State.UNREACHABLE, FailureReason.NETWORK, "service is down"));
+                    account, AccountStatus.State.UNREACHABLE, AltsFailure.of(Kind.NETWORK, "service is down")));
         });
 
         BulkReport report = bulk.refreshAll(List.of(account(0)), FAST, BulkProgress.NONE)
@@ -163,7 +164,7 @@ class BulkOperationsTest {
         BulkOperations bulk = bulkOver(account -> {
             calls.incrementAndGet();
             return CompletableFuture.completedFuture(AccountStatus.failure(
-                    account, AccountStatus.State.REAUTH_REQUIRED, FailureReason.REAUTH_REQUIRED, "spent"));
+                    account, AccountStatus.State.REAUTH_REQUIRED, AltsFailure.of(Kind.REAUTH_REQUIRED, "spent")));
         });
 
         bulk.refreshAll(List.of(account(0)), FAST, BulkProgress.NONE).report().get();
@@ -174,7 +175,9 @@ class BulkOperationsTest {
     @Test
     void aStatedRateLimitStopsTheRunAndSaysSo() throws Exception {
         BulkOperations bulk = bulkOver(account -> CompletableFuture.completedFuture(AccountStatus.failure(
-                account, AccountStatus.State.UNREACHABLE, FailureReason.NETWORK, "slow down", Duration.ofSeconds(30))));
+                account,
+                AccountStatus.State.UNREACHABLE,
+                AltsFailure.of(Kind.NETWORK, "slow down", Duration.ofSeconds(30)))));
 
         BulkReport report = bulk.refreshAll(accounts(20), FAST.withConcurrency(1), BulkProgress.NONE)
                 .report()
@@ -193,9 +196,7 @@ class BulkOperationsTest {
                 return CompletableFuture.completedFuture(AccountStatus.failure(
                         account,
                         AccountStatus.State.UNREACHABLE,
-                        FailureReason.NETWORK,
-                        "slow down",
-                        Duration.ofMillis(5)));
+                        AltsFailure.of(Kind.NETWORK, "slow down", Duration.ofMillis(5))));
             }
             return CompletableFuture.completedFuture(AccountStatus.valid(account));
         });
@@ -218,7 +219,7 @@ class BulkOperationsTest {
         BulkOperations bulk = bulkOver(account -> {
             calls.incrementAndGet();
             return CompletableFuture.completedFuture(AccountStatus.failure(
-                    account, AccountStatus.State.UNREACHABLE, FailureReason.RATE_LIMITED, "slow down"));
+                    account, AccountStatus.State.UNREACHABLE, AltsFailure.of(Kind.RATE_LIMITED, "slow down")));
         });
 
         BulkReport checked = bulk.checkAll(accounts(20), FAST.withConcurrency(1), BulkProgress.NONE)
@@ -227,7 +228,9 @@ class BulkOperationsTest {
 
         assertTrue(checked.stoppedEarly(), "a rate limit must end the run whether or not it names a wait");
         assertEquals(1, calls.get(), "the limited entry is not retried and the next is never started");
-        assertEquals(FailureReason.RATE_LIMITED, checked.failures().get(0).reason());
+        assertEquals(
+                Kind.RATE_LIMITED,
+                checked.failures().get(0).failure().map(AltsFailure::kind).orElse(null));
         assertEquals(1, checked.failures().get(0).attempts());
 
         calls.set(0);
@@ -252,7 +255,7 @@ class BulkOperationsTest {
             startedAt.add(System.nanoTime());
             if (calls.incrementAndGet() == 1) {
                 return CompletableFuture.completedFuture(AccountStatus.failure(
-                        account, AccountStatus.State.UNREACHABLE, FailureReason.RATE_LIMITED, "slow down"));
+                        account, AccountStatus.State.UNREACHABLE, AltsFailure.of(Kind.RATE_LIMITED, "slow down")));
             }
             return CompletableFuture.completedFuture(AccountStatus.valid(account));
         });
@@ -278,7 +281,7 @@ class BulkOperationsTest {
         BulkOperations bulk = bulkOver(account -> {
             calls.incrementAndGet();
             return CompletableFuture.completedFuture(AccountStatus.failure(
-                    account, AccountStatus.State.UNREACHABLE, FailureReason.RATE_LIMITED, "slow down"));
+                    account, AccountStatus.State.UNREACHABLE, AltsFailure.of(Kind.RATE_LIMITED, "slow down")));
         });
 
         BulkReport report = bulk.checkAll(List.of(account(0)), FAST.withoutStoppingOnRateLimit(), BulkProgress.NONE)
@@ -286,7 +289,9 @@ class BulkOperationsTest {
                 .get();
 
         assertEquals(3, calls.get(), "one attempt plus two waits");
-        assertEquals(FailureReason.RATE_LIMITED, report.failures().get(0).reason());
+        assertEquals(
+                Kind.RATE_LIMITED,
+                report.failures().get(0).failure().map(AltsFailure::kind).orElse(null));
     }
 
     /**
@@ -295,19 +300,19 @@ class BulkOperationsTest {
      */
     @Test
     void anAnswerAboutTheAccountIsNeverRetried() throws Exception {
-        for (FailureReason reason : List.of(
-                FailureReason.XBOX_DENIED,
-                FailureReason.DECLINED,
-                FailureReason.TIMED_OUT,
-                FailureReason.INVALID_TOKEN,
-                FailureReason.NOT_ENTITLED,
-                FailureReason.NOT_CONFIGURED,
-                FailureReason.UNKNOWN)) {
+        for (Kind reason : List.of(
+                Kind.XBOX_DENIED,
+                Kind.DECLINED,
+                Kind.TIMED_OUT,
+                Kind.UNAUTHORIZED,
+                Kind.NOT_ENTITLED,
+                Kind.NOT_CONFIGURED,
+                Kind.UNKNOWN)) {
             AtomicInteger calls = new AtomicInteger();
             BulkOperations bulk = bulkOver(account -> {
                 calls.incrementAndGet();
                 return CompletableFuture.completedFuture(
-                        AccountStatus.failure(account, AccountStatus.State.UNKNOWN, reason, "no"));
+                        AccountStatus.failure(account, AccountStatus.State.UNKNOWN, AltsFailure.of(reason, "no")));
             });
 
             BulkReport report = bulk.refreshAll(accounts(2), FAST.withConcurrency(1), BulkProgress.NONE)
@@ -316,7 +321,9 @@ class BulkOperationsTest {
 
             assertEquals(2, calls.get(), reason + " must fail its entry on the first attempt");
             assertFalse(report.stoppedEarly(), reason + " is about one account and must not end the run");
-            assertEquals(reason, report.failures().get(0).reason());
+            assertEquals(
+                    reason,
+                    report.failures().get(0).failure().map(AltsFailure::kind).orElse(null));
         }
     }
 
@@ -329,7 +336,7 @@ class BulkOperationsTest {
         AtomicInteger calls = new AtomicInteger();
         BulkOperations bulk = importingThrough(token -> {
             calls.incrementAndGet();
-            return LoginResult.failure("slow down", FailureReason.RATE_LIMITED);
+            return LoginResult.failure(Kind.RATE_LIMITED, "slow down");
         });
 
         BulkReport report = bulk.importCredentials(sessionTokens(20), LoginMode.DIRECT, FAST.withConcurrency(1), null)
@@ -338,7 +345,9 @@ class BulkOperationsTest {
 
         assertTrue(report.stoppedEarly(), "a throttled import must stop sending credentials");
         assertEquals(1, calls.get());
-        assertEquals(FailureReason.RATE_LIMITED, report.failures().get(0).reason());
+        assertEquals(
+                Kind.RATE_LIMITED,
+                report.failures().get(0).failure().map(AltsFailure::kind).orElse(null));
     }
 
     @Test
@@ -346,22 +355,18 @@ class BulkOperationsTest {
         AtomicInteger outages = new AtomicInteger();
         BulkOperations flaky = importingThrough(token -> {
             outages.incrementAndGet();
-            return LoginResult.failure("down", FailureReason.NETWORK);
+            return LoginResult.failure(Kind.NETWORK, "down");
         });
         flaky.importCredentials(sessionTokens(1), LoginMode.DIRECT, FAST, null)
                 .report()
                 .get();
         assertEquals(3, outages.get(), "an outage is worth the retry budget");
 
-        for (FailureReason reason : List.of(
-                FailureReason.XBOX_DENIED,
-                FailureReason.DECLINED,
-                FailureReason.TIMED_OUT,
-                FailureReason.INVALID_TOKEN)) {
+        for (Kind reason : List.of(Kind.XBOX_DENIED, Kind.DECLINED, Kind.TIMED_OUT, Kind.UNAUTHORIZED)) {
             AtomicInteger calls = new AtomicInteger();
             BulkOperations bulk = importingThrough(token -> {
                 calls.incrementAndGet();
-                return LoginResult.failure("no", reason);
+                return LoginResult.failure(reason, "no");
             });
 
             bulk.importCredentials(sessionTokens(1), LoginMode.DIRECT, FAST, null)
@@ -478,7 +483,9 @@ class BulkOperationsTest {
 
         assertEquals(2, report.succeeded());
         assertEquals(1, report.failures().size());
-        assertEquals(FailureReason.UNKNOWN, report.failures().get(0).reason());
+        assertEquals(
+                Kind.UNKNOWN,
+                report.failures().get(0).failure().map(AltsFailure::kind).orElse(null));
     }
 
     /** A loopback entitlements endpoint answering per bearer token, and counting what it was asked. */
@@ -621,7 +628,8 @@ class BulkOperationsTest {
             assertEquals(2, report.succeeded());
             assertFalse(report.stoppedEarly(), "one dead token does not end the sweep");
             BulkEntryResult failed = report.failures().get(0);
-            assertEquals(FailureReason.INVALID_TOKEN, failed.reason());
+            assertEquals(
+                    Kind.UNAUTHORIZED, failed.failure().map(AltsFailure::kind).orElse(null));
             assertEquals("Alt1", failed.label());
             assertEquals(1, failed.attempts(), "a refused token is not worth a second attempt");
             assertEquals(null, failed.entitlements());
@@ -640,7 +648,9 @@ class BulkOperationsTest {
                     .report()
                     .get();
 
-            assertEquals(FailureReason.INVALID_TOKEN, report.failures().get(0).reason());
+            assertEquals(
+                    Kind.UNAUTHORIZED,
+                    report.failures().get(0).failure().map(AltsFailure::kind).orElse(null));
             assertTrue(server.tokens.isEmpty(), "there is nothing to ask the service about");
         }
     }
@@ -676,7 +686,9 @@ class BulkOperationsTest {
 
             assertTrue(report.stoppedEarly());
             assertEquals(1, server.tokens.size(), "the first limit ends a one-at-a-time sweep");
-            assertEquals(FailureReason.RATE_LIMITED, report.failures().get(0).reason());
+            assertEquals(
+                    Kind.RATE_LIMITED,
+                    report.failures().get(0).failure().map(AltsFailure::kind).orElse(null));
         }
     }
 
@@ -803,10 +815,7 @@ class BulkOperationsTest {
     }
 
     @Test
-    void aResultBuiltTheOldWayCarriesNoEntitlements() {
-        BulkEntryResult result = new BulkEntryResult(0, "Alt0", true, account(0), FailureReason.NONE, "ok", 1);
-
-        assertEquals(null, result.entitlements());
+    void aResultOfAnotherRunCarriesNoEntitlements() {
         assertEquals(null, BulkEntryResult.success(0, account(0), "ok", 1).entitlements());
     }
 
@@ -818,48 +827,47 @@ class BulkOperationsTest {
             throw new AssertionError("no run here carries a route tag");
         }
 
-        private static CompletableFuture<lol.trq.alts.auth.AltLoginCallback.LoginResult> unused() {
+        private static CompletableFuture<lol.trq.alts.auth.LoginResult> unused() {
             throw new AssertionError("the import routes are not exercised by an account run");
         }
 
         @Override
-        public CompletableFuture<lol.trq.alts.auth.AltLoginCallback.LoginResult> loginSession(
+        public CompletableFuture<lol.trq.alts.auth.LoginResult> loginSession(
                 String sessionToken, lol.trq.alts.model.LoginMode mode) {
             return unused();
         }
 
         @Override
-        public CompletableFuture<lol.trq.alts.auth.AltLoginCallback.LoginResult> loginOffline(
+        public CompletableFuture<lol.trq.alts.auth.LoginResult> loginOffline(
                 String name, lol.trq.alts.model.LoginMode mode) {
             return unused();
         }
 
         @Override
-        public CompletableFuture<lol.trq.alts.auth.AltLoginCallback.LoginResult> loginMicrosoft(
-                lol.trq.alts.model.LoginMode mode) {
+        public CompletableFuture<lol.trq.alts.auth.LoginResult> loginMicrosoft(lol.trq.alts.model.LoginMode mode) {
             return unused();
         }
 
         @Override
-        public CompletableFuture<lol.trq.alts.auth.AltLoginCallback.LoginResult> loginCookie(
+        public CompletableFuture<lol.trq.alts.auth.LoginResult> loginCookie(
                 String cookieData, lol.trq.alts.model.LoginMode mode) {
             return unused();
         }
 
         @Override
-        public CompletableFuture<lol.trq.alts.auth.AltLoginCallback.LoginResult> loginCookieFile(
+        public CompletableFuture<lol.trq.alts.auth.LoginResult> loginCookieFile(
                 java.nio.file.Path file, lol.trq.alts.model.LoginMode mode) {
             return unused();
         }
 
         @Override
-        public CompletableFuture<lol.trq.alts.auth.AltLoginCallback.LoginResult> loginRefreshToken(
+        public CompletableFuture<lol.trq.alts.auth.LoginResult> loginRefreshToken(
                 String refreshToken, lol.trq.alts.model.LoginMode mode) {
             return unused();
         }
 
         @Override
-        public CompletableFuture<lol.trq.alts.auth.AltLoginCallback.LoginResult> loginAccount(AltAccount account) {
+        public CompletableFuture<lol.trq.alts.auth.LoginResult> loginAccount(AltAccount account) {
             return unused();
         }
     }

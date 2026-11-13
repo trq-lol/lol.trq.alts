@@ -11,8 +11,8 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
-import lol.trq.alts.auth.AltLoginCallback.LoginResult;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
@@ -91,7 +91,10 @@ class SessionLoginFailureReasonTest {
                 .get();
 
         assertFalse(result.success());
-        assertEquals(FailureReason.INVALID_TOKEN, result.reason(), "the service answered, and its answer was no");
+        assertEquals(
+                Kind.UNAUTHORIZED,
+                result.failure().map(AltsFailure::kind).orElse(null),
+                "the service answered, and its answer was no");
     }
 
     @Test
@@ -104,8 +107,8 @@ class SessionLoginFailureReasonTest {
 
         assertFalse(result.success());
         assertEquals(
-                FailureReason.NETWORK,
-                result.reason(),
+                Kind.NETWORK,
+                result.failure().map(AltsFailure::kind).orElse(null),
                 "a service that never answered proves nothing about the token, so the host must be told to retry");
     }
 }

@@ -11,14 +11,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.function.Function;
 import java.util.function.IntFunction;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.account.AccountException;
 import lol.trq.alts.account.EntitlementService;
 import lol.trq.alts.account.Entitlements;
 import lol.trq.alts.auth.AccountStatus;
 import lol.trq.alts.auth.AltAccountService;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
-import lol.trq.alts.auth.AltLoginCallback.LoginResult;
 import lol.trq.alts.auth.AltLoginService;
+import lol.trq.alts.auth.LoginResult;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.net.Backoff;
@@ -136,32 +137,23 @@ public final class BulkOperationsImpl implements BulkOperations {
      */
     private Attempt entitlementsOf(AltAccount account) {
         if (account.accessToken() == null || account.accessToken().isBlank()) {
-            return new Attempt(false, account, FailureReason.INVALID_TOKEN, "Account has no access token", null, null);
+            return Attempt.failed(AltsFailure.of(Kind.UNAUTHORIZED, "Account has no access token"));
         }
         try {
             Entitlements owned = entitlementServices.apply(account).fetch();
             String summary = owned.isEmpty() ? "Owns nothing" : owned.products().size() + " product(s)";
-            return new Attempt(true, account, FailureReason.NONE, summary, null, owned);
+            return new Attempt(account, Optional.empty(), summary, owned);
         } catch (AccountException failure) {
             if (failure.rateLimited()) {
-                return new Attempt(
-                        false,
-                        account,
-                        FailureReason.RATE_LIMITED,
-                        "Rate limited by the entitlement service",
-                        failure.retryAfter(),
-                        null);
+                return Attempt.failed(
+                        AltsFailure.rateLimited("Rate limited by the entitlement service", failure.retryAfter()));
             }
             if (failure.tokenRefused()) {
-                return new Attempt(false, account, FailureReason.INVALID_TOKEN, "Access token was refused", null, null);
+                return Attempt.failed(AltsFailure.of(Kind.UNAUTHORIZED, "Access token was refused"));
             }
-            return new Attempt(
-                    false,
-                    account,
-                    FailureReason.NETWORK,
-                    "Entitlement lookup failed" + (failure.status() > 0 ? " with status " + failure.status() : ""),
-                    null,
-                    null);
+            return Attempt.failed(AltsFailure.of(
+                    Kind.NETWORK,
+                    "Entitlement lookup failed" + (failure.status() > 0 ? " with status " + failure.status() : "")));
         }
     }
 
@@ -205,21 +197,19 @@ public final class BulkOperationsImpl implements BulkOperations {
             case COOKIE_TEXT -> importService.loginCookie(entry, mode).thenApply(BulkOperationsImpl::toAttempt);
             case OFFLINE_NAME -> importService.loginOffline(entry, mode).thenApply(BulkOperationsImpl::toAttempt);
             case UNKNOWN ->
-                CompletableFuture.completedFuture(new Attempt(
-                        false, null, FailureReason.INVALID_TOKEN, "Unrecognised credential format", null, null));
+                CompletableFuture.completedFuture(
+                        Attempt.failed(AltsFailure.of(Kind.UNAUTHORIZED, "Unrecognised credential format")));
         };
     }
 
     // The stated wait travels with the result, so an import that chooses to wait a limit out waits as
     // long as the service asked rather than guessing.
     private static Attempt toAttempt(LoginResult result) {
-        return new Attempt(
-                result.success(), result.account(), result.reason(), result.message(), result.retryAfter(), null);
+        return new Attempt(result.account(), result.failure(), result.message(), null);
     }
 
     private static Attempt toAttempt(AccountStatus status) {
-        return new Attempt(
-                status.usable(), status.account(), status.reason(), status.message(), status.retryAfter(), null);
+        return new Attempt(status.account(), status.failure(), status.message(), null);
     }
 
     /**
@@ -280,8 +270,9 @@ public final class BulkOperationsImpl implements BulkOperations {
     private static CompletableFuture<BulkEntryResult> attempt(Run run, int index, int attempt) {
         return run.attempts
                 .apply(index)
-                .exceptionally(
-                        failure -> new Attempt(false, null, FailureReason.UNKNOWN, describe(failure), null, null))
+                // An attempt that threw rather than returning a result failed somewhere the library did not
+                // classify (or the runtime closed under it), so it is classified here by type, never by text.
+                .exceptionally(failure -> Attempt.failed(FailureText.toFailure("Entry", failure)))
                 .thenCompose(outcome -> {
                     if (outcome.success()) {
                         return CompletableFuture.completedFuture(
@@ -296,8 +287,8 @@ public final class BulkOperationsImpl implements BulkOperations {
                                                 index, outcome.account(), outcome.message(), attempt));
                     }
                     String label = outcome.account() != null ? outcome.account().username() : run.labeller.apply(index);
-                    BulkEntryResult failed =
-                            BulkEntryResult.failure(index, label, outcome.reason(), outcome.message(), attempt);
+                    BulkEntryResult failed = BulkEntryResult.failure(
+                            index, label, outcome.failure().orElseThrow(), attempt);
 
                     if (outcome.rateLimited()) {
                         if (run.options.stopOnRateLimit()) {
@@ -312,16 +303,18 @@ public final class BulkOperationsImpl implements BulkOperations {
                         // The caller chose to wait limits out. The wait is the one the service named, or a
                         // growing one when it named none -- never an immediate retry -- and it holds back
                         // every other entry too, since the limit is on the address rather than the account.
-                        Duration wait = positive(outcome.retryAfter())
-                                ? outcome.retryAfter()
-                                : Backoff.exponential(attempt, run.options.retryBaseDelay());
+                        Duration stated = outcome.failure()
+                                .flatMap(AltsFailure::retryAfter)
+                                .orElse(null);
+                        Duration wait =
+                                positive(stated) ? stated : Backoff.exponential(attempt, run.options.retryBaseDelay());
                         if (!positive(wait)) {
                             wait = UNSTATED_RATE_LIMIT_WAIT;
                         }
                         run.holdBack(wait);
                         return delay(run.transport, wait).thenCompose(ignored -> attempt(run, index, attempt + 1));
                     }
-                    boolean retryable = outcome.reason() == FailureReason.NETWORK;
+                    boolean retryable = outcome.failure().orElseThrow().kind() == Kind.NETWORK;
                     if (!retryable || attempt > run.options.maxRetries()) {
                         return CompletableFuture.completedFuture(failed);
                     }
@@ -345,24 +338,23 @@ public final class BulkOperationsImpl implements BulkOperations {
         return duration != null && !duration.isZero() && !duration.isNegative();
     }
 
-    // An attempt that threw rather than returning a result failed somewhere the library did not
-    // classify, so its message is not the library's and is not repeated: see FailureText.
-    private static String describe(Throwable failure) {
-        return FailureText.of(failure);
-    }
-
     /** One attempt's outcome, flattened so both surfaces feed the same runner. */
     private record Attempt(
-            boolean success,
-            AltAccount account,
-            FailureReason reason,
-            String message,
-            Duration retryAfter,
-            Entitlements entitlements) {
+            AltAccount account, Optional<AltsFailure> failure, String message, Entitlements entitlements) {
 
-        /** Whether the service asked to be left alone: a rate limit by reason, or a stated wait on any. */
+        static Attempt failed(AltsFailure failure) {
+            return new Attempt(null, Optional.of(failure), failure.message(), null);
+        }
+
+        boolean success() {
+            return failure.isEmpty();
+        }
+
+        /** Whether the service asked to be left alone: a rate limit by kind, or a stated wait on any kind. */
         boolean rateLimited() {
-            return reason == FailureReason.RATE_LIMITED || retryAfter != null;
+            return failure.map(
+                            f -> f.kind() == Kind.RATE_LIMITED || f.retryAfter().isPresent())
+                    .orElse(false);
         }
     }
 

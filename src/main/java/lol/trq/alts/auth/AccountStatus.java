@@ -1,7 +1,8 @@
 package lol.trq.alts.auth;
 
-import java.time.Duration;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
+import java.util.Objects;
+import java.util.Optional;
+import lol.trq.alts.AltsFailure;
 import lol.trq.alts.model.AltAccount;
 
 /**
@@ -10,17 +11,19 @@ import lol.trq.alts.model.AltAccount;
  * <p>The {@code account} carried back is the record as it now stands — renewed credentials included — so
  * a caller updates its own view from one place rather than reassembling it.
  *
+ * <p>{@link #state()} says what the account is; {@link #failure()} says why it is not usable, in the
+ * library's one failure model. A rate limit, for one, is the state {@link State#UNREACHABLE} with a
+ * failure of kind {@link AltsFailure.Kind#RATE_LIMITED}, whose {@link AltsFailure#retryAfter()} carries
+ * the wait when the service stated one.
+ *
  * @param account the account this describes, possibly with freshly issued credentials
  * @param state the machine-readable outcome
- * @param reason the classified cause, {@link FailureReason#NONE} when the account is usable
- * @param message a short human-readable description
- * @param retryAfter how long the service asked the caller to wait before trying again, or {@code null}
- *     when it asked for nothing; added in 0.9.0
+ * @param failure why the account is not usable, or empty when it is; carried since 1.0.0 in place of the
+ *     former reason, message and wait
  * @author trq
  * @since 0.8.0
  */
-public record AccountStatus(
-        AltAccount account, State state, FailureReason reason, String message, Duration retryAfter) {
+public record AccountStatus(AltAccount account, State state, Optional<AltsFailure> failure) {
 
     /**
      * What an account can be.
@@ -51,20 +54,36 @@ public record AccountStatus(
 
         /**
          * The credentials authenticated, but the account cannot be played as it stands: it has no
-         * Minecraft profile ({@link FailureReason#NOT_ENTITLED}), or Xbox Live refused to authorize it
-         * ({@link FailureReason#XBOX_DENIED}). Neither retrying nor re-authenticating helps.
+         * Minecraft profile ({@link AltsFailure.Kind#NOT_ENTITLED}), or Xbox Live refused to authorize it
+         * ({@link AltsFailure.Kind#XBOX_DENIED}). Neither retrying nor re-authenticating helps.
          */
         NOT_ENTITLED,
 
         /**
-         * The service could not be reached, failed, or is throttling the caller
-         * ({@link FailureReason#RATE_LIMITED}, for which {@link AccountStatus#rateLimited()} is true).
-         * Nothing was spent. An outage is worth a retry; a rate limit is worth a wait.
+         * The service could not be reached, failed ({@link AltsFailure.Kind#NETWORK}), or is throttling
+         * the caller ({@link AltsFailure.Kind#RATE_LIMITED}). Nothing was spent. An outage is worth a
+         * retry; a rate limit is worth a wait, and the failure's kind says which.
          */
         UNREACHABLE,
 
         /** Something else went wrong, which the library could not classify. */
         UNKNOWN
+    }
+
+    /**
+     * Checks that a usable state carries no failure and every other state carries one.
+     *
+     * @throws NullPointerException if {@code state} or {@code failure} is null
+     * @throws IllegalArgumentException if the failure does not match the state
+     */
+    public AccountStatus {
+        Objects.requireNonNull(state, "state");
+        Objects.requireNonNull(failure, "failure");
+        boolean usable = state == State.VALID || state == State.RENEWED;
+        if (usable != failure.isEmpty()) {
+            throw new IllegalArgumentException(
+                    usable ? "a usable account carries no failure" : "an unusable account carries its failure");
+        }
     }
 
     /**
@@ -78,6 +97,17 @@ public record AccountStatus(
     }
 
     /**
+     * Returns a short description to show: the failure's message, or a fixed phrase when the account is
+     * usable. Never branch on it.
+     *
+     * @return the description
+     * @since 0.8.0
+     */
+    public String message() {
+        return failure.map(AltsFailure::message).orElse(state == State.RENEWED ? "Session renewed" : "Session is live");
+    }
+
+    /**
      * Creates a status for an account whose stored credentials work.
      *
      * @param account the account
@@ -85,7 +115,7 @@ public record AccountStatus(
      * @since 0.8.0
      */
     public static AccountStatus valid(AltAccount account) {
-        return new AccountStatus(account, State.VALID, FailureReason.NONE, "Session is live", null);
+        return new AccountStatus(account, State.VALID, Optional.empty());
     }
 
     /**
@@ -96,50 +126,19 @@ public record AccountStatus(
      * @since 0.8.0
      */
     public static AccountStatus renewed(AltAccount account) {
-        return new AccountStatus(account, State.RENEWED, FailureReason.NONE, "Session renewed", null);
-    }
-
-    /**
-     * Returns whether the service asked the caller to slow down before trying this account again.
-     *
-     * <p>True for a rate limit whether or not the service said how long to wait: since 0.12.0 a bare
-     * {@code 429} is reported as {@link FailureReason#RATE_LIMITED} with a {@code null}
-     * {@link #retryAfter()}, where it used to pass for an outage.
-     *
-     * @return true if the reason is {@link FailureReason#RATE_LIMITED} or a delay was stated
-     * @since 0.9.0
-     */
-    public boolean rateLimited() {
-        return reason == FailureReason.RATE_LIMITED || retryAfter != null;
+        return new AccountStatus(account, State.RENEWED, Optional.empty());
     }
 
     /**
      * Creates a status for an account that cannot be used as it stands.
      *
      * @param account the account this describes
-     * @param state the outcome
-     * @param reason the classified cause
-     * @param message a short description
+     * @param state the outcome; not {@link State#VALID} or {@link State#RENEWED}
+     * @param failure why the account is not usable
      * @return a failed status
-     * @since 0.8.0
+     * @since 1.0.0
      */
-    public static AccountStatus failure(AltAccount account, State state, FailureReason reason, String message) {
-        return new AccountStatus(account, state, reason, message, null);
-    }
-
-    /**
-     * Creates a status for an account the service asked the caller to come back to later.
-     *
-     * @param account the account this describes
-     * @param state the outcome
-     * @param reason the classified cause
-     * @param message a short description
-     * @param retryAfter how long the service asked the caller to wait, or {@code null}
-     * @return a failed status carrying the requested delay
-     * @since 0.9.0
-     */
-    public static AccountStatus failure(
-            AltAccount account, State state, FailureReason reason, String message, Duration retryAfter) {
-        return new AccountStatus(account, state, reason, message, retryAfter);
+    public static AccountStatus failure(AltAccount account, State state, AltsFailure failure) {
+        return new AccountStatus(account, state, Optional.of(failure));
     }
 }

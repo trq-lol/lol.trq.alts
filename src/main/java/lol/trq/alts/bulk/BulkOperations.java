@@ -69,7 +69,7 @@ public interface BulkOperations {
      * that owns nothing succeeds with an empty set, because the read worked.
      *
      * <p>Each account is read with the access token it currently holds. One whose token has expired
-     * fails its entry as {@link lol.trq.alts.auth.AltLoginCallback.FailureReason#INVALID_TOKEN}; run
+     * fails its entry as {@link lol.trq.alts.AltsFailure.Kind#UNAUTHORIZED}; run
      * {@link #refreshAll} first when the tokens may be stale. An account with no token at all — an
      * offline one — fails the same way without a request being made.
      *

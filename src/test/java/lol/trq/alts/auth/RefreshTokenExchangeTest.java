@@ -17,6 +17,8 @@ import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -93,13 +95,13 @@ class RefreshTokenExchangeTest {
      * Redeems a token against the configured endpoint and returns the rejection it failed with, so a
      * classification assertion reads as one line.
      */
-    private static MicrosoftAuthUtil.RefreshRejectedException rejectionFor(MicrosoftAuthConfig config) {
+    private static AltsException rejectionFor(MicrosoftAuthConfig config) {
         ExecutionException thrown = assertThrows(
                 ExecutionException.class,
                 () -> new MicrosoftAuthUtil(TestTransports.direct())
                         .authenticateWithRefreshToken(config, "still-good")
                         .get());
-        return assertInstanceOf(MicrosoftAuthUtil.RefreshRejectedException.class, thrown.getCause());
+        return assertInstanceOf(AltsException.class, thrown.getCause());
     }
 
     private static void respond(HttpExchange exchange, int status, String body) throws IOException {
@@ -204,9 +206,8 @@ class RefreshTokenExchangeTest {
                         .authenticateWithRefreshToken(config, "revoked")
                         .get());
 
-        MicrosoftAuthUtil.RefreshRejectedException rejection =
-                assertInstanceOf(MicrosoftAuthUtil.RefreshRejectedException.class, thrown.getCause());
-        assertTrue(rejection.permanent(), "a 4xx means the token will never work again");
+        AltsException rejection = assertInstanceOf(AltsException.class, thrown.getCause());
+        assertEquals(Kind.REAUTH_REQUIRED, rejection.kind(), "a stated invalid_grant means the token is spent");
     }
 
     @Test
@@ -241,8 +242,9 @@ class RefreshTokenExchangeTest {
         tokenBody = "{\"error\":\"invalid_grant\"}";
         MicrosoftAuthConfig config = startServer();
 
-        assertFalse(
-                rejectionFor(config).permanent(),
+        assertEquals(
+                Kind.RATE_LIMITED,
+                rejectionFor(config).kind(),
                 "a rate limit is the service asking to wait, never a reason to destroy a credential");
     }
 
@@ -252,7 +254,7 @@ class RefreshTokenExchangeTest {
         tokenBody = "{\"error\":\"invalid_grant\"}";
         MicrosoftAuthConfig config = startServer();
 
-        assertFalse(rejectionFor(config).permanent(), "a request timeout is retryable, not a spent token");
+        assertEquals(Kind.NETWORK, rejectionFor(config).kind(), "a request timeout is retryable, not a spent token");
     }
 
     @Test
@@ -261,8 +263,9 @@ class RefreshTokenExchangeTest {
         tokenBody = "{\"error\":\"invalid_client\"}";
         MicrosoftAuthConfig config = startServer();
 
-        assertFalse(
-                rejectionFor(config).permanent(),
+        assertEquals(
+                Kind.UNAUTHORIZED,
+                rejectionFor(config).kind(),
                 "a wrong client id is the host's mistake; the user's refresh token is still good");
     }
 
@@ -272,7 +275,10 @@ class RefreshTokenExchangeTest {
         tokenBody = "not json at all";
         MicrosoftAuthConfig config = startServer();
 
-        assertFalse(rejectionFor(config).permanent(), "only a stated invalid_grant proves the token is spent");
+        assertEquals(
+                Kind.UNAUTHORIZED,
+                rejectionFor(config).kind(),
+                "only a stated invalid_grant proves the token is spent");
     }
 
     @Test
@@ -287,8 +293,7 @@ class RefreshTokenExchangeTest {
                         .authenticateWithRefreshToken(config, "fine")
                         .get());
 
-        MicrosoftAuthUtil.RefreshRejectedException rejection =
-                assertInstanceOf(MicrosoftAuthUtil.RefreshRejectedException.class, thrown.getCause());
-        assertFalse(rejection.permanent(), "a 5xx must not cost the user their refresh token");
+        AltsException rejection = assertInstanceOf(AltsException.class, thrown.getCause());
+        assertEquals(Kind.NETWORK, rejection.kind(), "a 5xx must not cost the user their refresh token");
     }
 }

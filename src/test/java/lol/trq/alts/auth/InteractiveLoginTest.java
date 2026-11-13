@@ -25,8 +25,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
-import lol.trq.alts.auth.AltLoginCallback.LoginResult;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.model.SessionData;
@@ -224,8 +224,10 @@ class InteractiveLoginTest {
         LoginResult result = login();
 
         assertFalse(result.success());
-        assertEquals(FailureReason.XBOX_DENIED, result.reason());
-        assertEquals(XstsError.NO_XBOX_ACCOUNT, result.xstsError());
+        assertEquals(Kind.XBOX_DENIED, result.failure().map(AltsFailure::kind).orElse(null));
+        assertEquals(
+                XstsError.NO_XBOX_ACCOUNT,
+                result.failure().flatMap(AltsFailure::xstsError).orElse(null));
     }
 
     @Test
@@ -234,22 +236,22 @@ class InteractiveLoginTest {
 
         LoginResult result = login();
 
-        assertEquals(FailureReason.RATE_LIMITED, result.reason());
-        assertNull(result.xstsError());
+        assertEquals(Kind.RATE_LIMITED, result.failure().map(AltsFailure::kind).orElse(null));
+        assertNull(result.failure().flatMap(AltsFailure::xstsError).orElse(null));
     }
 
     @Test
     void aThrottledXstsStepWithNoStatedCauseIsRateLimitedToo() throws Exception {
         chain.fail("/xsts", 429);
 
-        assertEquals(FailureReason.RATE_LIMITED, login().reason());
+        assertEquals(Kind.RATE_LIMITED, login().failure().map(AltsFailure::kind).orElse(null));
     }
 
     @Test
     void aFailingServiceIsANetworkFailure() throws Exception {
         chain.fail("/token", 503);
 
-        assertEquals(FailureReason.NETWORK, login().reason());
+        assertEquals(Kind.NETWORK, login().failure().map(AltsFailure::kind).orElse(null));
     }
 
     @Test
@@ -268,21 +270,21 @@ class InteractiveLoginTest {
 
         LoginResult result = service.loginMicrosoft(LoginMode.DIRECT).get(30, TimeUnit.SECONDS);
 
-        assertEquals(FailureReason.NETWORK, result.reason());
+        assertEquals(Kind.NETWORK, result.failure().map(AltsFailure::kind).orElse(null));
     }
 
     @Test
     void aRefusedCredentialIsAnInvalidToken() throws Exception {
         chain.fail("/mclogin", 401);
 
-        assertEquals(FailureReason.INVALID_TOKEN, login().reason());
+        assertEquals(Kind.UNAUTHORIZED, login().failure().map(AltsFailure::kind).orElse(null));
     }
 
     @Test
     void anAccountWithNoProfileIsNotEntitled() throws Exception {
         chain.fail("/mcprofile", 404);
 
-        assertEquals(FailureReason.NOT_ENTITLED, login().reason());
+        assertEquals(Kind.NOT_ENTITLED, login().failure().map(AltsFailure::kind).orElse(null));
     }
 
     @Test

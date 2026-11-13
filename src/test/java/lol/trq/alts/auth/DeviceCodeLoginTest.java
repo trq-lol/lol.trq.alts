@@ -20,8 +20,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
-import lol.trq.alts.auth.AltLoginCallback.LoginResult;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.auth.MicrosoftAuthUtil.DeviceCodeTiming;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
@@ -174,7 +174,7 @@ class DeviceCodeLoginTest {
         LoginResult result = login(LoginMode.ADD);
 
         assertFalse(result.success());
-        assertEquals(FailureReason.DECLINED, result.reason());
+        assertEquals(Kind.DECLINED, result.failure().map(AltsFailure::kind).orElse(null));
         assertNull(injected.get(), "a declined sign-in installs nothing");
         assertEquals(2, chain.deviceTokenPolls(), "a refusal ends the polling");
     }
@@ -186,7 +186,7 @@ class DeviceCodeLoginTest {
         LoginResult result = login(LoginMode.DIRECT);
 
         assertFalse(result.success());
-        assertEquals(FailureReason.TIMED_OUT, result.reason());
+        assertEquals(Kind.TIMED_OUT, result.failure().map(AltsFailure::kind).orElse(null));
     }
 
     @Test
@@ -200,7 +200,7 @@ class DeviceCodeLoginTest {
         LoginResult result = login(LoginMode.DIRECT);
 
         assertFalse(result.success());
-        assertEquals(FailureReason.TIMED_OUT, result.reason());
+        assertEquals(Kind.TIMED_OUT, result.failure().map(AltsFailure::kind).orElse(null));
         assertTrue(chain.deviceTokenPolls() <= 6, "no poll is sent after the code lapsed");
     }
 
@@ -258,7 +258,7 @@ class DeviceCodeLoginTest {
         LoginResult result = login(LoginMode.DIRECT);
 
         assertFalse(result.success());
-        assertEquals(FailureReason.INVALID_TOKEN, result.reason());
+        assertEquals(Kind.UNAUTHORIZED, result.failure().map(AltsFailure::kind).orElse(null));
     }
 
     @Test
@@ -287,7 +287,7 @@ class DeviceCodeLoginTest {
         LoginResult result = login(LoginMode.DIRECT);
 
         assertFalse(result.success());
-        assertEquals(FailureReason.RATE_LIMITED, result.reason());
+        assertEquals(Kind.RATE_LIMITED, result.failure().map(AltsFailure::kind).orElse(null));
         assertEquals(0, prompts.get());
         assertEquals(0, chain.deviceTokenPolls());
     }
@@ -300,8 +300,11 @@ class DeviceCodeLoginTest {
                 .get();
         LoginResult noPrompt = service().loginDeviceCode(null, LoginMode.DIRECT).get();
 
-        assertEquals(FailureReason.NOT_CONFIGURED, unconfigured.reason());
-        assertEquals(FailureReason.NOT_CONFIGURED, noPrompt.reason());
+        assertEquals(
+                Kind.NOT_CONFIGURED,
+                unconfigured.failure().map(AltsFailure::kind).orElse(null));
+        assertEquals(
+                Kind.NOT_CONFIGURED, noPrompt.failure().map(AltsFailure::kind).orElse(null));
     }
 
     @Test

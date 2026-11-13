@@ -14,6 +14,10 @@ import lol.trq.alts.model.AltAccount;
  * <p>{@link AltLoginService#loginAccount} is this plus one step: {@link #refresh(AltAccount)}, and then
  * the injection.
  *
+ * <p>Neither method throws at the caller or completes its future exceptionally. Every failure, a runtime
+ * closed before the call included, is an {@link AccountStatus} whose {@link AccountStatus#failure()}
+ * says what kind it was.
+ *
  * @author trq
  * @since 0.8.0
  */

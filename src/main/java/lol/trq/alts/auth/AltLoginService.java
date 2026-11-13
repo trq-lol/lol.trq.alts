@@ -11,6 +11,11 @@ import lol.trq.alts.spi.DeviceCodePrompt;
  * accounts via Microsoft OAuth, browser cookies, session tokens, refresh tokens, or offline (cracked)
  * identities.
  *
+ * <p>No route throws at the caller or completes its future exceptionally. Every failure, a runtime
+ * closed before the route started included, is a {@link LoginResult} whose
+ * {@link LoginResult#failure()} says what kind it was ({@link lol.trq.alts.AltsFailure.Kind#CANCELLED}
+ * for a closed runtime or a refusing executor).
+ *
  * @author trq
  * @since 0.1.0
  */
@@ -22,7 +27,7 @@ public interface AltLoginService {
      * @param mode the login mode (whether to add the account to storage)
      * @return a future containing the result of the login attempt
      */
-    CompletableFuture<AltLoginCallback.LoginResult> loginMicrosoft(LoginMode mode);
+    CompletableFuture<LoginResult> loginMicrosoft(LoginMode mode);
 
     /**
      * Initiates authentication through the OAuth device-authorization grant: the host shows the user a
@@ -46,9 +51,9 @@ public interface AltLoginService {
      * @return a future containing the result of the login attempt
      * @since 0.12.0
      */
-    default CompletableFuture<AltLoginCallback.LoginResult> loginDeviceCode(DeviceCodePrompt prompt, LoginMode mode) {
-        return CompletableFuture.completedFuture(AltLoginCallback.LoginResult.failure(
-                "Device code login is not supported", AltLoginCallback.FailureReason.NOT_CONFIGURED));
+    default CompletableFuture<LoginResult> loginDeviceCode(DeviceCodePrompt prompt, LoginMode mode) {
+        return CompletableFuture.completedFuture(LoginResult.failure(
+                lol.trq.alts.AltsFailure.Kind.NOT_CONFIGURED, "Device code login is not supported"));
     }
 
     /**
@@ -59,7 +64,7 @@ public interface AltLoginService {
      * @param mode the login mode
      * @return a future containing the result of the login attempt
      */
-    CompletableFuture<AltLoginCallback.LoginResult> loginCookie(String cookieData, LoginMode mode);
+    CompletableFuture<LoginResult> loginCookie(String cookieData, LoginMode mode);
 
     /**
      * Authenticates using cookies exported to a file, which is the shape browser extensions produce
@@ -71,7 +76,7 @@ public interface AltLoginService {
      * @return a future containing the result of the login attempt
      * @since 0.7.0
      */
-    CompletableFuture<AltLoginCallback.LoginResult> loginCookieFile(Path file, LoginMode mode);
+    CompletableFuture<LoginResult> loginCookieFile(Path file, LoginMode mode);
 
     /**
      * Authenticates using a pre-existing Minecraft access token or session string.
@@ -80,7 +85,7 @@ public interface AltLoginService {
      * @param mode the login mode
      * @return a future containing the result of the login attempt
      */
-    CompletableFuture<AltLoginCallback.LoginResult> loginSession(String sessionToken, LoginMode mode);
+    CompletableFuture<LoginResult> loginSession(String sessionToken, LoginMode mode);
 
     /**
      * Authenticates using a stored OAuth refresh token, skipping the interactive browser step. The
@@ -91,7 +96,7 @@ public interface AltLoginService {
      * @return a future containing the result of the login attempt
      * @since 0.6.0
      */
-    CompletableFuture<AltLoginCallback.LoginResult> loginRefreshToken(String refreshToken, LoginMode mode);
+    CompletableFuture<LoginResult> loginRefreshToken(String refreshToken, LoginMode mode);
 
     /**
      * Authenticates for offline (cracked) play using only a username.
@@ -100,7 +105,7 @@ public interface AltLoginService {
      * @param mode the login mode
      * @return a future containing the result of the login attempt
      */
-    CompletableFuture<AltLoginCallback.LoginResult> loginOffline(String username, LoginMode mode);
+    CompletableFuture<LoginResult> loginOffline(String username, LoginMode mode);
 
     /**
      * Performs a login operation using an existing {@link AltAccount} data model.
@@ -108,7 +113,7 @@ public interface AltLoginService {
      * @param account the account data to authenticate with
      * @return a future containing the result of the login attempt
      */
-    CompletableFuture<AltLoginCallback.LoginResult> loginAccount(AltAccount account);
+    CompletableFuture<LoginResult> loginAccount(AltAccount account);
 
     /**
      * Returns a view of this login service whose every request carries {@code tag} as the

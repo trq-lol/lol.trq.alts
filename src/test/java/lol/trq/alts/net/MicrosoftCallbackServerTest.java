@@ -21,9 +21,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.auth.MicrosoftAuthConfig;
-import lol.trq.alts.auth.MicrosoftAuthUtil;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -122,9 +122,8 @@ class MicrosoftCallbackServerTest {
         assertEquals(400, get("error=access_denied&error_description=nope&state=" + STATE));
 
         ExecutionException failure = assertThrows(ExecutionException.class, () -> code.get(5, TimeUnit.SECONDS));
-        MicrosoftAuthUtil.AuthFlowException classified =
-                assertInstanceOf(MicrosoftAuthUtil.AuthFlowException.class, failure.getCause());
-        assertEquals(FailureReason.DECLINED, classified.reason());
+        AltsException classified = assertInstanceOf(AltsException.class, failure.getCause());
+        assertEquals(Kind.DECLINED, classified.kind());
     }
 
     @Test

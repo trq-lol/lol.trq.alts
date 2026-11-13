@@ -11,7 +11,6 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
-import lol.trq.alts.auth.AltLoginCallback.LoginResult;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;

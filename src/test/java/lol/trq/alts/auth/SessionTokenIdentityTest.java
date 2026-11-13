@@ -14,8 +14,8 @@ import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import lol.trq.alts.auth.AltLoginCallback.FailureReason;
-import lol.trq.alts.auth.AltLoginCallback.LoginResult;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
@@ -101,7 +101,7 @@ class SessionTokenIdentityTest {
         LoginResult result = service().loginSession(forged, LoginMode.ADD).get(10, TimeUnit.SECONDS);
 
         assertFalse(result.success());
-        assertEquals(FailureReason.INVALID_TOKEN, result.reason());
+        assertEquals(Kind.UNAUTHORIZED, result.failure().map(AltsFailure::kind).orElse(null));
         assertNull(injected.get());
         assertTrue(localStore.store().accounts().isEmpty(), "nothing was stored for a token the service refused");
     }
