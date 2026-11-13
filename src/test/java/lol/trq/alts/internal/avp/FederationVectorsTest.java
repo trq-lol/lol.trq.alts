@@ -130,6 +130,25 @@ class FederationVectorsTest {
                 invite.homeHostLocator(),
                 a);
         assertFalse(Tokens.verifyInvite(otherMember, repoId, a.expiresAt() - 1), "acceptance for another key");
+
+        // SPEC 8.2: the acceptance signature itself, with every other condition still holding.
+        byte[] flipped = a.signature();
+        flipped[0] ^= 0x01;
+        InviteToken badSignature = new InviteToken(
+                invite.ed25519PublicKey(),
+                invite.x25519PublicKey(),
+                invite.homeHostKey(),
+                invite.homeHostLocator(),
+                new Acceptance(a.repoId(), a.memberKey(), a.hostKey(), a.expiresAt(), flipped));
+        assertFalse(Tokens.verifyInvite(badSignature, repoId, a.expiresAt() - 1), "a flipped signature byte");
+        long later = a.expiresAt() + 60_000;
+        InviteToken extended = new InviteToken(
+                invite.ed25519PublicKey(),
+                invite.x25519PublicKey(),
+                invite.homeHostKey(),
+                invite.homeHostLocator(),
+                new Acceptance(a.repoId(), a.memberKey(), a.hostKey(), later, a.signature()));
+        assertFalse(Tokens.verifyInvite(extended, repoId, a.expiresAt() - 1), "expiresAt altered after signing");
     }
 
     @Test
