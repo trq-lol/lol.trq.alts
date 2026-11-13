@@ -190,7 +190,7 @@ public final class BulkOperationsImpl implements BulkOperations {
             case OFFLINE_NAME -> importService.loginOffline(entry, mode).thenApply(BulkOperationsImpl::toAttempt);
             case UNKNOWN ->
                 CompletableFuture.completedFuture(
-                        Attempt.failed(AltsFailure.of(Kind.UNAUTHORIZED, "Unrecognised credential format")));
+                        Attempt.failed(AltsFailure.of(Kind.INVALID_INPUT, "Unrecognised credential format")));
         };
     }
 

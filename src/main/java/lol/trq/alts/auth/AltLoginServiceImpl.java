@@ -186,7 +186,7 @@ public class AltLoginServiceImpl implements AltLoginService {
             String cleanName =
                     name == null ? "" : NOT_USERNAME.matcher(name.trim()).replaceAll("");
             if (cleanName.isEmpty() || cleanName.length() > 16) {
-                return LoginResult.failure(Kind.UNAUTHORIZED, "Invalid username length (1-16 chars)");
+                return LoginResult.failure(Kind.INVALID_INPUT, "Invalid username length (1-16 chars)");
             }
 
             UUID uuid = UUID.nameUUIDFromBytes(("OfflinePlayer:" + cleanName).getBytes(StandardCharsets.UTF_8));
@@ -233,7 +233,7 @@ public class AltLoginServiceImpl implements AltLoginService {
         }
         if (prompt == null) {
             return CompletableFuture.completedFuture(
-                    LoginResult.failure(Kind.NOT_CONFIGURED, "No device code prompt given"));
+                    LoginResult.failure(Kind.INVALID_INPUT, "No device code prompt given"));
         }
         return started(
                 "Device code",

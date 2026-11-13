@@ -305,7 +305,9 @@ class DeviceCodeLoginTest {
                 Kind.NOT_CONFIGURED,
                 unconfigured.failure().map(AltsFailure::kind).orElse(null));
         assertEquals(
-                Kind.NOT_CONFIGURED, noPrompt.failure().map(AltsFailure::kind).orElse(null));
+                Kind.INVALID_INPUT,
+                noPrompt.failure().map(AltsFailure::kind).orElse(null),
+                "a missing prompt is the caller's argument, not the host's configuration");
     }
 
     @Test

@@ -414,6 +414,23 @@ class BulkOperationsTest {
                 TestTransports.direct());
     }
 
+    /** A line that is no credential at all is input the host gave, refused without a request. */
+    @Test
+    void aLineThatIsNoCredentialIsInvalidInput() throws Exception {
+        assertEquals(CredentialKind.UNKNOWN, CredentialKind.detect("this is not a credential"));
+        BulkOperations bulk = importingThrough(token -> {
+            throw new AssertionError("nothing is signed in with a line that is no credential");
+        });
+
+        BulkReport report = bulk.importCredentials(List.of("this is not a credential"), LoginMode.DIRECT, FAST, null)
+                .report()
+                .get(10, TimeUnit.SECONDS);
+
+        assertEquals(
+                Kind.INVALID_INPUT,
+                report.results().get(0).failure().orElseThrow().kind());
+    }
+
     /**
      * A host's progress callback that throws as an entry starts fails that entry, with kind UNKNOWN and
      * no attempt made, and the run goes on: one bad callback does not cost the rest of the list.

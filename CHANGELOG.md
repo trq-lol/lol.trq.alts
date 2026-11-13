@@ -199,9 +199,9 @@ says the kind); *none* means success, so `failure()` is empty.
 | `FailureReason.NONE` | none | |
 | `FailureReason.UNKNOWN` | `UNKNOWN` | |
 | `FailureReason.REAUTH_REQUIRED` | `REAUTH_REQUIRED` | The credential is spent and was discarded. |
-| `FailureReason.INVALID_TOKEN` | `UNAUTHORIZED` | Empty, malformed or refused; a refresh token may still renew. |
+| `FailureReason.INVALID_TOKEN` | `UNAUTHORIZED` | Empty, malformed or refused; a refresh token may still renew. Where nothing was sent because the input is no credential at all (an offline name that is not a name, a bulk line of no known form), `INVALID_INPUT`. |
 | `FailureReason.NETWORK` | `NETWORK` | |
-| `FailureReason.NOT_CONFIGURED` | `NOT_CONFIGURED` | |
+| `FailureReason.NOT_CONFIGURED` | `NOT_CONFIGURED` | A missing `DeviceCodePrompt` argument is `INVALID_INPUT`. |
 | `FailureReason.NOT_ENTITLED` | `NOT_ENTITLED` | |
 | `FailureReason.RATE_LIMITED` | `RATE_LIMITED` | The wait is `failure().retryAfter()`. |
 | `FailureReason.XBOX_DENIED` | `XBOX_DENIED` | The reason is `failure().xstsError()`. |

@@ -93,6 +93,15 @@ class LoginHardeningTest {
      * The browser sign-in's callback listener gives up with the JDK's TimeoutException, wrapped by the
      * stage it completes. That is the user not finishing the sign-in, not an outage.
      */
+    /** An offline name that is no name is input the caller gave, refused before anything happens. */
+    @Test
+    void anOfflineNameThatIsNoNameIsInvalidInput() throws Exception {
+        for (String name : new String[] {"", "!!!", "a_name_far_longer_than_sixteen"}) {
+            LoginResult result = service().loginOffline(name, LoginMode.DIRECT).get(10, TimeUnit.SECONDS);
+            assertEquals(Kind.INVALID_INPUT, result.failure().orElseThrow().kind(), name);
+        }
+    }
+
     @Test
     void aSignInThatWasNeverFinishedIsTimedOut() {
         LoginResult result = AltLoginServiceImpl.classifiedFailure(
