@@ -89,6 +89,19 @@ class LoginHardeningTest {
         assertFalse(result.message().contains(vaultDir.toString()), "an absolute path leaked: " + result.message());
     }
 
+    /**
+     * The browser sign-in's callback listener gives up with the JDK's TimeoutException, wrapped by the
+     * stage it completes. That is the user not finishing the sign-in, not an outage.
+     */
+    @Test
+    void aSignInThatWasNeverFinishedIsTimedOut() {
+        LoginResult result = AltLoginServiceImpl.classifiedFailure(
+                "Microsoft Auth",
+                new java.util.concurrent.CompletionException(new java.util.concurrent.TimeoutException()));
+
+        assertEquals(Kind.TIMED_OUT, result.failure().orElseThrow().kind());
+    }
+
     @Test
     void aResultCarriesAnXboxCauseOnlyWhenThereWasOne() {
         LoginResult plain = LoginResult.failure(Kind.UNAUTHORIZED, "refused");
