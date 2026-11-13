@@ -8,28 +8,44 @@ import lol.trq.alts.store.HostSecrets;
 
 /**
  * How the runtime opens and closes its stores without either operation being public on the store types.
- * The store package installs the one {@link Bridge} when its types initialize; nothing else does. Not
- * part of the library's API: a host gets its stores from {@code AltsRuntime#store()} and
+ * The store package installs the one {@link Bridge} when its types initialize, and {@link #install}
+ * accepts no other: only the library's own bridge class, loaded by this class's own loader, and only
+ * once. Not part of the library's API: a host gets its stores from {@code AltsRuntime#store()} and
  * {@code AltsRuntime#secrets()}, and closes them by closing the runtime.
+ *
+ * <p>Known limit until the module descriptor stops exporting this package: code on the classpath can
+ * still call {@link #bridge()} and close or open a store through it. It cannot substitute a bridge of
+ * its own, so it never sees a key provider or a store the library did not open.
  *
  * @author trq
  * @since 1.0.0
  */
 public final class StoreAccess {
 
+    /** The one class whose instance {@link #install} accepts. */
+    private static final String BRIDGE_CLASS = "lol.trq.alts.store.StoreBridge";
+
     private static volatile Bridge bridge;
 
     private StoreAccess() {}
 
     /**
-     * Installs the bridge. Called once, by the store package.
+     * Installs the bridge. Called once, by the store package, as it initializes.
      *
      * @param value the bridge
+     * @throws IllegalArgumentException if {@code value} is not the library's own store bridge, loaded by
+     *     this class's loader; nothing is installed
      * @throws IllegalStateException if a bridge is already installed
      * @since 1.0.0
      */
     public static synchronized void install(Bridge value) {
         Objects.requireNonNull(value, "bridge");
+        // Checked before anything else, and whatever has been installed: a bridge sees every key provider
+        // and every store the runtime opens, so only the store package's own may ever be the one.
+        Class<?> type = value.getClass();
+        if (!type.getName().equals(BRIDGE_CLASS) || type.getClassLoader() != StoreAccess.class.getClassLoader()) {
+            throw new IllegalArgumentException("not the library's store bridge");
+        }
         if (bridge != null) {
             throw new IllegalStateException("store bridge already installed");
         }
@@ -43,16 +59,14 @@ public final class StoreAccess {
      * @since 1.0.0
      */
     public static Bridge bridge() {
-        Bridge installed = bridge;
-        if (installed == null) {
-            try {
-                Class.forName(AccountStore.class.getName(), true, AccountStore.class.getClassLoader());
-            } catch (ClassNotFoundException impossible) {
-                throw new IllegalStateException("store package unavailable", impossible);
-            }
-            installed = bridge;
+        // Always, not only when nothing is installed yet: initializing the store package is what installs
+        // the library's bridge, and it must have had the chance to before the field is read.
+        try {
+            Class.forName(AccountStore.class.getName(), true, StoreAccess.class.getClassLoader());
+        } catch (ClassNotFoundException impossible) {
+            throw new IllegalStateException("store package unavailable", impossible);
         }
-        return Objects.requireNonNull(installed, "store bridge not installed");
+        return Objects.requireNonNull(bridge, "store bridge not installed");
     }
 
     /**
