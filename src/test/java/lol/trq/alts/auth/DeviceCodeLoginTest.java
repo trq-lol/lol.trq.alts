@@ -315,10 +315,6 @@ class DeviceCodeLoginTest {
     }
 
     /**
-     * A device-code login registers its wait and each poll with the transport so close() can end them.
-     * Once the login ends on its own, whichever way, nothing of it may stay registered.
-     */
-    /**
      * A host's executor can be shut down while the runtime is still open. The next poll is then refused,
      * and the login must fail rather than wait for a poll that will never run.
      */
@@ -336,6 +332,10 @@ class DeviceCodeLoginTest {
         assertNull(injected.get());
     }
 
+    /**
+     * A device-code login registers its wait and each poll with the transport so close() can end them.
+     * Once the login ends on its own, whichever way, nothing of it may stay registered.
+     */
     @Test
     void aSucceededDeviceCodeLoginLeavesNothingRegistered() throws Exception {
         chain.deviceTokenError("authorization_pending");

@@ -270,7 +270,9 @@ class AccountStorePersistenceTest {
 
     @Test
     void theStoreFileIsReadableByItsOwnerOnly() throws Exception {
-        assumeTrue(storeDir.getFileSystem().supportedFileAttributeViews().contains("posix"));
+        assumeTrue(
+                storeDir.getFileSystem().supportedFileAttributeViews().contains("posix"),
+                "POSIX permissions only: this file system (for example NTFS on Windows) has no posix view");
 
         store.addAccount(account(1));
         store.addAccount(account(2));
