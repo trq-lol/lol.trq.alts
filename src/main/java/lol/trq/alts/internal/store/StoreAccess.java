@@ -15,7 +15,8 @@ import lol.trq.alts.store.HostSecrets;
  *
  * <p>Known limit until the module descriptor stops exporting this package: code on the classpath can
  * still call {@link #bridge()} and close or open a store through it. It cannot substitute a bridge of
- * its own, so it never sees a key provider or a store the library did not open.
+ * its own without deep reflection or a split package, so it never sees a key provider or a store the
+ * library did not open; the module descriptor and a sealed jar close those two as well.
  *
  * @author trq
  * @since 1.0.0
