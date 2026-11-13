@@ -56,7 +56,11 @@ import lol.trq.alts.spi.ProxyProvider;
  *       is reached through a tunnel the library opens itself, so the credential rides the
  *       {@code CONNECT} and is never inside the TLS stream the origin reads.
  *   <li>A kept-alive connection is only reused by the proxy identity that opened it: proxy host, port,
- *       and credential, within this transport. Two transports never share a tunnel.
+ *       and credential, within this transport. Two transports never share a tunnel. Connections the
+ *       library does not tunnel itself (direct ones, unauthenticated SOCKS, and an unauthenticated
+ *       plain-HTTP proxy) are pooled by the JDK, process-wide, keyed by their target and proxy; a
+ *       connection reused that way has the same identity, so nothing leaks between routes, but
+ *       {@link #close()} cannot close those.
  *   <li>TLS uses the JVM's default trust with hostname verification on, tunnelled or not.
  *   <li>Redirects are not followed, except by the binary fetch, which never carries a credential across
  *       origins and never steps down from {@code https} to {@code http}.
@@ -65,7 +69,8 @@ import lol.trq.alts.spi.ProxyProvider;
  *
  * <p>The request methods block. Run them on {@link #executor()} rather than the common pool.
  *
- * <p>{@link #close()} closes the pooled tunnel connections and refuses every later request. Nothing here
+ * <p>{@link #close()} closes the pooled tunnel connections the library opened and refuses every later
+ * request. Nothing here
  * changes process-wide JVM state: no system property, default authenticator, default {@code SSLContext},
  * or proxy selector is installed.
  *

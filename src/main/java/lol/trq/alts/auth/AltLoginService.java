@@ -119,6 +119,11 @@ public interface AltLoginService {
      * account UUID exists to route on. The view stores, injects and classifies exactly as this service
      * does; only the tag differs.
      *
+     * <p>The tag belongs to the sign-in, not to the account it produces. Once the account exists, what
+     * is done with it is routed by its UUID like any other: {@code AltsRuntime#accountServices}, a bulk
+     * check or refresh, and a later {@code loginAccount} through the service itself carry no tag. A host
+     * that wants the account kept on the same proxy maps its UUID to that proxy in its provider.
+     *
      * @param tag the host's route tag
      * @return the tagged view
      * @throws NullPointerException if {@code tag} is null

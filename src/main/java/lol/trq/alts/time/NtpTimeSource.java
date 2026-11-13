@@ -23,6 +23,11 @@ import java.util.concurrent.locks.ReentrantLock;
  * calculation, not an aggregator over a handful of web time APIs that each answer in a different JSON
  * shape and are slower than the drift they claim to fix.
  *
+ * <p><strong>Its UDP exchange does not go through the runtime's {@code ProxyProvider}.</strong> NTP is
+ * not HTTP, and no proxy route the library knows carries it, so a host that proxies every request still
+ * sends this one from its own address to the server named here; see SECURITY.md. A host that must not
+ * do that passes its own {@link TimeSource} instead.
+ *
  * <p><strong>{@link #now()} never touches the network.</strong> It is the OS clock plus the last measured
  * offset — pure arithmetic — because it is read inside the final spin of a scheduled claim, where a DNS
  * lookup or a socket timeout turns a twenty-millisecond approach into seconds and misses the target.

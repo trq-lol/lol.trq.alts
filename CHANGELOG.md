@@ -89,10 +89,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AccountStore` and `HostSecrets` have no public factory and no public `close()`, so a store cannot be
   closed under a runtime that is still open; closing the runtime closes both.
 - **Breaking:** `AltsToasts`, with no deprecation bridge. `alts.toasts()` is the only route to the
-  host's `ToastSink`: `AltsToasts.success(name)` becomes
-  `alts.toasts().toast(ToastSink.Level.SUCCESS, "Logged In", "Logged in as " + name, 3000)`, and the
-  same for `failure` (`ERROR`, "Login Failed", 4000 ms), `info` (`INFO`, 2500 ms) and `removed`
-  (`INFO`, "Account Removed", 2500 ms).
+  host's `ToastSink`. Each helper becomes one `toast(level, title, description, durationMs)` call:
+  `success(name)` is `toast(SUCCESS, "Logged In", "Logged in as " + name, 3000)`, `failure(message)` is
+  `toast(ERROR, "Login Failed", message, 4000)`, `info(title, description)` is
+  `toast(INFO, title, description, 2500)`, and `removed(name)` is
+  `toast(INFO, "Account Removed", "Removed " + name, 2500)`.
 - The store test seam (`StoreTestHooks.reset()` and the package-private `resetForTests()` behind it);
   a test that owns its runtime or store needs no process-wide reset.
 - **Breaking:** `AccountServices.of(...)` and `ProfileLookupService.create(...)`. The routes are
@@ -107,6 +108,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   static `bind` methods. A host sets the provider and the executor on the builder, as before, and
   nothing else: there is no process-wide transport or executor left to reach.
 - `AccountNetworkUtil.lookupUsername`, which nothing used; `ProfileLookupService.byUuid` does the job.
+- Internal, moving under `lol.trq.alts.internal` before the release: `CookieAuthUtil.authenticate(String)`
+  (the overload against the default endpoints), the `MicrosoftCallbackServer(state, config)`
+  constructor that sent no PKCE challenge, and the static request methods of `MicrosoftAuthUtil`,
+  `CookieAuthUtil` and `AccountNetworkUtil`, now instance methods over the runtime's transport.
 - The `lol.trq.alts.testSeams` system property and the test hooks it guarded (`HttpUtil.resetForTests`,
   `IoExecutor.resetForTests`, `NetTestHooks`): a test builds its own runtime or transport and needs no
   process-wide reset.
