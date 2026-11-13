@@ -99,6 +99,10 @@ final class StoreFile {
     private volatile String saveError;
     private volatile boolean closed;
 
+    // A test seam: runs inside a write, with the I/O lock held, just before the file is replaced, so a test
+    // can hold a write open and see what another owner can do meanwhile. Package-private on purpose.
+    private volatile Runnable beforeWriteForTests;
+
     private Pending pending;
     private ScheduledFuture<?> timer;
     private long timerDueNanos;
@@ -253,6 +257,16 @@ final class StoreFile {
     }
 
     /**
+     * Sets a task that runs inside every write, with the I/O lock held, just before the file is replaced.
+     * For tests only.
+     *
+     * @param hook the task, or null for none
+     */
+    void beforeWriteForTests(Runnable hook) {
+        this.beforeWriteForTests = hook;
+    }
+
+    /**
      * Returns whether this file still holds key material: the host's secret, or a key derived from it
      * or from the machine. For tests, which check that {@link #close()} drops it.
      *
@@ -370,6 +384,10 @@ final class StoreFile {
                 return;
             }
             try {
+                Runnable hook = beforeWriteForTests;
+                if (hook != null) {
+                    hook.run();
+                }
                 write(next.plaintext().get());
                 written = next.order();
                 knownGood = true;

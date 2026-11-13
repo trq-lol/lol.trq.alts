@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import org.junit.jupiter.api.Test;
@@ -178,5 +180,42 @@ class StoreLockTest {
         next.close();
         assertEquals("value", next.get("feature.api-key"));
         assertNull(next.get("feature.other-key"));
+    }
+
+    /**
+     * The lock is what keeps a second owner from reading the file before the first has finished writing
+     * it. Released before the final write, a next owner could open and load the file between the two
+     * and see a store without the last change, or have that change land over what it then writes.
+     */
+    @Test
+    void theLockIsHeldThroughTheFinalWriteOfClose() throws Exception {
+        AccountStore first = AccountStore.open(storeDir, null, null, null, false, Duration.ofHours(1));
+        first.load();
+        first.addAccount(alex());
+        CountDownLatch writing = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        first.fileForTests().beforeWriteForTests(() -> {
+            writing.countDown();
+            try {
+                release.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        });
+
+        Thread closing = Thread.ofPlatform().start(first::close);
+        try {
+            assertTrue(writing.await(10, TimeUnit.SECONDS), "close() reached its final write");
+            assertThrows(
+                    IllegalStateException.class,
+                    () -> AccountStore.open(storeDir),
+                    "no one else may open the file while its last change is still being written");
+        } finally {
+            release.countDown();
+            closing.join(TimeUnit.SECONDS.toMillis(10));
+        }
+
+        assertFalse(closing.isAlive(), "close() returned");
+        assertTrue(holds(reopened(), UUID), "and the next owner reads the change close() wrote");
     }
 }
