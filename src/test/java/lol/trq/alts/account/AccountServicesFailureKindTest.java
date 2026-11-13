@@ -144,11 +144,13 @@ class AccountServicesFailureKindTest {
     }
 
     @Test
-    void aServerErrorIsNetwork() {
-        server.canned(503, HOSTILE_BODY);
-        assertThrown(throwingCalls(), Kind.NETWORK, Optional.empty());
-        assertThrown(lookupCalls(), Kind.NETWORK, Optional.empty());
-        assertFailedMutations(Kind.NETWORK, Optional.empty());
+    void aServerErrorOrARequestTimeoutIsNetwork() {
+        for (int status : new int[] {503, 408}) {
+            server.canned(status, HOSTILE_BODY);
+            assertThrown(throwingCalls(), Kind.NETWORK, Optional.empty());
+            assertThrown(lookupCalls(), Kind.NETWORK, Optional.empty());
+            assertFailedMutations(Kind.NETWORK, Optional.empty());
+        }
     }
 
     @Test
