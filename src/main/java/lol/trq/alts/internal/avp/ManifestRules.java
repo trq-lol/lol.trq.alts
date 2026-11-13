@@ -64,7 +64,8 @@ public final class ManifestRules {
      * @param next the state to check
      * @param prev the verified state it should extend, or {@code null} when {@code next} should be the
      *     genesis
-     * @return the first rule that fails, or {@link Verdict#OK}; never throws
+     * @return the first rule that fails, or {@link Verdict#OK}
+     * @throws NullPointerException if an argument or one of its fields is null
      */
     public static Verdict check(SignedManifest next, SignedManifest prev) {
         if (!shapeOk(next)) {

@@ -274,7 +274,8 @@ public final class Manifest {
      * Verifies the owner signature over {@code S} under {@code ownerKey}, strictly (SPEC 4.2, 6.1 rule 2).
      *
      * @param m the signed manifest
-     * @return whether the state encodes and the signature verifies; never throws
+     * @return whether the state encodes and the signature verifies; a malformed state is simply false
+     * @throws NullPointerException if an argument or one of its fields is null
      */
     public static boolean verify(SignedManifest m) {
         byte[] s;
@@ -292,7 +293,8 @@ public final class Manifest {
      *
      * @param next the later state
      * @param prev the earlier state
-     * @return whether it links; never throws
+     * @return whether it links; a malformed state is simply false
+     * @throws NullPointerException if an argument or one of its fields is null
      */
     public static boolean linksTo(SignedManifest next, SignedManifest prev) {
         long seq = prev.state().manifestSeq();

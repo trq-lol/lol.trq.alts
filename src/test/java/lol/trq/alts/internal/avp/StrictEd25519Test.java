@@ -4,6 +4,7 @@ import static lol.trq.alts.internal.avp.Vectors.hex;
 import static lol.trq.alts.internal.avp.Vectors.str;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.gson.JsonObject;
@@ -66,6 +67,17 @@ class StrictEd25519Test {
         assertFalse(Ed25519Strict.strictInputsOk(key, sig));
         System.arraycopy(reverse(toFixed(L.subtract(BigInteger.ONE))), 0, sig, 32, 32);
         assertTrue(Ed25519Strict.strictInputsOk(key, sig), "L - 1 passes the pre-check");
+    }
+
+    /** A null argument is a caller's bug, not a signature that fails. */
+    @Test
+    void aNullArgumentIsRefusedAsNull() {
+        byte[] b = new byte[32];
+        assertThrows(NullPointerException.class, () -> Ed25519Strict.verify(null, b, new byte[64]));
+        assertThrows(NullPointerException.class, () -> Ed25519Strict.verify(b, null, new byte[64]));
+        assertThrows(NullPointerException.class, () -> Ed25519Strict.verify(b, b, null));
+        assertThrows(NullPointerException.class, () -> Challenge.verify(null, b, b, new byte[64]));
+        assertThrows(NullPointerException.class, () -> Challenge.verify(b, b, null, new byte[64]));
     }
 
     /** {@code s-plus-l} is a valid signature with {@code L} added to {@code S}: reduced, it verifies. */

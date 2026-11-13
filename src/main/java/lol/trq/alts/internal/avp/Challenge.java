@@ -1,5 +1,7 @@
 package lol.trq.alts.internal.avp;
 
+import java.util.Objects;
+
 /**
  * The challenge transcript of host-issued authentication (AVP SPEC 3.3).
  *
@@ -73,9 +75,14 @@ public final class Challenge {
      * @param ed25519PublicKey the 32-byte key that requested the token
      * @param nonce the raw nonce
      * @param signature the 64-byte signature
-     * @return whether it verifies; never throws
+     * @return whether it verifies; keys or a signature of the wrong length are simply false
+     * @throws NullPointerException if an argument is null
      */
     public static boolean verify(byte[] hostKey, byte[] ed25519PublicKey, byte[] nonce, byte[] signature) {
+        Objects.requireNonNull(hostKey, "hostKey");
+        Objects.requireNonNull(ed25519PublicKey, "ed25519PublicKey");
+        Objects.requireNonNull(nonce, "nonce");
+        Objects.requireNonNull(signature, "signature");
         if (hostKey.length != 32 || ed25519PublicKey.length != 32) {
             return false;
         }

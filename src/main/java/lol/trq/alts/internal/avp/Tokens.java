@@ -212,7 +212,8 @@ public final class Tokens {
      *
      * @param a the acceptance
      * @param hostKey the key to verify under
-     * @return whether it verifies; never throws
+     * @return whether it verifies
+     * @throws NullPointerException if an argument or one of its fields is null
      */
     public static boolean verifyAcceptance(Acceptance a, byte[] hostKey) {
         return Ed25519Strict.verify(hostKey, acceptanceMessage(a), a.signature());
@@ -226,7 +227,8 @@ public final class Tokens {
      * @param t the invite token
      * @param repoId the repository the owner is adding the member to
      * @param nowMillis the owner client's current time
-     * @return whether every condition holds; never throws
+     * @return whether every condition holds
+     * @throws NullPointerException if an argument or one of its fields is null
      */
     public static boolean verifyInvite(InviteToken t, String repoId, long nowMillis) {
         Acceptance a = t.acceptance();
@@ -459,7 +461,8 @@ public final class Tokens {
      * Verifies a leave request's signature, strictly, under its own {@code memberKey}.
      *
      * @param l the leave request
-     * @return whether it verifies; never throws
+     * @return whether it verifies
+     * @throws NullPointerException if an argument or one of its fields is null
      */
     public static boolean verifyLeave(LeaveRequest l) {
         return Ed25519Strict.verify(l.memberKey(), leaveMessage(l), l.signature());
@@ -501,7 +504,8 @@ public final class Tokens {
      *
      * @param l the leave request
      * @param tip the latest verified manifest state
-     * @return the first check that fails, or {@link LeaveVerdict#OK}; never throws on a decoded request
+     * @return the first check that fails, or {@link LeaveVerdict#OK}
+     * @throws NullPointerException if an argument or one of its fields is null
      */
     public static LeaveVerdict leaveVerdict(LeaveRequest l, Manifest.ManifestState tip) {
         if (!verifyLeave(l)) {

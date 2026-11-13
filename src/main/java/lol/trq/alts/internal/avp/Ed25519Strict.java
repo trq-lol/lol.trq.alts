@@ -16,6 +16,7 @@ import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.Arrays;
 import java.util.HexFormat;
+import java.util.Objects;
 
 /**
  * Ed25519 over raw keys, with the strict verification of AVP SPEC 2.
@@ -71,10 +72,15 @@ public final class Ed25519Strict {
      * @param publicKey the raw 32-byte public key
      * @param message the signed message, a CE string of one of the SPEC 4.1 constructions
      * @param signature the raw 64-byte signature
-     * @return true only if the strict checks pass and the signature verifies; never throws
+     * @return true only if the strict checks pass and the signature verifies; an input of the wrong
+     *     length or that is not a point is simply false
+     * @throws NullPointerException if an argument is null
      */
     public static boolean verify(byte[] publicKey, byte[] message, byte[] signature) {
-        if (publicKey == null || message == null || signature == null || !strictInputsOk(publicKey, signature)) {
+        Objects.requireNonNull(publicKey, "publicKey");
+        Objects.requireNonNull(message, "message");
+        Objects.requireNonNull(signature, "signature");
+        if (!strictInputsOk(publicKey, signature)) {
             return false;
         }
         try {

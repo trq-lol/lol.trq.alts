@@ -183,7 +183,8 @@ public final class Commits {
      * signature verifies strictly under {@code author} over the commit-sig message.
      *
      * @param c the commit
-     * @return whether all hold; never throws
+     * @return whether all hold; a malformed commit is simply false
+     * @throws NullPointerException if an argument or one of its fields is null
      */
     public static boolean verify(Commit c) {
         if (!shapeOk(c)) {
