@@ -7,6 +7,8 @@ import java.security.PublicKey;
 import java.util.Arrays;
 import java.util.Base64;
 import javax.crypto.SecretKey;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure;
 
 /**
  * A member's cryptographic identity: an Ed25519 key pair (the stable public identity used to
@@ -28,6 +30,23 @@ public final class VaultIdentity {
     private static final byte[] CONSISTENCY_PROBE =
             "lol.trq.alts/identity-consistency/v1".getBytes(StandardCharsets.UTF_8);
     private static final int MATERIAL_BYTES = Ed25519.KEY_BYTES + X25519.KEY_BYTES;
+
+    /**
+     * The shortest challenge {@link #signChallenge(byte[])} signs.
+     *
+     * @since 1.0.0
+     */
+    public static final int MIN_CHALLENGE_BYTES = 16;
+
+    /**
+     * The longest challenge {@link #signChallenge(byte[])} signs.
+     *
+     * @since 1.0.0
+     */
+    public static final int MAX_CHALLENGE_BYTES = 1024;
+
+    /** The ASCII bytes every AVP 0.5 canonical-encoding tag begins with. */
+    private static final byte[] AVP_TAG_PREFIX = "avp/".getBytes(StandardCharsets.US_ASCII);
 
     private final PublicKey edPublic;
     private final PrivateKey edPrivate;
@@ -189,15 +208,36 @@ public final class VaultIdentity {
     }
 
     /**
-     * Signs a server-issued challenge nonce with the Ed25519 identity key, proving key ownership for
-     * authentication.
+     * Signs a challenge nonce from a 0.4 vault server with the Ed25519 identity key, as 0.4 authentication
+     * asks: over the raw nonce bytes. It exists so a host can still authenticate to its 0.4 server to
+     * export a repository.
+     *
+     * <p>The same key is a 0.5 member key, and a 0.5 member signs only the canonical-encoding structures
+     * of AVP SPEC 4.1, never raw bytes a server chose. So that a server cannot pass one of those off as a
+     * nonce, this refuses, without signing, any input that begins with the ASCII bytes {@code avp/} (every
+     * 0.5 canonical-encoding string begins with such a tag) or that is shorter than {@value
+     * #MIN_CHALLENGE_BYTES} or longer than {@value #MAX_CHALLENGE_BYTES} bytes.
      *
      * @param nonce the challenge bytes
      * @return the signature
+     * @throws lol.trq.alts.AltsException of kind {@link lol.trq.alts.AltsFailure.Kind#INVALID_INPUT} if the
+     *     input is refused; nothing is signed
      * @throws CryptoException if signing fails
      */
     public byte[] signChallenge(byte[] nonce) throws CryptoException {
+        if (nonce == null
+                || nonce.length < MIN_CHALLENGE_BYTES
+                || nonce.length > MAX_CHALLENGE_BYTES
+                || startsWith(nonce, AVP_TAG_PREFIX)) {
+            throw new AltsException(
+                    AltsFailure.Kind.INVALID_INPUT,
+                    "Vault identity: a challenge must be 16 to 1024 bytes and must not be a protocol structure");
+        }
         return Ed25519.sign(edPrivate, nonce);
+    }
+
+    private static boolean startsWith(byte[] data, byte[] prefix) {
+        return data.length >= prefix.length && Arrays.equals(data, 0, prefix.length, prefix, 0, prefix.length);
     }
 
     private static VaultIdentity fromMaterial(byte[] material, WrappedIdentity stored) throws CryptoException {

@@ -8,6 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.internal.avp.Challenge;
+import lol.trq.alts.internal.avp.Commits;
+import lol.trq.alts.internal.avp.Tokens;
 import org.junit.jupiter.api.Test;
 
 /** Create / unlock / recovery round-trips for the vault identity. */
@@ -23,7 +28,7 @@ class VaultIdentityTest {
         assertEquals(created.identityId(), unlocked.identityId());
 
         // The unlocked private key still signs verifiably against the original public identity.
-        byte[] nonce = "server-nonce".getBytes(StandardCharsets.UTF_8);
+        byte[] nonce = "a 0.4 server challenge nonce".getBytes(StandardCharsets.UTF_8);
         byte[] sig = unlocked.signChallenge(nonce);
         assertTrue(Ed25519.verify(created.identityPublicKey(), nonce, sig));
 
@@ -169,5 +174,39 @@ class VaultIdentityTest {
                 null,
                 null);
         assertThrows(CryptoException.class, () -> VaultIdentity.unlock(flipped, pw));
+    }
+
+    /**
+     * The 0.4 export aid must not be a signing oracle for 0.5 structures (freeze record section 4): a
+     * canonical leave string or commit-signature string handed over as a "nonce" is refused unsigned, and so
+     * is anything outside 16 to 1024 bytes.
+     */
+    @Test
+    void signChallengeRefusesAnAvpStructureOrAnOutOfRangeInput() throws Exception {
+        VaultIdentity identity = VaultIdentity.create("pass".toCharArray());
+        byte[] memberKey = Ed25519.encodePublicKey(identity.identityPublicKey());
+        byte[] leave = Tokens.leaveMessage(
+                new Tokens.LeaveRequest("RBhoUI0PUSR7tD5HpFC9lA", memberKey, 1767229200000L, new byte[64]));
+        byte[] commitSig = Commits.sigMessage(new byte[32]);
+        byte[] challenge = Challenge.message(new byte[32], memberKey, new byte[32]);
+        assertEquals(54, commitSig.length, "within the length bounds: only the tag refuses it");
+
+        for (byte[] refused : new byte[][] {
+            leave,
+            commitSig,
+            challenge,
+            "avp/anything-at-all".getBytes(StandardCharsets.US_ASCII),
+            new byte[15],
+            new byte[1025]
+        }) {
+            AltsException e = assertThrows(AltsException.class, () -> identity.signChallenge(refused));
+            assertEquals(AltsFailure.Kind.INVALID_INPUT, e.kind());
+        }
+
+        byte[] tagNotAtTheStart = "x avp/0123456789abcdef".getBytes(StandardCharsets.US_ASCII);
+        for (byte[] signed : new byte[][] {new byte[16], new byte[1024], tagNotAtTheStart}) {
+            byte[] sig = identity.signChallenge(signed);
+            assertTrue(Ed25519.verify(identity.identityPublicKey(), signed, sig));
+        }
     }
 }

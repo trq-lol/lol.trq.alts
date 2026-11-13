@@ -138,6 +138,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the run goes on. A `BulkProgress.completed` or `finished` that throws is ignored: the entry stays
   recorded and the run is not cut short. An account-service call on a closed runtime throws `AltsException` of kind
   `CANCELLED`.
+- **Breaking: `VaultIdentity.signChallenge` refuses an AVP structure.** It signs nothing and throws
+  `AltsException` of kind `INVALID_INPUT` for an input that begins with the ASCII bytes `avp/`, or is
+  shorter than `VaultIdentity.MIN_CHALLENGE_BYTES` (16) or longer than `MAX_CHALLENGE_BYTES` (1024), so a
+  server cannot have the key sign an AVP 0.5 leave request or commit signature passed off as a nonce. It
+  stays the raw-nonce signature a host uses to authenticate to a 0.4 server; AVP 0.5 authentication signs
+  a domain-separated challenge transcript instead.
 
 ### Removed
 
