@@ -33,6 +33,7 @@ import org.junit.jupiter.api.io.TempDir;
  * <p>Both tests point at a profile endpoint that refuses everything, so the only route to a successful
  * result is the fast path itself.
  */
+@org.junit.jupiter.api.Timeout(value = 60, unit = java.util.concurrent.TimeUnit.SECONDS)
 class SessionLoginExpiryTest {
 
     private static final long NOW = 1_800_000_000_000L;

@@ -27,6 +27,7 @@ import org.junit.jupiter.api.io.TempDir;
  * A throttled login says how long to wait when the service did. A host importing a list of credentials
  * needs the number, not just the fact: without it the only choices are to give up or to guess.
  */
+@org.junit.jupiter.api.Timeout(value = 60, unit = java.util.concurrent.TimeUnit.SECONDS)
 class LoginResultRetryAfterTest {
 
     @TempDir

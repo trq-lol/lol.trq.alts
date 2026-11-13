@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /** The host secrets persist by the same rules as the account store. */
+@org.junit.jupiter.api.Timeout(value = 60, unit = java.util.concurrent.TimeUnit.SECONDS)
 class HostSecretsPersistenceTest {
 
     private static final String FILE_NAME = "secrets.dat";

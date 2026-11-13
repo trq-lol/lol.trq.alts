@@ -24,6 +24,7 @@ import org.junit.jupiter.api.io.TempDir;
  * A failure message goes to the host's UI and its log, so no token may ever be part of one. The case
  * that used to break this is the most ordinary one there is: a token pasted with a line break in it.
  */
+@org.junit.jupiter.api.Timeout(value = 60, unit = java.util.concurrent.TimeUnit.SECONDS)
 class TokenNeverInMessageTest {
 
     private static final String HEAD = "eyJhbGciOiJIUzI1NiJ9.secret-head";

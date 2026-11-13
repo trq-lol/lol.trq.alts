@@ -43,6 +43,7 @@ import org.junit.jupiter.api.io.TempDir;
  * the second rather than wait out real ones; the advertised interval of one "second" lasts
  * {@link #SECOND_MILLIS} here.
  */
+@org.junit.jupiter.api.Timeout(value = 60, unit = java.util.concurrent.TimeUnit.SECONDS)
 class DeviceCodeLoginTest {
 
     private static final long SECOND_MILLIS = 20L;

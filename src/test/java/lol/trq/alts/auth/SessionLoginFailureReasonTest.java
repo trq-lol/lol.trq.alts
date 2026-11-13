@@ -26,6 +26,7 @@ import org.junit.jupiter.api.io.TempDir;
  * should offer a retry. Collapsing both onto {@code INVALID_TOKEN} makes the documented advice to branch
  * on the reason wrong for the one case where retrying is the right answer.
  */
+@org.junit.jupiter.api.Timeout(value = 60, unit = java.util.concurrent.TimeUnit.SECONDS)
 class SessionLoginFailureReasonTest {
 
     private static final String OPAQUE_TOKEN = "not-a-jwt-so-the-fast-path-is-skipped";

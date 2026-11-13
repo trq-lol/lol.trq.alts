@@ -36,6 +36,7 @@ import org.junit.jupiter.api.io.TempDir;
  * session does not move: a host sweeping a hundred alts must not switch session a hundred times, and that
  * is exactly what building the sweep on {@code loginAccount} would do.
  */
+@org.junit.jupiter.api.Timeout(value = 60, unit = java.util.concurrent.TimeUnit.SECONDS)
 class AccountServiceTest {
 
     private static final long NOW = 1_800_000_000_000L;

@@ -23,6 +23,7 @@ import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+@org.junit.jupiter.api.Timeout(value = 60, unit = java.util.concurrent.TimeUnit.SECONDS)
 class RefreshTokenExchangeTest {
 
     /** A client id that injects a second form parameter unless it is encoded. */

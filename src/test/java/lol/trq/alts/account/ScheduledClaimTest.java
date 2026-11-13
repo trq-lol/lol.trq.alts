@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Test;
  * stops the instant a change succeeds, and a terminal failure ends it rather than hammering a change that
  * can never land.
  */
+@org.junit.jupiter.api.Timeout(value = 60, unit = java.util.concurrent.TimeUnit.SECONDS)
 class ScheduledClaimTest {
 
     private HttpServer server;

@@ -32,6 +32,7 @@ import org.junit.jupiter.api.io.TempDir;
  * "network" retries, and retrying an account Xbox Live or Minecraft services turned away spends a token
  * rotation each time for nothing.
  */
+@org.junit.jupiter.api.Timeout(value = 60, unit = java.util.concurrent.TimeUnit.SECONDS)
 class RefreshClassificationTest {
 
     private static final long NOW = 1_800_000_000_000L;

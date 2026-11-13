@@ -30,6 +30,7 @@ import org.junit.jupiter.api.io.TempDir;
  * Logging into an account that is already stored must install <em>that record</em>, never a poorer
  * rebuild of it, and must not spend a refresh-token rotation on a failure the credential did not cause.
  */
+@org.junit.jupiter.api.Timeout(value = 60, unit = java.util.concurrent.TimeUnit.SECONDS)
 class StoredAccountLoginTest {
 
     private static final long NOW = 1_800_000_000_000L;
