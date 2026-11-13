@@ -1,6 +1,5 @@
 package lol.trq.alts.auth;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -376,15 +375,12 @@ public class AltLoginServiceImpl implements AltLoginService {
                                 () -> {
                                     try {
                                         return CookieFile.read(file);
-                                    } catch (IOException e) {
+                                    } catch (AltsException unreadable) {
                                         // Not a network failure: the file is the credential, and it could not
-                                        // be read. CookieFile writes its own messages: a file name and a fixed
-                                        // phrase.
+                                        // be read, which a sign-in reports as a credential it cannot use.
+                                        // CookieFile's message is a file name and a fixed phrase.
                                         throw new AltsException(
-                                                AltsFailure.of(
-                                                        Kind.UNAUTHORIZED,
-                                                        e.getMessage() != null ? e.getMessage() : "could not be read"),
-                                                e);
+                                                AltsFailure.of(Kind.UNAUTHORIZED, unreadable.getMessage()));
                                     }
                                 },
                                 http.executor())

@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure.Kind;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -76,30 +78,32 @@ class CookieFileTest {
 
     @Test
     void rejectsMissingFile() {
-        IOException thrown = assertThrows(IOException.class, () -> CookieFile.read(dir.resolve("absent.txt")));
-
-        assertTrue(thrown.getMessage().contains("absent.txt"), thrown.getMessage());
+        AltsException thrown = assertThrows(AltsException.class, () -> CookieFile.read(dir.resolve("absent.txt")));
+        assertEquals(Kind.INVALID_INPUT, thrown.kind());
     }
 
     @Test
     void rejectsDirectory() {
-        assertThrows(IOException.class, () -> CookieFile.read(dir));
+        assertEquals(
+                Kind.INVALID_INPUT,
+                assertThrows(AltsException.class, () -> CookieFile.read(dir)).kind());
     }
 
     @Test
     void rejectsBlankFile() throws IOException {
         Path file = write("blank.txt", "   \n\t\n".getBytes(StandardCharsets.UTF_8));
 
-        assertThrows(IOException.class, () -> CookieFile.read(file));
+        assertEquals(
+                Kind.INVALID_INPUT,
+                assertThrows(AltsException.class, () -> CookieFile.read(file)).kind());
     }
 
     @Test
     void rejectsOversizedFile() throws IOException {
         Path file = write("huge.txt", new byte[(int) CookieFile.MAX_BYTES + 1]);
 
-        IOException thrown = assertThrows(IOException.class, () -> CookieFile.read(file));
-
-        assertTrue(thrown.getMessage().contains("too large"), thrown.getMessage());
+        AltsException thrown = assertThrows(AltsException.class, () -> CookieFile.read(file));
+        assertEquals(Kind.INVALID_INPUT, thrown.kind());
     }
 
     /**
@@ -110,9 +114,8 @@ class CookieFileTest {
     void readsNoMoreThanOneByteBeyondTheCap() throws IOException {
         Path file = write("huge.txt", new byte[(int) CookieFile.MAX_BYTES * 2]);
 
-        IOException thrown = assertThrows(IOException.class, () -> CookieFile.read(file));
-
-        assertTrue(thrown.getMessage().contains("too large"), thrown.getMessage());
+        AltsException thrown = assertThrows(AltsException.class, () -> CookieFile.read(file));
+        assertEquals(Kind.INVALID_INPUT, thrown.kind());
     }
 
     /**
@@ -124,9 +127,9 @@ class CookieFileTest {
     void aFailureNamesTheFileAndNeverThePathToIt() {
         Path absent = dir.resolve("absent.txt");
 
-        IOException thrown = assertThrows(IOException.class, () -> CookieFile.read(absent));
+        AltsException thrown = assertThrows(AltsException.class, () -> CookieFile.read(absent));
+        assertEquals(Kind.INVALID_INPUT, thrown.kind());
 
-        assertTrue(thrown.getMessage().contains("absent.txt"), thrown.getMessage());
         assertFalse(
                 thrown.getMessage().contains(dir.toString()),
                 "the containing directory must not travel into a message: " + thrown.getMessage());
@@ -134,9 +137,8 @@ class CookieFileTest {
 
     @Test
     void aDirectoryIsRejectedAsNotAFileRatherThanAsMissing() {
-        IOException thrown = assertThrows(IOException.class, () -> CookieFile.read(dir));
-
-        assertTrue(thrown.getMessage().contains("not a file"), thrown.getMessage());
+        AltsException thrown = assertThrows(AltsException.class, () -> CookieFile.read(dir));
+        assertEquals(Kind.INVALID_INPUT, thrown.kind());
     }
 
     @Test

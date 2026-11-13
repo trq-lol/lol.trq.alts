@@ -122,6 +122,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   request failed and with what status; the service's `errorMessage` is no longer repeated, since a
   service may echo what it was sent. A sign-in no longer repeats what the host's session injector
   threw.
+- **Breaking: `CookieFile.read(Path)` throws `AltsException` of kind `INVALID_INPUT`** in place of a
+  checked `IOException` for a file that is missing, not a file, empty, too large or unreadable; the
+  message still names the file only, and no exception carrying the path rides along as its cause.
 - **Breaking: nothing a closed runtime starts throws at the caller.** A sign-in route, a check or a
   refresh started after `close()`, or refused by its executor, returns a result whose failure is
   `CANCELLED` (it used to throw `RejectedExecutionException` on a runtime-created executor); a browser
@@ -242,6 +245,7 @@ says the kind); *none* means success, so `failure()` is empty.
 | Store `loadError()`, `saveError()`, `loadWarning()` strings | `STORAGE` | |
 | `build()`'s `IllegalStateException`, store file in use | `CONFLICT` | |
 | `build()`'s `IllegalStateException`, store not lockable | `STORAGE` | |
+| `CookieFile.read`'s `IOException` | `INVALID_INPUT` | A sign-in from the file still reports `UNAUTHORIZED`. |
 
 An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in the rows above.
 `CryptoException` and `VaultException` stay until the shared vault moves to AVP 0.5; their failures

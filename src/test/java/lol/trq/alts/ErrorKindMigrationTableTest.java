@@ -87,6 +87,7 @@ class ErrorKindMigrationTableTest {
         rows.put("Store loadError(), saveError(), loadWarning() strings", "STORAGE");
         rows.put("build()'s IllegalStateException, store file in use", "CONFLICT");
         rows.put("build()'s IllegalStateException, store not lockable", "STORAGE");
+        rows.put("CookieFile.read's IOException", "INVALID_INPUT");
         return rows;
     }
 
