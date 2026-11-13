@@ -64,8 +64,10 @@ public final class AvpBytes {
 
     /**
      * Compares two byte strings for equality in time that does not depend on where they differ ({@link
-     * MessageDigest#isEqual}). Every key, hash and repository id comparison goes through this or {@link
-     * #same(String, String)}.
+     * MessageDigest#isEqual}). Every direct comparison of a key, hash or repository id goes through this or
+     * {@link #same(String, String)}. Set lookups of public keys and ids (the duplicate, removal and member
+     * checks of {@link ManifestRules}) use hashing instead, which is acceptable because the values are
+     * public.
      *
      * @param a the first
      * @param b the second
