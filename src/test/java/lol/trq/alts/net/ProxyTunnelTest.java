@@ -155,6 +155,37 @@ class ProxyTunnelTest {
         assertEquals(0, http.tunnelFactoryCount(), "and no tunnel factory outlives the close");
     }
 
+    /**
+     * Two runtimes that happen to name the same proxy and credential still keep their tunnels apart: the
+     * pool is the transport's, so each opens its own, and closing one runtime's leaves the other's
+     * working.
+     */
+    @Test
+    void twoTransportsOnOneRouteNeverShareATunnel() throws Exception {
+        proxy = new ConnectProxy(CREDENTIAL);
+        bind(scope -> throughProxy().withCredentials("user", "pass".toCharArray()));
+        HttpTransport first = http;
+        HttpTransport second = TestTransports.trusting(
+                scope -> throughProxy().withCredentials("user", "pass".toCharArray()), tls.trustingFactory());
+        try {
+            first.get(originUrl(), null, PROFILE);
+            second.get(originUrl(), null, PROFILE);
+            assertEquals(2, proxy.requestLines().size(), "each transport opened its own tunnel");
+
+            first.close();
+            for (int i = 0; i < 200 && proxy.tunnelsClosedByClient() == 0; i++) {
+                Thread.sleep(10);
+            }
+            assertEquals(1, proxy.tunnelsClosedByClient(), "closing one closed only its own tunnel");
+
+            assertNotNull(second.get(originUrl(), null, PROFILE), "the other's tunnel still works");
+            assertEquals(2, proxy.requestLines().size(), "and it was reused rather than reopened");
+            assertEquals(1, proxy.tunnelsClosedByClient());
+        } finally {
+            second.close();
+        }
+    }
+
     @Test
     void anHttpsRequestThroughAnAuthenticatingProxySucceeds() throws Exception {
         proxy = new ConnectProxy(CREDENTIAL);
