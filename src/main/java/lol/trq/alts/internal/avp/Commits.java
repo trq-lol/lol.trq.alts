@@ -2,7 +2,6 @@ package lol.trq.alts.internal.avp;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import java.security.MessageDigest;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -190,7 +189,7 @@ public final class Commits {
         if (!shapeOk(c)) {
             return false;
         }
-        return MessageDigest.isEqual(id(c), c.commitId())
+        return AvpBytes.same(id(c), c.commitId())
                 && Ed25519Strict.verify(c.author(), sigMessage(c.commitId()), c.authorSignature());
     }
 

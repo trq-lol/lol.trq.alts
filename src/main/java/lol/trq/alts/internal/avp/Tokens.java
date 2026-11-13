@@ -230,9 +230,9 @@ public final class Tokens {
     public static boolean verifyInvite(InviteToken t, String repoId, long nowMillis) {
         Acceptance a = t.acceptance();
         return verifyAcceptance(a, a.hostKey())
-                && a.repoId().equals(repoId)
-                && Arrays.equals(a.memberKey(), t.ed25519PublicKey())
-                && Arrays.equals(a.hostKey(), t.homeHostKey())
+                && AvpBytes.same(a.repoId(), repoId)
+                && AvpBytes.same(a.memberKey(), t.ed25519PublicKey())
+                && AvpBytes.same(a.hostKey(), t.homeHostKey())
                 && a.expiresAt() > nowMillis;
     }
 

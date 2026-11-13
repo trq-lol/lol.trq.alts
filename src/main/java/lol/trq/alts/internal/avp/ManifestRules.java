@@ -1,7 +1,6 @@
 package lol.trq.alts.internal.avp;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -147,10 +146,10 @@ public final class ManifestRules {
                 || s.keyEpoch() != 0
                 || !s.removals().isEmpty()
                 || s.members().size() != 1
-                || !Arrays.equals(s.members().get(0).ed25519PublicKey(), s.ownerKey())) {
+                || !AvpBytes.same(s.members().get(0).ed25519PublicKey(), s.ownerKey())) {
             return false;
         }
-        return Manifest.deriveRepoId(s.ownerKey(), s.genesisNonce()).equals(s.repoId());
+        return AvpBytes.same(Manifest.deriveRepoId(s.ownerKey(), s.genesisNonce()), s.repoId());
     }
 
     /** Rule 5: the content rules, and against {@code prev} when there is one. */
@@ -159,7 +158,7 @@ public final class ManifestRules {
             return false;
         }
         long owners = s.members().stream()
-                .filter(x -> Arrays.equals(x.ed25519PublicKey(), s.ownerKey()))
+                .filter(x -> AvpBytes.same(x.ed25519PublicKey(), s.ownerKey()))
                 .count();
         if (owners != 1) {
             return false;
@@ -180,8 +179,8 @@ public final class ManifestRules {
             return true;
         }
 
-        if (!s.repoId().equals(prev.repoId())
-                || !Arrays.equals(s.ownerKey(), prev.ownerKey())
+        if (!AvpBytes.same(s.repoId(), prev.repoId())
+                || !AvpBytes.same(s.ownerKey(), prev.ownerKey())
                 || !s.schemeId().equals(prev.schemeId())
                 || s.genesisNonce().length != 0) {
             return false;
@@ -211,7 +210,7 @@ public final class ManifestRules {
             if (s.hasMember(x.ed25519PublicKey())) {
                 continue;
             }
-            if (Arrays.equals(x.ed25519PublicKey(), s.ownerKey())
+            if (AvpBytes.same(x.ed25519PublicKey(), s.ownerKey())
                     || !added.contains(AvpBytes.base64(x.ed25519PublicKey()))) {
                 return false;
             }

@@ -3,7 +3,6 @@ package lol.trq.alts.internal.avp;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -124,7 +123,7 @@ public final class Manifest {
          */
         public Optional<MemberEntry> member(byte[] key) {
             return members.stream()
-                    .filter(m -> Arrays.equals(m.ed25519PublicKey(), key))
+                    .filter(m -> AvpBytes.same(m.ed25519PublicKey(), key))
                     .findFirst();
         }
 
@@ -145,7 +144,7 @@ public final class Manifest {
          * @return whether a host has it
          */
         public boolean hasHost(byte[] key) {
-            return hosts.stream().anyMatch(h -> Arrays.equals(h.hostKey(), key));
+            return hosts.stream().anyMatch(h -> AvpBytes.same(h.hostKey(), key));
         }
 
         /**
@@ -156,7 +155,7 @@ public final class Manifest {
          */
         public Optional<Removal> removalOf(byte[] key) {
             return removals.stream()
-                    .filter(r -> Arrays.equals(r.memberKey(), key))
+                    .filter(r -> AvpBytes.same(r.memberKey(), key))
                     .findFirst();
         }
     }
@@ -301,7 +300,7 @@ public final class Manifest {
             return false;
         }
         try {
-            return MessageDigest.isEqual(next.state().prevManifestHash(), hash(prev));
+            return AvpBytes.same(next.state().prevManifestHash(), hash(prev));
         } catch (RuntimeException malformed) {
             return false;
         }

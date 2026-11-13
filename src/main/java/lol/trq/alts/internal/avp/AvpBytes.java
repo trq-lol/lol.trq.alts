@@ -1,5 +1,7 @@
 package lol.trq.alts.internal.avp;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -58,6 +60,30 @@ public final class AvpBytes {
             }
         }
         return out;
+    }
+
+    /**
+     * Compares two byte strings for equality in time that does not depend on where they differ ({@link
+     * MessageDigest#isEqual}). Every key, hash and repository id comparison goes through this or {@link
+     * #same(String, String)}.
+     *
+     * @param a the first
+     * @param b the second
+     * @return whether they are equal
+     */
+    public static boolean same(byte[] a, byte[] b) {
+        return MessageDigest.isEqual(a, b);
+    }
+
+    /**
+     * {@link #same(byte[], byte[])} over the UTF-8 bytes of two strings, for repository ids.
+     *
+     * @param a the first
+     * @param b the second
+     * @return whether they are equal
+     */
+    public static boolean same(String a, String b) {
+        return same(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
     }
 
     /**
