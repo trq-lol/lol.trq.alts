@@ -318,6 +318,24 @@ class DeviceCodeLoginTest {
      * A device-code login registers its wait and each poll with the transport so close() can end them.
      * Once the login ends on its own, whichever way, nothing of it may stay registered.
      */
+    /**
+     * A host's executor can be shut down while the runtime is still open. The next poll is then refused,
+     * and the login must fail rather than wait for a poll that will never run.
+     */
+    @Test
+    void aLoginWhoseExecutorIsShutDownBetweenPollsFails() throws Exception {
+        chain.deviceTokenError("authorization_pending");
+        ExecutorService host = Executors.newSingleThreadExecutor();
+        HttpTransport transport = TestTransports.on(null, host);
+
+        CompletableFuture<LoginResult> login = registering(transport).loginDeviceCode(prompt, LoginMode.DIRECT);
+        waitUntil(() -> chain.deviceTokenPolls() >= 1);
+        host.shutdown();
+
+        assertFalse(login.get(10, TimeUnit.SECONDS).success(), "the login ended rather than hung");
+        assertNull(injected.get());
+    }
+
     @Test
     void aSucceededDeviceCodeLoginLeavesNothingRegistered() throws Exception {
         chain.deviceTokenError("authorization_pending");
