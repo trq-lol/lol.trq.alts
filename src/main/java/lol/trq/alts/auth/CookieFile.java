@@ -6,6 +6,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.List;
@@ -69,7 +70,16 @@ public final class CookieFile {
         Objects.requireNonNull(file, "file");
 
         String name = displayName(file);
+        try {
+            return readChecked(file, name);
+        } catch (SecurityException | InvalidPathException denied) {
+            // A security manager's or a path parser's message can name the path; neither is kept.
+            throw refused(name + ": could not be read");
+        }
+    }
 
+    /** The checks and the read, any of which may fail with a refusal naming the file only. */
+    private static String readChecked(Path file, String name) {
         // isRegularFile answers both questions at once, and answers them false for a directory, a device,
         // a named pipe, and anything else that would otherwise be opened and read until it felt like
         // stopping. A symlink to a regular file is followed, which is what a user picking one intends.
