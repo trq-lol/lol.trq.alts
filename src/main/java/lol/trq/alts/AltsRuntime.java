@@ -756,12 +756,15 @@ public final class AltsRuntime<H> implements AutoCloseable {
          * (and the same on {@link HostSecrets}).
          *
          * <p>Each store file is locked for the runtime's lifetime. When another runtime, in this process
-         * or another, holds either file, this fails with an {@link IllegalStateException} saying the
-         * store file is in use (the message names the file, not its path) and holds no lock afterwards.
+         * or another, holds either file, this fails with an {@link AltsException} of kind
+         * {@link AltsFailure.Kind#CONFLICT} saying the store file is in use (the message names the file,
+         * not its path) and holds no lock afterwards; a directory that cannot be created or locked fails
+         * it with kind {@link AltsFailure.Kind#STORAGE}.
          *
          * @return the constructed runtime, which the host closes when done with it
          * @throws NullPointerException if a required seam is missing
-         * @throws IllegalStateException if a store file is in use by another runtime or cannot be locked
+         * @throws AltsException of kind {@link AltsFailure.Kind#CONFLICT} if a store file is in use by another
+         *     runtime, or {@link AltsFailure.Kind#STORAGE} if one cannot be locked
          */
         public AltsRuntime<H> build() {
             return new AltsRuntime<>(this);

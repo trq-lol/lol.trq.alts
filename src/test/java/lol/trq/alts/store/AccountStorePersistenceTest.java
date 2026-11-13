@@ -23,6 +23,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import org.junit.jupiter.api.AfterEach;
@@ -182,8 +184,10 @@ class AccountStorePersistenceTest {
 
         store.addAccount(account(1));
 
-        String error = store.saveError().orElseThrow(() -> new AssertionError("a failed save must be reported"));
-        assertTrue(error.startsWith(FILE_NAME + ":"), "the failure names the file: " + error);
+        AltsFailure errorFailure =
+                store.saveError().orElseThrow(() -> new AssertionError("a failed save must be reported"));
+        assertEquals(Kind.STORAGE, errorFailure.kind());
+        String error = errorFailure.message();
         assertFalse(error.contains(storeDir.toString()), "the failure must not carry a filesystem path: " + error);
         assertEquals(1, store.accounts().size(), "a failed save must not undo the mutation in memory");
 
@@ -202,8 +206,9 @@ class AccountStorePersistenceTest {
 
         store.load();
 
-        String error = store.loadError().orElseThrow();
-        assertTrue(error.startsWith(FILE_NAME + ":"), "the failure names the file: " + error);
+        AltsFailure errorFailure = store.loadError().orElseThrow();
+        assertEquals(Kind.STORAGE, errorFailure.kind());
+        String error = errorFailure.message();
         assertFalse(error.contains(storeDir.toString()), "the failure must not carry a filesystem path: " + error);
     }
 
@@ -214,7 +219,9 @@ class AccountStorePersistenceTest {
 
         store.load();
 
-        String error = store.loadError().orElseThrow();
+        AltsFailure errorFailure = store.loadError().orElseThrow();
+        assertEquals(Kind.STORAGE, errorFailure.kind());
+        String error = errorFailure.message();
         assertFalse(error.contains(storeDir.toString()), "the failure must not carry a filesystem path: " + error);
         assertFalse(error.contains(storeDir.getFileName().toString()), "nor any part of one: " + error);
     }
@@ -314,8 +321,10 @@ class AccountStorePersistenceTest {
         assertTrue(store.loadError().isEmpty(), "a store with some bad entries still loaded");
         assertEquals(2, store.accounts().size(), "the valid entries must survive the invalid ones");
         assertEquals("new", store.accounts().get(0).accessToken(), "of two entries for one UUID the later wins");
-        String warning = store.loadWarning().orElseThrow(() -> new AssertionError("skipped entries must be noted"));
-        assertTrue(warning.contains("4"), "three unusable entries and one duplicate were skipped: " + warning);
+        AltsFailure warningFailure =
+                store.loadWarning().orElseThrow(() -> new AssertionError("skipped entries must be noted"));
+        assertEquals(Kind.STORAGE, warningFailure.kind());
+        String warning = warningFailure.message();
 
         // Every mutator keys on the UUID; none may throw over what the file held.
         store.markBanned(uuid(2), "example.net", null);

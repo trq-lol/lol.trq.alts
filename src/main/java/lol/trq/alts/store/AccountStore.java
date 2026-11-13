@@ -16,6 +16,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.UnaryOperator;
+import lol.trq.alts.AltsFailure;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.BanInfo;
 import lol.trq.alts.spi.StoreKeyProvider;
@@ -81,7 +82,7 @@ public final class AccountStore {
     private final List<AltAccount> accounts = new CopyOnWriteArrayList<>();
 
     private volatile AltAccount currentAccount;
-    private volatile String loadWarning;
+    private volatile AltsFailure loadWarning;
 
     static {
         // The runtime, in another package, opens and closes stores through this bridge only, so neither
@@ -101,7 +102,8 @@ public final class AccountStore {
      *
      * @param directory the directory the store file lives in; created when missing
      * @return the open store, which the caller closes
-     * @throws IllegalStateException when the store file is in use by another owner or cannot be locked;
+     * @throws lol.trq.alts.AltsException of kind {@code CONFLICT} when the store file is in use by another owner,
+     *     or {@code STORAGE} when it cannot be locked;
      *     the message names the file, never its path
      */
     static AccountStore open(Path directory) {
@@ -132,7 +134,8 @@ public final class AccountStore {
      * @param writeDelay how long mutations are gathered for before one write covers them; null, zero, or
      *     negative writes synchronously inside the mutator
      * @return the open store, which the caller closes
-     * @throws IllegalStateException when the store file is in use by another owner or cannot be locked;
+     * @throws lol.trq.alts.AltsException of kind {@code CONFLICT} when the store file is in use by another owner,
+     *     or {@code STORAGE} when it cannot be locked;
      *     the message names the file, never its path
      */
     static AccountStore open(
@@ -216,14 +219,14 @@ public final class AccountStore {
      * copied until it is discarded. A successful write after a discard clears this, since the file on
      * disk is then the one just written.
      *
-     * <p>The description is the file's name and a fixed phrase. It never carries a filesystem path, so
-     * it is safe to show and to log.
+     * <p>Its message is the file's name and a fixed phrase. It never carries a filesystem path, so it
+     * is safe to show and to log.
      *
-     * @return the failure description, or empty when the last load succeeded or found no file, or the
+     * @return the failure, of kind {@link AltsFailure.Kind#STORAGE}, or empty when the last load succeeded or found no file, or the
      *     store has been written successfully since
      * @since 1.0.0
      */
-    public Optional<String> loadError() {
+    public Optional<AltsFailure> loadError() {
         return Optional.ofNullable(file.loadError());
     }
 
@@ -234,10 +237,11 @@ public final class AccountStore {
      * {@link #loadError()} this does not mean the store failed to load — every valid account is in
      * {@link #accounts()}.
      *
-     * @return the note, or empty when the last load skipped nothing
+     * @return the note, as a failure of kind {@link AltsFailure.Kind#STORAGE}, or empty when the last
+     *     load skipped nothing
      * @since 1.0.0
      */
-    public Optional<String> loadWarning() {
+    public Optional<AltsFailure> loadWarning() {
         return Optional.ofNullable(loadWarning);
     }
 
@@ -245,7 +249,7 @@ public final class AccountStore {
      * Returns why the most recent write did not reach the disk, if it did not. While this is set the
      * file is whatever the last successful write left — never a partial one — and the accounts in
      * memory are ahead of it; the write is retried by the next mutation, {@link #save()}, or
-     * {@link #flush()}, and a success clears this. Like {@link #loadError()}, the description carries no
+     * {@link #flush()}, and a success clears this. Like {@link #loadError()}, the message carries no
      * filesystem path.
      *
      * <p>Two failures are not retried by writing: while the last {@link #load()} failed on a file that
@@ -253,10 +257,10 @@ public final class AccountStore {
      * {@link #discardUnreadable()} (see {@link #loadError()}); and once the runtime is closed nothing is
      * written at all.
      *
-     * @return the failure description, or empty when the last write succeeded
+     * @return the failure, of kind {@link AltsFailure.Kind#STORAGE}, or empty when the last write succeeded
      * @since 1.0.0
      */
-    public Optional<String> saveError() {
+    public Optional<AltsFailure> saveError() {
         return Optional.ofNullable(file.saveError());
     }
 
@@ -457,8 +461,10 @@ public final class AccountStore {
                 accounts.addAll(valid);
             });
             if (skipped[0] > 0 && outcome != StoreFile.LoadOutcome.FAILED) {
-                loadWarning = file.fileName() + ": skipped " + skipped[0] + " invalid or duplicate "
-                        + (skipped[0] == 1 ? "entry" : "entries");
+                loadWarning = AltsFailure.of(
+                        AltsFailure.Kind.STORAGE,
+                        file.fileName() + ": skipped " + skipped[0] + " invalid or duplicate "
+                                + (skipped[0] == 1 ? "entry" : "entries"));
             } else {
                 loadWarning = null;
             }

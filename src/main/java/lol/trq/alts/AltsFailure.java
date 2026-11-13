@@ -118,7 +118,10 @@ public record AltsFailure(
          */
         INVALID_INPUT,
 
-        /** The service refused the request because it conflicts with the current state ({@code 409}). */
+        /**
+         * The request conflicts with the current state: a service answered {@code 409}, or a store file
+         * is held by another runtime, in this process or another.
+         */
         CONFLICT,
 
         /**

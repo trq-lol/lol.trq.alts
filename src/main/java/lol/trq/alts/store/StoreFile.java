@@ -26,6 +26,8 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure;
 import lol.trq.alts.spi.StoreKeyProvider;
 
 /**
@@ -95,8 +97,8 @@ final class StoreFile {
     private final FileChannel lockChannel;
     private final FileLock lock;
 
-    private volatile String loadError;
-    private volatile String saveError;
+    private volatile AltsFailure loadError;
+    private volatile AltsFailure saveError;
     private volatile boolean closed;
 
     // A test seam: runs inside a write, with the I/O lock held, just before the file is replaced, so a test
@@ -156,8 +158,9 @@ final class StoreFile {
      *     loaded and resealed under the host's; applies only while a key provider is installed
      * @param writeDelay the coalescing window; null, zero, or negative writes synchronously
      * @return the open, locked file
-     * @throws IllegalStateException when another owner holds the lock, or the lock could not be taken;
-     *     the message names the file, never its path
+     * @throws AltsException of kind {@link AltsFailure.Kind#CONFLICT} when another owner holds the lock,
+     *     or {@link AltsFailure.Kind#STORAGE} when the lock could not be taken; the message names the file,
+     *     never its path
      */
     static StoreFile open(
             Path directory,
@@ -176,7 +179,9 @@ final class StoreFile {
                     directory.resolve(fileName + LOCK_SUFFIX), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
         } catch (IOException | RuntimeException failure) {
             // The cause's message is the absolute path; this one names the file only.
-            throw new IllegalStateException("store file " + fileName + " could not be locked", failure);
+            throw new AltsException(
+                    AltsFailure.of(AltsFailure.Kind.STORAGE, "store file " + fileName + " could not be locked"),
+                    failure);
         }
         FileLock taken;
         try {
@@ -185,11 +190,14 @@ final class StoreFile {
             taken = null;
         } catch (IOException | RuntimeException failure) {
             closeQuietly(channel);
-            throw new IllegalStateException("store file " + fileName + " could not be locked", failure);
+            throw new AltsException(
+                    AltsFailure.of(AltsFailure.Kind.STORAGE, "store file " + fileName + " could not be locked"),
+                    failure);
         }
         if (taken == null) {
             closeQuietly(channel);
-            throw new IllegalStateException("store file " + fileName + " is in use by another runtime");
+            throw new AltsException(
+                    AltsFailure.Kind.CONFLICT, "store file " + fileName + " is in use by another runtime");
         }
         return new StoreFile(
                 directory, fileName, keyBinding, keyProvider, migrateFromMachineKey, writeDelay, channel, taken);
@@ -311,19 +319,19 @@ final class StoreFile {
     /**
      * Returns why the last load could not read an existing file.
      *
-     * @return the failure description, or null when the last load succeeded or found no file, or when
+     * @return the failure, of kind STORAGE, or null when the last load succeeded or found no file, or when
      *     the store has been written successfully since
      */
-    String loadError() {
+    AltsFailure loadError() {
         return loadError;
     }
 
     /**
      * Returns why the last write did not reach the disk.
      *
-     * @return the failure description, or null when the last write succeeded
+     * @return the failure, of kind STORAGE, or null when the last write succeeded
      */
-    String saveError() {
+    AltsFailure saveError() {
         return saveError;
     }
 
@@ -343,7 +351,7 @@ final class StoreFile {
      */
     void submit(Supplier<String> plaintext) {
         if (closed) {
-            saveError = fileName + ": not written, because the store is closed";
+            saveError = storage(fileName + ": not written, because the store is closed");
             return;
         }
         long delay = writeDelayMillis;
@@ -379,7 +387,7 @@ final class StoreFile {
             if (writesRefused) {
                 // The file on disk was not read. Writing what is in memory now would replace everything
                 // in it with whatever was added since, under whatever key this store happens to hold.
-                saveError = refusal;
+                saveError = storage(refusal);
                 retain(next);
                 return;
             }
@@ -398,10 +406,10 @@ final class StoreFile {
                 // replaced no longer describes it.
                 loadError = null;
             } catch (WriteFailure failure) {
-                saveError = fileName + ": " + failure.getMessage();
+                saveError = storage(fileName + ": " + failure.getMessage());
                 retain(next);
             } catch (RuntimeException failure) {
-                saveError = fileName + ": could not be written";
+                saveError = storage(fileName + ": could not be written");
                 retain(next);
             }
         }
@@ -421,7 +429,7 @@ final class StoreFile {
             String name = fileName;
             if (closed) {
                 // Not unreadable: the file was never looked at, and the next owner may read it.
-                loadError = name + ": not read, because the store is closed";
+                loadError = storage(name + ": not read, because the store is closed");
                 return LoadOutcome.FAILED;
             }
             Path file = directory.resolve(name);
@@ -592,7 +600,7 @@ final class StoreFile {
      * @return {@link LoadOutcome#FAILED}
      */
     private LoadOutcome unreadable(String name, String reason, boolean copyAside) {
-        loadError = name + ": " + reason;
+        loadError = storage(name + ": " + reason);
         knownGood = false;
         unreadableOnDisk = true;
         writesRefused = true;
@@ -634,7 +642,7 @@ final class StoreFile {
             try {
                 preserveUnreadable(directory, directory.resolve(name), name);
             } catch (WriteFailure notCopied) {
-                saveError = name + ": " + notCopied.getMessage();
+                saveError = storage(name + ": " + notCopied.getMessage());
                 return false;
             }
             allowWrites();
@@ -994,6 +1002,17 @@ final class StoreFile {
     private record Pending(long order, Supplier<String> plaintext) {}
 
     /** A write that did not reach the disk; the message is a fixed, path-free phrase. */
+    /**
+     * Wraps a store failure's description, built here from the file's name and a fixed phrase, as the
+     * {@link AltsFailure} of kind {@link AltsFailure.Kind#STORAGE} the stores report, recorded now.
+     *
+     * @param description the description; never a path
+     * @return the failure
+     */
+    private static AltsFailure storage(String description) {
+        return AltsFailure.of(AltsFailure.Kind.STORAGE, description);
+    }
+
     private static final class WriteFailure extends Exception {
 
         private static final long serialVersionUID = 1L;

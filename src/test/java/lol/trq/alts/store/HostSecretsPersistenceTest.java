@@ -11,6 +11,8 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -83,7 +85,10 @@ class HostSecretsPersistenceTest {
 
         secrets.put("feature.api-key", "value");
 
-        String error = secrets.saveError().orElseThrow(() -> new AssertionError("a failed save must be reported"));
+        AltsFailure errorFailure =
+                secrets.saveError().orElseThrow(() -> new AssertionError("a failed save must be reported"));
+        assertEquals(Kind.STORAGE, errorFailure.kind());
+        String error = errorFailure.message();
         assertFalse(error.contains(storeDir.toString()), "the failure must not carry a filesystem path: " + error);
 
         Files.delete(inside);
@@ -101,7 +106,9 @@ class HostSecretsPersistenceTest {
 
         secrets.load();
 
-        String error = secrets.loadError().orElseThrow();
+        AltsFailure errorFailure = secrets.loadError().orElseThrow();
+        assertEquals(Kind.STORAGE, errorFailure.kind());
+        String error = errorFailure.message();
         assertFalse(error.contains(storeDir.toString()), "the failure must not carry a filesystem path: " + error);
 
         assertArrayEquals(

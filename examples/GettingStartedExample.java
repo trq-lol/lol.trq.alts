@@ -127,11 +127,11 @@ public final class GettingStartedExample {
     public static void warnIfTheStoreDidNotLoad(AltsRuntime<MyHandle> alts) {
         alts.store()
                 .loadError()
-                .ifPresent(reason -> alts.toasts()
+                .ifPresent(failure -> alts.toasts()
                         .toast(
                                 ToastSink.Level.ERROR,
                                 "Accounts not loaded",
-                                "The saved file could not be read: " + reason,
+                                "The saved file could not be read: " + failure.message(),
                                 8000));
     }
 

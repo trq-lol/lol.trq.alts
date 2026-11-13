@@ -109,9 +109,9 @@ class AltsRuntimeStoresTest {
         try (AltsRuntime<Object> first = builder(dirA).build()) {
             first.store().addAccount(account(ALEX, "Alex"));
 
-            IllegalStateException refused = assertThrows(
-                    IllegalStateException.class, () -> builder(dirA).build());
-            assertTrue(refused.getMessage().contains("in use"), "the failure says why: " + refused.getMessage());
+            AltsException refused =
+                    assertThrows(AltsException.class, () -> builder(dirA).build());
+            assertEquals(AltsFailure.Kind.CONFLICT, refused.kind(), "the failure says why by its kind");
             assertFalse(refused.getMessage().contains(dirA.toString()), "and names no path: " + refused.getMessage());
 
             first.store().addAccount(account(STEVE, "Steve"));
@@ -157,7 +157,7 @@ class AltsRuntimeStoresTest {
                 .toastSink((level, title, description, durationMs) -> toastsA.add(title))
                 .build()) {
             assertThrows(
-                    IllegalStateException.class,
+                    AltsException.class,
                     () -> builder(dirA)
                             .accountEndpoints(nowhere)
                             .proxyProvider(scope -> {
@@ -214,7 +214,10 @@ class AltsRuntimeStoresTest {
     void aBuildRefusedOnTheSecondFileReleasesTheFirst() {
         HostSecrets held = StoreTestHooks.openHostSecrets(dirA);
         try {
-            assertThrows(IllegalStateException.class, () -> builder(dirA).build());
+            assertEquals(
+                    AltsFailure.Kind.CONFLICT,
+                    assertThrows(AltsException.class, () -> builder(dirA).build())
+                            .kind());
 
             // The refused build had already locked the account file; it must have let it go again.
             AccountStore accounts = StoreTestHooks.openAccountStore(dirA);

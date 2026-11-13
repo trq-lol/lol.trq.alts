@@ -13,6 +13,8 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import org.junit.jupiter.api.Test;
@@ -58,9 +60,8 @@ class StoreLockTest {
             first.load();
             first.addAccount(alex());
 
-            IllegalStateException refused =
-                    assertThrows(IllegalStateException.class, () -> AccountStore.open(storeDir));
-            assertTrue(refused.getMessage().contains("accounts.dat"), "the refusal names the file");
+            AltsException refused = assertThrows(AltsException.class, () -> AccountStore.open(storeDir));
+            assertEquals(Kind.CONFLICT, refused.kind(), "another owner holds the file");
             assertFalse(
                     refused.getMessage().contains(storeDir.toString()), "and never its path: " + refused.getMessage());
 
@@ -80,8 +81,14 @@ class StoreLockTest {
         AccountStore accounts = AccountStore.open(storeDir);
         HostSecrets secrets = HostSecrets.open(storeDir);
         try {
-            assertThrows(IllegalStateException.class, () -> HostSecrets.open(storeDir));
-            assertThrows(IllegalStateException.class, () -> AccountStore.open(storeDir));
+            assertEquals(
+                    Kind.CONFLICT,
+                    assertThrows(AltsException.class, () -> HostSecrets.open(storeDir))
+                            .kind());
+            assertEquals(
+                    Kind.CONFLICT,
+                    assertThrows(AltsException.class, () -> AccountStore.open(storeDir))
+                            .kind());
         } finally {
             secrets.close();
             accounts.close();
@@ -206,10 +213,13 @@ class StoreLockTest {
         Thread closing = Thread.ofPlatform().start(first::close);
         try {
             assertTrue(writing.await(10, TimeUnit.SECONDS), "close() reached its final write");
-            assertThrows(
-                    IllegalStateException.class,
-                    () -> AccountStore.open(storeDir),
-                    "no one else may open the file while its last change is still being written");
+            assertEquals(
+                    Kind.CONFLICT,
+                    assertThrows(
+                                    AltsException.class,
+                                    () -> AccountStore.open(storeDir),
+                                    "no one else may open the file while its last change is still being written")
+                            .kind());
         } finally {
             release.countDown();
             closing.join(TimeUnit.SECONDS.toMillis(10));

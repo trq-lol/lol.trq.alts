@@ -86,7 +86,8 @@ public final class StoreAccess {
          * @param keyProvider the host key provider, or null for the machine-derived key
          * @param migrateFromMachineKey whether a file from before the key provider may be resealed
          * @return the open store
-         * @throws IllegalStateException when the file is in use by another owner or cannot be locked
+         * @throws lol.trq.alts.AltsException of kind {@code CONFLICT} when the file is in use by another owner, or
+         *     {@code STORAGE} when it cannot be locked
          */
         AccountStore openAccounts(
                 Path directory,
@@ -104,7 +105,8 @@ public final class StoreAccess {
          * @param keyProvider the host key provider, or null for the machine-derived key
          * @param migrateFromMachineKey whether a file from before the key provider may be resealed
          * @return the open store
-         * @throws IllegalStateException when the file is in use by another owner or cannot be locked
+         * @throws lol.trq.alts.AltsException of kind {@code CONFLICT} when the file is in use by another owner, or
+         *     {@code STORAGE} when it cannot be locked
          */
         HostSecrets openSecrets(
                 Path directory,

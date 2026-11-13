@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import lol.trq.alts.AltsFailure;
 import lol.trq.alts.spi.StoreKeyProvider;
 
 /**
@@ -76,7 +77,8 @@ public final class HostSecrets {
      *
      * @param directory the directory the store file lives in; created when missing
      * @return the open store, which the caller closes
-     * @throws IllegalStateException when the store file is in use by another owner or cannot be locked;
+     * @throws lol.trq.alts.AltsException of kind {@code CONFLICT} when the store file is in use by another owner,
+     *     or {@code STORAGE} when it cannot be locked;
      *     the message names the file, never its path
      */
     static HostSecrets open(Path directory) {
@@ -96,7 +98,8 @@ public final class HostSecrets {
      * @param migrateFromMachineKey whether to accept and reseal a file from before the key provider
      * @param writeDelay the coalescing window; null, zero, or negative writes synchronously
      * @return the open store, which the caller closes
-     * @throws IllegalStateException when the store file is in use by another owner or cannot be locked;
+     * @throws lol.trq.alts.AltsException of kind {@code CONFLICT} when the store file is in use by another owner,
+     *     or {@code STORAGE} when it cannot be locked;
      *     the message names the file, never its path
      */
     static HostSecrets open(
@@ -175,26 +178,26 @@ public final class HostSecrets {
      * with the account store, an unreadable file is not an empty one: it is copied aside when the load
      * fails (unless it failed only for want of the key), and nothing is written over it until a later
      * load succeeds or the host calls {@link #discardUnreadable()} — see
-     * {@link AccountStore#loadError()}. The description carries no filesystem path.
+     * {@link AccountStore#loadError()}. The message carries no filesystem path.
      *
-     * @return the failure description, or empty when the last load succeeded or found no file, or the
+     * @return the failure, of kind {@link AltsFailure.Kind#STORAGE}, or empty when the last load succeeded or found no file, or the
      *     store has been written successfully since
      * @since 1.0.0
      */
-    public Optional<String> loadError() {
+    public Optional<AltsFailure> loadError() {
         return Optional.ofNullable(file.loadError());
     }
 
     /**
      * Returns why the most recent write did not reach the disk, if it did not. The write is retried by
      * the next mutation, {@link #save()}, or {@link #flush()}, and a success clears this; a write refused
-     * because the last load failed, or because the store is closed, is not retried. The description
+     * because the last load failed, or because the store is closed, is not retried. The message
      * carries no filesystem path.
      *
-     * @return the failure description, or empty when the last write succeeded
+     * @return the failure, of kind {@link AltsFailure.Kind#STORAGE}, or empty when the last write succeeded
      * @since 1.0.0
      */
-    public Optional<String> saveError() {
+    public Optional<AltsFailure> saveError() {
         return Optional.ofNullable(file.saveError());
     }
 

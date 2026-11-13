@@ -9,6 +9,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.spi.StoreKeyProvider;
@@ -215,7 +217,9 @@ class StoreKeyProviderTest {
                 },
                 false);
 
-        String loadError = store.loadError().orElseThrow();
+        AltsFailure loadErrorFailure = store.loadError().orElseThrow();
+        assertEquals(Kind.STORAGE, loadErrorFailure.kind());
+        String loadError = loadErrorFailure.message();
         assertFalse(loadError.contains("keystore locked"), "a provider's message is not ours to publish: " + loadError);
         assertTrue(store.accounts().isEmpty(), "no fallback to the machine key while a provider is installed");
 
