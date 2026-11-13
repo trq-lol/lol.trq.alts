@@ -77,7 +77,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `importCredentials`. A host that pins accounts to proxies can now route a new account's first
   sign-in before any UUID exists. `routed` is abstract, so a host's own `AltLoginService`
   implementation has to add it; `BulkOptions` gains a sixth component, `Optional<String> routeTag`, and
-  keeps its five-argument constructor.
+  keeps its five-argument constructor. A blank tag is refused with `IllegalArgumentException` wherever
+  it is given: by `routed`, by `withRouteTag`, or in a `NetworkScope` or `BulkOptions` built directly.
 
 ### Removed
 

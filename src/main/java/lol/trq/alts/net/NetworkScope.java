@@ -52,12 +52,18 @@ public record NetworkScope(Purpose purpose, String accountUuid, String accountUs
     /**
      * Substitutes {@link Purpose#AUTH} for a missing purpose, so a scope always states one, and empty for
      * a missing route tag.
+     *
+     * @throws IllegalArgumentException if the route tag is present but blank: a provider must never be
+     *     handed a tag that names no route
      */
     public NetworkScope {
         if (purpose == null) {
             purpose = Purpose.AUTH;
         }
         routeTag = routeTag == null ? Optional.empty() : routeTag;
+        if (routeTag.isPresent() && routeTag.get().isBlank()) {
+            throw new IllegalArgumentException("a route tag must not be blank");
+        }
     }
 
     /**
@@ -77,6 +83,7 @@ public record NetworkScope(Purpose purpose, String accountUuid, String accountUs
      *
      * @param tag the host's route tag, or null for none
      * @return the tagged copy
+     * @throws IllegalArgumentException if {@code tag} is blank
      * @since 1.0.0
      */
     public NetworkScope withRouteTag(String tag) {
