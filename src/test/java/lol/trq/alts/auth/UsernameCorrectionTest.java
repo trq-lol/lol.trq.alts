@@ -26,6 +26,7 @@ import org.junit.jupiter.api.io.TempDir;
  * player has renamed, the stored record should pick that up rather than keep showing the name it had
  * when it was saved.
  */
+@org.junit.jupiter.api.Timeout(value = 60, unit = java.util.concurrent.TimeUnit.SECONDS)
 class UsernameCorrectionTest {
 
     private static final long NOW = 1_800_000_000_000L;
@@ -92,7 +93,7 @@ class UsernameCorrectionTest {
                 .withTokens("stored-access", "stored-refresh", NOW + 3_600_000L);
         localStore.seed(stored);
 
-        AccountStatus status = service().check(stored).get();
+        AccountStatus status = service().check(stored).get(10, java.util.concurrent.TimeUnit.SECONDS);
 
         assertEquals(State.VALID, status.state());
         assertEquals("NewName", status.account().username(), "the caller gets the current name back");
@@ -109,7 +110,7 @@ class UsernameCorrectionTest {
                 .withTokens("stored-access", "stored-refresh", NOW + 3_600_000L);
         localStore.seed(stored);
 
-        AccountStatus status = service().check(stored).get();
+        AccountStatus status = service().check(stored).get(10, java.util.concurrent.TimeUnit.SECONDS);
 
         assertEquals("SameName", status.account().username());
     }

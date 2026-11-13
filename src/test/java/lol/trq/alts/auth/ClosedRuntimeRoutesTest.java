@@ -29,6 +29,7 @@ import org.junit.jupiter.api.io.TempDir;
  * {@link Kind#CANCELLED}: on the runtime's own executor, which refuses the task, and on a host's
  * executor, which runs it into a closed transport.
  */
+@org.junit.jupiter.api.Timeout(value = 60, unit = java.util.concurrent.TimeUnit.SECONDS)
 class ClosedRuntimeRoutesTest {
 
     /** Nothing listens here, and nothing must try: a closed transport refuses before connecting. */

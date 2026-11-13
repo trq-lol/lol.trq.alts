@@ -44,6 +44,7 @@ import org.junit.jupiter.api.io.TempDir;
  * authorization address the library produced and calls the loopback redirect back, as the identity
  * service would after the user signed in.
  */
+@org.junit.jupiter.api.Timeout(value = 60, unit = java.util.concurrent.TimeUnit.SECONDS)
 class InteractiveLoginTest {
 
     @TempDir
