@@ -165,6 +165,37 @@ class FederationVectorsTest {
         }
     }
 
+    /** SPEC 8.4, in order: signature, repository, a member of the tip, not the owner. */
+    @Test
+    void theOwnerChecksALeaveRequestBeforeActingOnIt() {
+        List<JsonObject> states = Vectors.cases(Vectors.load("manifest.json"), "cases", 4);
+        Manifest.ManifestState members =
+                Manifest.signedFromJson(states.get(1).get("signedManifest")).state();
+        Manifest.ManifestState bobRemoved =
+                Manifest.signedFromJson(states.get(2).get("signedManifest")).state();
+        List<JsonObject> leaves = Vectors.cases(ROOT, "leaves", 2);
+        LeaveRequest alice = Tokens.leaveFromJson(obj(leaves.get(0), "decoded"));
+        LeaveRequest bob = Tokens.leaveFromJson(obj(leaves.get(1), "decoded"));
+
+        assertEquals(Tokens.LeaveVerdict.OK, Tokens.leaveVerdict(alice, members));
+        assertEquals(Tokens.LeaveVerdict.OK, Tokens.leaveVerdict(bob, members));
+        assertEquals(Tokens.LeaveVerdict.NOT_A_MEMBER, Tokens.leaveVerdict(bob, bobRemoved));
+
+        byte[] flipped = alice.signature();
+        flipped[5] ^= 0x01;
+        LeaveRequest forged = new LeaveRequest(alice.repoId(), alice.memberKey(), alice.at(), flipped);
+        assertEquals(Tokens.LeaveVerdict.BAD_SIGNATURE, Tokens.leaveVerdict(forged, members));
+
+        LeaveRequest elsewhere =
+                Tokens.signLeave("AAAAAAAAAAAAAAAAAAAAAA", alice.at(), hex(seedOf("alice"), "ed25519SeedHex"));
+        assertEquals(Tokens.LeaveVerdict.WRONG_REPOSITORY, Tokens.leaveVerdict(elsewhere, members));
+
+        LeaveRequest owner = Tokens.signLeave(alice.repoId(), alice.at(), hex(seedOf("owner"), "ed25519SeedHex"));
+        assertEquals(Tokens.LeaveVerdict.OWNER, Tokens.leaveVerdict(owner, members));
+        assertEquals("forbidden", Tokens.LeaveVerdict.OWNER.code().orElseThrow());
+        assertEquals("bad_request", Tokens.LeaveVerdict.WRONG_REPOSITORY.code().orElseThrow());
+    }
+
     @Test
     void theLinkCodesAndTheLinkGrantReproduce() {
         for (JsonObject c : Vectors.cases(ROOT, "linkCodes", 2)) {

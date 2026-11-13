@@ -35,17 +35,20 @@ import org.junit.jupiter.api.Test;
  *   <li><b>Commits</b>, by SPEC 7.5 rule 1: structure, repository id, the recomputed commit id and the
  *       strict author signature. Every commit step is checked; a step the host refuses as {@code
  *       bad_request} must fail it, and every other step must pass it.
- *   <li><b>Leave requests</b>, by the SPEC 8.4 checks the owner's client makes before it acts on one:
- *       signature, repository id, a member of the tip who is not the owner.
+ *   <li><b>Leave requests</b>, by {@link Tokens#leaveVerdict}: the SPEC 8.4 checks the owner's client
+ *       makes before it acts on one (signature, repository id, a member of the tip who is not the owner).
  * </ul>
  *
- * <p>The rest is host-only, or a client rule that lands with the vault client (T6), and is counted, not
- * replayed: {@code not_hosted} (SPEC 6.1 rule 6, asserted to be a state that passes rules 1 to 5 and does
- * not list the host); publication atomicity (SPEC 8.2, 8.3: the genesis or rotation commit carried with a
- * state, asserted to be a state that passes rules 1 to 5); the host's commit decisions beyond rule 1
- * (membership, epoch and removal cutoff, held commits, unknown parents or manifests, the head bound);
- * diverged owner states, which a host resolves by the tie rule (SPEC 6.5) and after which the host's view
- * is not the client's; and the final heads, held commits and pending leaves, which are host storage.
+ * <p>Only two classes are host-only, and they are counted, not replayed: {@code not_hosted} (SPEC 6.1 rule
+ * 6, asserted to be a state that passes rules 1 to 5 and does not list the host) and publication
+ * atomicity (SPEC 8.2, 8.3: the genesis or rotation commit carried with a state, asserted to be a state
+ * that passes rules 1 to 5). The final heads, held commits and pending leaves are host storage.
+ *
+ * <p>The rest are client rules that land with the vault client (T6), which must replay them against these
+ * same scenarios and raise the decided count accordingly: the SPEC 6.5 tie rule for diverged owner states
+ * ({@code DIVERGED_OWNER_STATE} and the {@code AFTER_DIVERGED_STATE} steps behind them, 26 steps), and the
+ * SPEC 7.5 rules 2 and 3 for commits (removal cutoff, membership and epoch), counted here past rule 1 by
+ * the host's verdict.
  */
 class AcceptanceReplayTest {
 
@@ -296,14 +299,9 @@ class AcceptanceReplayTest {
         String client;
         try {
             Tokens.LeaveRequest l = Tokens.leaveFromJson(obj(step, "item"));
-            Manifest.ManifestState tip = chain.get(chain.size() - 1).state();
-            if (!Tokens.verifyLeave(l) || !l.repoId().equals(tip.repoId())) {
-                client = "bad_request";
-            } else if (!tip.hasMember(l.memberKey()) || Arrays.equals(l.memberKey(), tip.ownerKey())) {
-                client = "forbidden";
-            } else {
-                client = "ok";
-            }
+            client = Tokens.leaveVerdict(l, chain.get(chain.size() - 1).state())
+                    .code()
+                    .orElse("ok");
         } catch (AltsException malformed) {
             client = "bad_request";
         }

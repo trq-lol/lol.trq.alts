@@ -2,6 +2,7 @@ package lol.trq.alts.internal.avp;
 
 import com.google.gson.JsonObject;
 import java.util.Arrays;
+import java.util.Optional;
 import java.util.regex.Pattern;
 import lol.trq.alts.internal.avp.AvpCrypto.WrapLabel;
 
@@ -462,6 +463,57 @@ public final class Tokens {
      */
     public static boolean verifyLeave(LeaveRequest l) {
         return Ed25519Strict.verify(l.memberKey(), leaveMessage(l), l.signature());
+    }
+
+    /** The outcome of the SPEC 8.4 checks on a leave request, with the SPEC 10.4 code for it. */
+    public enum LeaveVerdict {
+        /** The request may be acted on: the owner removes the member. */
+        OK(null),
+        /** The signature does not verify under {@code memberKey}. */
+        BAD_SIGNATURE("bad_request"),
+        /** The request names another repository. */
+        WRONG_REPOSITORY("bad_request"),
+        /** {@code memberKey} is not a member of the state checked against. */
+        NOT_A_MEMBER("forbidden"),
+        /** {@code memberKey} is the owner, who cannot leave. */
+        OWNER("forbidden");
+
+        private final String code;
+
+        LeaveVerdict(String code) {
+            this.code = code;
+        }
+
+        /**
+         * The SPEC 10.4 code of this verdict.
+         *
+         * @return the code, or empty for {@link #OK}
+         */
+        public Optional<String> code() {
+            return Optional.ofNullable(code);
+        }
+    }
+
+    /**
+     * The SPEC 8.4 checks on a leave request, in order, against the latest verified state: the signature
+     * verifies under {@code memberKey}, the repository matches, and {@code memberKey} is a member who is
+     * not the owner. The owner's client makes them before it acts on a pending request.
+     *
+     * @param l the leave request
+     * @param tip the latest verified manifest state
+     * @return the first check that fails, or {@link LeaveVerdict#OK}; never throws on a decoded request
+     */
+    public static LeaveVerdict leaveVerdict(LeaveRequest l, Manifest.ManifestState tip) {
+        if (!verifyLeave(l)) {
+            return LeaveVerdict.BAD_SIGNATURE;
+        }
+        if (!AvpBytes.same(l.repoId(), tip.repoId())) {
+            return LeaveVerdict.WRONG_REPOSITORY;
+        }
+        if (!tip.hasMember(l.memberKey())) {
+            return LeaveVerdict.NOT_A_MEMBER;
+        }
+        return AvpBytes.same(l.memberKey(), tip.ownerKey()) ? LeaveVerdict.OWNER : LeaveVerdict.OK;
     }
 
     /**
