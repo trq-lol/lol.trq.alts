@@ -6,11 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicBoolean;
 import lol.trq.alts.AltsRuntime;
+import lol.trq.alts.internal.ChildFirstLoader;
 import lol.trq.alts.spi.StoreKeyProvider;
 import lol.trq.alts.store.AccountStore;
 import lol.trq.alts.store.HostSecrets;
@@ -85,40 +84,10 @@ class StoreAccessTest {
         assertNotSame(foreign, StoreAccess.bridge().getClass().getClassLoader());
     }
 
-    /** Defines one class itself from the parent's bytes, so it shares the name but not the loader. */
-    private static final class ChildFirstLoader extends ClassLoader {
+    @Test
+    void theLibrarysOwnBridgeIsNotInstalledTwice() {
+        StoreAccess.Bridge installed = StoreAccess.bridge();
 
-        private final String own;
-
-        ChildFirstLoader(ClassLoader parent, String own) {
-            super(parent);
-            this.own = own;
-        }
-
-        @Override
-        protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
-            if (!name.equals(own)) {
-                return super.loadClass(name, resolve);
-            }
-            synchronized (getClassLoadingLock(name)) {
-                Class<?> loaded = findLoadedClass(name);
-                if (loaded == null) {
-                    String resource = name.replace('.', '/') + ".class";
-                    try (InputStream in = getParent().getResourceAsStream(resource)) {
-                        if (in == null) {
-                            throw new ClassNotFoundException(name);
-                        }
-                        byte[] bytes = in.readAllBytes();
-                        loaded = defineClass(name, bytes, 0, bytes.length);
-                    } catch (IOException unreadable) {
-                        throw new ClassNotFoundException(name, unreadable);
-                    }
-                }
-                if (resolve) {
-                    resolveClass(loaded);
-                }
-                return loaded;
-            }
-        }
+        assertThrows(IllegalStateException.class, () -> StoreAccess.install(installed));
     }
 }
