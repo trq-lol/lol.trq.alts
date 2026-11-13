@@ -132,7 +132,7 @@ public class AltAccountServiceImpl implements AltAccountService {
             String label, AltAccount account, Supplier<CompletableFuture<AccountStatus>> start) {
         if (http.isClosed()) {
             return CompletableFuture.completedFuture(AccountStatus.failure(
-                    account, State.UNKNOWN, AltsFailure.of(Kind.CANCELLED, "the runtime is closed")));
+                    account, State.UNKNOWN, AltsFailure.of(Kind.CANCELLED, label + ": the runtime is closed")));
         }
         try {
             return start.get().exceptionally(failure -> unexpectedFailure(label, account, failure));
