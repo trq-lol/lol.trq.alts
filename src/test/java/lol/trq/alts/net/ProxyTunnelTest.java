@@ -134,6 +134,27 @@ class ProxyTunnelTest {
         assertEquals(1, proxy.requestLines().size(), "a closed transport opens no new tunnel");
     }
 
+    /**
+     * A request that resolved its route just before the transport closed must not open a tunnel after
+     * it: close() has already gone through the tunnels, and would never close that one. The provider
+     * closes the transport between the two steps, which makes the race deterministic.
+     */
+    @Test
+    void aTunnelIsRefusedOnceTheTransportHasClosed() throws Exception {
+        proxy = new ConnectProxy(null);
+        HttpTransport[] self = new HttpTransport[1];
+        bind(scope -> {
+            self[0].close();
+            return throughProxy();
+        });
+        self[0] = http;
+
+        assertThrows(IOException.class, () -> http.get(originUrl(), null, PROFILE));
+
+        assertEquals(0, proxy.requestLines().size(), "no CONNECT was sent after close");
+        assertEquals(0, http.tunnelFactoryCount(), "and no tunnel factory outlives the close");
+    }
+
     @Test
     void anHttpsRequestThroughAnAuthenticatingProxySucceeds() throws Exception {
         proxy = new ConnectProxy(CREDENTIAL);

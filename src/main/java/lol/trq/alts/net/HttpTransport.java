@@ -349,8 +349,9 @@ public final class HttpTransport implements AutoCloseable {
 
         void close() {
             List<ProxyTunnelSocketFactory> open;
-            closed = true;
             synchronized (factories) {
+                // Set under the lock tunnelFactory() takes, so no factory is created after this point.
+                closed = true;
                 open = new ArrayList<>(factories.values());
                 open.addAll(retired);
                 factories.clear();
@@ -479,11 +480,17 @@ public final class HttpTransport implements AutoCloseable {
      *
      * @param route an HTTP proxy route
      * @return the factory owning that identity's tunnels
+     * @throws IOException if the transport has closed
      */
-    private ProxyTunnelSocketFactory tunnelFactory(ProxyRoute route) {
+    private ProxyTunnelSocketFactory tunnelFactory(ProxyRoute route) throws IOException {
         TunnelIdentity identity = new TunnelIdentity(
                 route.host().toLowerCase(Locale.ROOT), route.port(), route.username(), route.authorizationHeader());
         synchronized (tunnels.factories) {
+            // A request that resolved its route just before close() must not open a tunnel after it:
+            // close() would never see that tunnel's factory.
+            if (tunnels.closed) {
+                throw closedFailure(null);
+            }
             return tunnels.factories.computeIfAbsent(
                     identity,
                     key -> new ProxyTunnelSocketFactory(
