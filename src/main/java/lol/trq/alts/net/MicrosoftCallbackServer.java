@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
@@ -57,20 +58,9 @@ public class MicrosoftCallbackServer {
     private final String codeChallenge;
     private final Consumer<String> browser;
     private final CompletableFuture<String> codeFuture = new CompletableFuture<>();
+    private final Executor executor;
     private volatile List<HttpServer> servers = List.of();
     private int boundPort;
-
-    /**
-     * Initializes a new callback server with the expected state parameter and the host's auth config.
-     * The authorization request carries no PKCE challenge; prefer
-     * {@link #MicrosoftCallbackServer(String, MicrosoftAuthConfig, String, Consumer)}.
-     *
-     * @param state the state string generated during auth initiation, verified against CSRF
-     * @param config the host's Microsoft authentication configuration (client id, scope, endpoints)
-     */
-    public MicrosoftCallbackServer(String state, MicrosoftAuthConfig config) {
-        this(state, config, null, MicrosoftAuthUtil::openBrowser);
-    }
 
     /**
      * Initializes a new callback server whose authorization request carries a PKCE challenge.
@@ -79,10 +69,16 @@ public class MicrosoftCallbackServer {
      * @param config the host's Microsoft authentication configuration (client id, scope, endpoints)
      * @param codeChallenge the {@code S256} PKCE challenge to send, or {@code null} to send none
      * @param browser what opens the authorization address for the user
-     * @since 0.12.0
+     * @param executor the executor the server is stopped on once the code arrives
+     * @since 1.0.0
      */
     public MicrosoftCallbackServer(
-            String state, MicrosoftAuthConfig config, String codeChallenge, Consumer<String> browser) {
+            String state,
+            MicrosoftAuthConfig config,
+            String codeChallenge,
+            Consumer<String> browser,
+            Executor executor) {
+        this.executor = Objects.requireNonNull(executor, "executor");
         this.expectedState = Objects.requireNonNull(state, "state");
         this.config = Objects.requireNonNull(config, "config");
         this.codeChallenge = codeChallenge;
@@ -101,7 +97,7 @@ public class MicrosoftCallbackServer {
         // Registered before anything can complete the future, and run off the completing thread: the
         // completion usually happens on the server's own dispatcher, which must not be asked to stop
         // itself before it has finished writing the response.
-        codeFuture.whenCompleteAsync((code, failure) -> stop(), IoExecutor.executor());
+        codeFuture.whenCompleteAsync((code, failure) -> stop(), executor);
         try {
             bindToAvailablePort();
             for (HttpServer listener : servers) {

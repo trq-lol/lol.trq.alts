@@ -17,10 +17,10 @@ import lol.trq.alts.auth.AltLoginCallback.LoginResult;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
-import lol.trq.alts.net.HttpUtil;
-import lol.trq.alts.net.NetTestHooks;
+import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.net.ProxyRoute;
+import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,12 +42,13 @@ class RefreshScopeRoutingTest {
 
     private AuthChainServer chain;
     private final List<NetworkScope> scopes = Collections.synchronizedList(new ArrayList<>());
+    private HttpTransport transport;
 
     @BeforeEach
     void setUp() throws IOException {
         localStore = AccountStoreTestSupport.openIn(vaultDir);
         chain = new AuthChainServer();
-        HttpUtil.bind(scope -> {
+        transport = TestTransports.through(scope -> {
             scopes.add(scope);
             return ProxyRoute.direct();
         });
@@ -56,8 +57,6 @@ class RefreshScopeRoutingTest {
     @AfterEach
     void tearDown() {
         localStore.close();
-        // Static, so leaving it installed would route every later test through this recorder.
-        NetTestHooks.resetHttp();
         chain.close();
     }
 
@@ -75,7 +74,7 @@ class RefreshScopeRoutingTest {
         AltAccount account = expiredRenewableAccount();
         localStore.seed(account);
 
-        AccountStatus status = new AltAccountServiceImpl(localStore.store(), chain.config(), clock())
+        AccountStatus status = new AltAccountServiceImpl(localStore.store(), chain.config(), transport, clock())
                 .refresh(account)
                 .get(10, TimeUnit.SECONDS);
 
@@ -100,7 +99,8 @@ class RefreshScopeRoutingTest {
         AltAccount account = expiredRenewableAccount();
         localStore.seed(account);
 
-        LoginResult result = new AltLoginServiceImpl(localStore.store(), session -> {}, chain.config(), clock())
+        LoginResult result = new AltLoginServiceImpl(
+                        localStore.store(), session -> {}, chain.config(), transport, clock())
                 .loginAccount(account)
                 .get(10, TimeUnit.SECONDS);
 
@@ -117,7 +117,8 @@ class RefreshScopeRoutingTest {
         AltAccount first = expiredRenewableAccount();
         AltAccount second = AltAccount.of(otherUuid, "Steve", "stale-access", AccountType.MICROSOFT)
                 .withTokens("stale-access", "other-refresh", NOW - 3_600_000L);
-        AltAccountServiceImpl service = new AltAccountServiceImpl(localStore.store(), chain.config(), clock());
+        AltAccountServiceImpl service =
+                new AltAccountServiceImpl(localStore.store(), chain.config(), transport, clock());
 
         service.refresh(first).get(10, TimeUnit.SECONDS);
         service.refresh(second).get(10, TimeUnit.SECONDS);
@@ -135,7 +136,8 @@ class RefreshScopeRoutingTest {
 
     @Test
     void importingABareRefreshTokenNamesNoAccount() throws Exception {
-        LoginResult result = new AltLoginServiceImpl(localStore.store(), session -> {}, chain.config(), clock())
+        LoginResult result = new AltLoginServiceImpl(
+                        localStore.store(), session -> {}, chain.config(), transport, clock())
                 .loginRefreshToken("pasted-refresh", LoginMode.DIRECT)
                 .get(10, TimeUnit.SECONDS);
 
@@ -148,7 +150,8 @@ class RefreshScopeRoutingTest {
 
     @Test
     void theOlderEntryPointStillWorksAndNamesNoAccount() throws Exception {
-        MinecraftProfile profile = MicrosoftAuthUtil.authenticateWithRefreshToken(chain.config(), "stored-refresh")
+        MinecraftProfile profile = new MicrosoftAuthUtil(transport)
+                .authenticateWithRefreshToken(chain.config(), "stored-refresh")
                 .get(10, TimeUnit.SECONDS);
 
         assertEquals("Alex", profile.username());

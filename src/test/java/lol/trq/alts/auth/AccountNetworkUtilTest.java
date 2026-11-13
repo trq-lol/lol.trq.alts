@@ -11,6 +11,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicReference;
 import lol.trq.alts.net.NetworkScope;
+import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -44,8 +45,8 @@ class AccountNetworkUtilTest {
     void resolvesProfileFromTheSuppliedEndpoint() throws Exception {
         String url = startServer(200, "{\"id\":\"abc\",\"name\":\"Alex\"}");
 
-        AccountNetworkUtil.ProfileLookup lookup =
-                AccountNetworkUtil.fetchProfile("tok", url, NetworkScope.of(NetworkScope.Purpose.PROFILE));
+        AccountNetworkUtil.ProfileLookup lookup = new AccountNetworkUtil(TestTransports.direct())
+                .fetchProfile("tok", url, NetworkScope.of(NetworkScope.Purpose.PROFILE));
 
         assertTrue(lookup.found());
         assertEquals("Alex", lookup.username());
@@ -57,8 +58,8 @@ class AccountNetworkUtilTest {
     void aRejectedTokenIsReportedAsRefusedRatherThanCollapsedToNull() throws Exception {
         String url = startServer(401, "{}");
 
-        AccountNetworkUtil.ProfileLookup lookup =
-                AccountNetworkUtil.fetchProfile("expired", url, NetworkScope.of(NetworkScope.Purpose.PROFILE));
+        AccountNetworkUtil.ProfileLookup lookup = new AccountNetworkUtil(TestTransports.direct())
+                .fetchProfile("expired", url, NetworkScope.of(NetworkScope.Purpose.PROFILE));
 
         assertFalse(lookup.found());
         assertTrue(lookup.refused());

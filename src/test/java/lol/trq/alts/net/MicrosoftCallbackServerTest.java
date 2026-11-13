@@ -45,7 +45,7 @@ class MicrosoftCallbackServerTest {
     @BeforeEach
     void setUp() {
         MicrosoftAuthConfig config = MicrosoftAuthConfig.of("test-client-id").withRedirectPath(PATH);
-        server = new MicrosoftCallbackServer(STATE, config, "challenge-value", opened::set);
+        server = new MicrosoftCallbackServer(STATE, config, "challenge-value", opened::set, TestTransports.EXECUTOR);
         code = server.start();
     }
 

@@ -25,6 +25,8 @@ import org.junit.jupiter.api.Test;
  */
 class HttpUtilRateLimitTest {
 
+    private final HttpTransport http = TestTransports.direct();
+
     private static final Instant NOW = Instant.parse("2026-10-21T07:28:00Z");
     private static final String NOW_HEADER = "Wed, 21 Oct 2026 07:28:00 GMT";
 
@@ -57,9 +59,9 @@ class HttpUtilRateLimitTest {
 
     @Test
     void aDelayInSecondsIsRead() {
-        assertEquals(Duration.ofSeconds(120), HttpUtil.parseRetryAfter("120", null, NOW));
-        assertEquals(Duration.ofSeconds(120), HttpUtil.parseRetryAfter(" 120 ", NOW_HEADER, NOW));
-        assertEquals(Duration.ZERO, HttpUtil.parseRetryAfter("0", null, NOW));
+        assertEquals(Duration.ofSeconds(120), HttpTransport.parseRetryAfter("120", null, NOW));
+        assertEquals(Duration.ofSeconds(120), HttpTransport.parseRetryAfter(" 120 ", NOW_HEADER, NOW));
+        assertEquals(Duration.ZERO, HttpTransport.parseRetryAfter("0", null, NOW));
     }
 
     @Test
@@ -67,31 +69,32 @@ class HttpUtilRateLimitTest {
         // The local clock is an hour off; the response's Date header is what the delay is relative to.
         Instant skewed = NOW.plus(Duration.ofHours(1));
 
-        Duration delay = HttpUtil.parseRetryAfter("Wed, 21 Oct 2026 07:29:30 GMT", NOW_HEADER, skewed);
+        Duration delay = HttpTransport.parseRetryAfter("Wed, 21 Oct 2026 07:29:30 GMT", NOW_HEADER, skewed);
 
         assertEquals(Duration.ofSeconds(90), delay);
     }
 
     @Test
     void withoutADateHeaderTheLocalClockIsTheReference() {
-        assertEquals(Duration.ofSeconds(90), HttpUtil.parseRetryAfter("Wed, 21 Oct 2026 07:29:30 GMT", null, NOW));
+        assertEquals(Duration.ofSeconds(90), HttpTransport.parseRetryAfter("Wed, 21 Oct 2026 07:29:30 GMT", null, NOW));
         assertEquals(
-                Duration.ofSeconds(90), HttpUtil.parseRetryAfter("Wed, 21 Oct 2026 07:29:30 GMT", "not a date", NOW));
+                Duration.ofSeconds(90),
+                HttpTransport.parseRetryAfter("Wed, 21 Oct 2026 07:29:30 GMT", "not a date", NOW));
     }
 
     @Test
     void aDateAlreadyPastIsNoWaitRatherThanNoAnswer() {
-        Duration delay = HttpUtil.parseRetryAfter("Wed, 21 Oct 2026 07:00:00 GMT", NOW_HEADER, NOW);
+        Duration delay = HttpTransport.parseRetryAfter("Wed, 21 Oct 2026 07:00:00 GMT", NOW_HEADER, NOW);
 
         assertEquals(Duration.ZERO, delay, "the service did state a delay; it has merely elapsed");
     }
 
     @Test
     void anUnreadableDelayIsReportedAsNoneGiven() {
-        assertNull(HttpUtil.parseRetryAfter(null, NOW_HEADER, NOW));
-        assertNull(HttpUtil.parseRetryAfter("   ", NOW_HEADER, NOW));
-        assertNull(HttpUtil.parseRetryAfter("soon", NOW_HEADER, NOW));
-        assertNull(HttpUtil.parseRetryAfter("-5", NOW_HEADER, NOW));
+        assertNull(HttpTransport.parseRetryAfter(null, NOW_HEADER, NOW));
+        assertNull(HttpTransport.parseRetryAfter("   ", NOW_HEADER, NOW));
+        assertNull(HttpTransport.parseRetryAfter("soon", NOW_HEADER, NOW));
+        assertNull(HttpTransport.parseRetryAfter("-5", NOW_HEADER, NOW));
     }
 
     @Test
@@ -100,7 +103,7 @@ class HttpUtilRateLimitTest {
                 Instant.now().plusSeconds(90).atOffset(ZoneOffset.UTC));
         String url = startThrottlingServer(at);
 
-        HttpUtil.HttpResponse response = HttpUtil.postFormForStatus(url, null, "grant_type=refresh_token");
+        HttpTransport.HttpResponse response = http.postFormForStatus(url, null, "grant_type=refresh_token");
 
         assertTrue(response.rateLimited());
         assertNotNull(response.retryAfter(), "a date is a stated delay: " + at);
@@ -113,9 +116,9 @@ class HttpUtilRateLimitTest {
     void aThrottleThatStatesNoDelayIsStillAThrottle() throws Exception {
         String url = startThrottlingServer(null);
 
-        HttpUtil.HttpResponse json = HttpUtil.postJsonForStatus(url, null, "{}", NetworkScope.of(null));
-        HttpUtil.BytesResponse bytes = HttpUtil.getBytesForStatus(url, null, 1024, null);
-        HttpUtil.HeaderResponse header = HttpUtil.getHeader(url, null, "Location", null);
+        HttpTransport.HttpResponse json = http.postJsonForStatus(url, null, "{}", NetworkScope.of(null));
+        HttpTransport.BytesResponse bytes = http.getBytesForStatus(url, null, 1024, null);
+        HttpTransport.HeaderResponse header = http.getHeader(url, null, "Location", null);
 
         assertTrue(json.rateLimited(), "429 is a rate limit with or without Retry-After");
         assertNull(json.retryAfter());
@@ -132,10 +135,10 @@ class HttpUtilRateLimitTest {
     void aThrottledBinaryFetchCarriesItsDelay() throws Exception {
         String url = startThrottlingServer("7");
 
-        HttpUtil.BytesResponse response = HttpUtil.getBytesForStatus(url, null, 1024, null);
+        HttpTransport.BytesResponse response = http.getBytesForStatus(url, null, 1024, null);
 
         assertEquals(429, response.status());
         assertEquals(Duration.ofSeconds(7), response.retryAfter());
-        assertNull(HttpUtil.getBytes(url, null, 1024, null), "the collapsing form still reports nothing");
+        assertNull(http.getBytes(url, null, 1024, null), "the collapsing form still reports nothing");
     }
 }

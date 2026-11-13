@@ -2,19 +2,30 @@ package lol.trq.alts.auth;
 
 import com.google.gson.JsonObject;
 import java.util.Map;
-import lol.trq.alts.net.HttpUtil;
+import java.util.Objects;
+import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 
 /**
- * Domain-specific network operations for Minecraft account profiles. Facilitates communication with
- * Mojang and Minecraft services for resolving player identities and validating session credentials.
+ * The profile hop of the sign-in chain: validates a Minecraft access token and resolves the identity
+ * behind it, over the runtime's transport.
  *
  * @author trq
  * @since 0.1.0
  */
 public final class AccountNetworkUtil {
 
-    private AccountNetworkUtil() {}
+    private final HttpTransport http;
+
+    /**
+     * Creates the profile hop over a transport.
+     *
+     * @param http the runtime's transport
+     * @since 1.0.0
+     */
+    public AccountNetworkUtil(HttpTransport http) {
+        this.http = Objects.requireNonNull(http, "http");
+    }
 
     /**
      * The outcome of a profile lookup, carrying the status so a caller can tell a refused token from an
@@ -73,24 +84,6 @@ public final class AccountNetworkUtil {
     }
 
     /**
-     * Resolves a Minecraft UUID to its corresponding username via the Mojang session server.
-     *
-     * @param uuid the player's UUID (supports both dashed and undashed formats)
-     * @return the current username of the player, or {@code null} if the profile does not exist
-     * @throws Exception if a network error occurs during the request
-     */
-    public static String lookupUsername(String uuid) throws Exception {
-        // Mojang API expects undashed UUIDs
-        String cleanUuid = uuid.replace("-", "");
-        JsonObject response = HttpUtil.get(
-                "https://sessionserver.mojang.com/session/minecraft/profile/" + cleanUuid,
-                null,
-                NetworkScope.forAccount(NetworkScope.Purpose.PROFILE, uuid, null));
-
-        return response != null && response.has("name") ? response.get("name").getAsString() : null;
-    }
-
-    /**
      * Validates a Minecraft access token and resolves the identity behind it, reporting the status
      * either way.
      *
@@ -106,9 +99,9 @@ public final class AccountNetworkUtil {
      * @throws Exception if a network error occurs during the request
      * @since 0.8.0
      */
-    public static ProfileLookup fetchProfile(String token, String profileUrl, NetworkScope scope) throws Exception {
-        HttpUtil.HttpResponse response =
-                HttpUtil.getForStatus(profileUrl, Map.of("Authorization", "Bearer " + token), scope);
+    public ProfileLookup fetchProfile(String token, String profileUrl, NetworkScope scope) throws Exception {
+        HttpTransport.HttpResponse response =
+                http.getForStatus(profileUrl, Map.of("Authorization", "Bearer " + token), scope);
 
         JsonObject body = response.body();
         if (response.successful() && body != null && body.has("name") && body.has("id")) {

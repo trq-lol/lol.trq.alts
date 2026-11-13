@@ -25,8 +25,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
 import lol.trq.alts.net.FailureText;
-import lol.trq.alts.net.HttpUtil;
-import lol.trq.alts.net.IoExecutor;
+import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.MicrosoftCallbackServer;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.spi.DeviceCodePrompt;
@@ -54,7 +53,18 @@ public final class MicrosoftAuthUtil {
 
     private static final Gson GSON = new Gson();
 
-    private MicrosoftAuthUtil() {}
+    private final HttpTransport http;
+
+    /**
+     * Creates the sign-in chain over a transport: every request goes through it, and every blocking
+     * step runs on its executor.
+     *
+     * @param http the runtime's transport
+     * @since 1.0.0
+     */
+    public MicrosoftAuthUtil(HttpTransport http) {
+        this.http = Objects.requireNonNull(http, "http");
+    }
 
     /**
      * Initiates the full asynchronous authentication flow. Starts a local callback server, opens the
@@ -67,16 +77,17 @@ public final class MicrosoftAuthUtil {
      * @param config the host's Microsoft authentication configuration (client id, scope, endpoints)
      * @return a future containing the final {@link MinecraftProfile} on success
      */
-    public static CompletableFuture<MinecraftProfile> authenticate(MicrosoftAuthConfig config) {
+    public CompletableFuture<MinecraftProfile> authenticate(MicrosoftAuthConfig config) {
         return authenticate(config, MicrosoftAuthUtil::openBrowser);
     }
 
     // Exists so the interactive flow can be driven in tests without launching a real browser.
-    static CompletableFuture<MinecraftProfile> authenticate(MicrosoftAuthConfig config, Consumer<String> browser) {
+    CompletableFuture<MinecraftProfile> authenticate(MicrosoftAuthConfig config, Consumer<String> browser) {
         Objects.requireNonNull(config, "config");
         String state = generateState();
         String verifier = generateCodeVerifier();
-        MicrosoftCallbackServer server = new MicrosoftCallbackServer(state, config, codeChallenge(verifier), browser);
+        MicrosoftCallbackServer server =
+                new MicrosoftCallbackServer(state, config, codeChallenge(verifier), browser, http.executor());
 
         CompletableFuture<String> code = server.start();
         CompletableFuture<MinecraftProfile> chain = code.thenCompose(
@@ -100,7 +111,7 @@ public final class MicrosoftAuthUtil {
      * @throws NullPointerException if {@code config} is null
      * @since 0.6.0
      */
-    public static CompletableFuture<MinecraftProfile> authenticateWithRefreshToken(
+    public CompletableFuture<MinecraftProfile> authenticateWithRefreshToken(
             MicrosoftAuthConfig config, String refreshToken) {
         return authenticateWithRefreshToken(config, refreshToken, NO_ACCOUNT);
     }
@@ -120,7 +131,7 @@ public final class MicrosoftAuthUtil {
      * @throws NullPointerException if {@code config} is null
      * @since 0.12.0
      */
-    public static CompletableFuture<MinecraftProfile> authenticateWithRefreshToken(
+    public CompletableFuture<MinecraftProfile> authenticateWithRefreshToken(
             MicrosoftAuthConfig config, String refreshToken, NetworkScope account) {
         Objects.requireNonNull(config, "config");
         if (refreshToken == null || refreshToken.isBlank()) {
@@ -152,13 +163,13 @@ public final class MicrosoftAuthUtil {
      * @throws NullPointerException if {@code config} or {@code prompt} is null
      * @since 0.12.0
      */
-    public static CompletableFuture<MinecraftProfile> authenticateWithDeviceCode(
+    public CompletableFuture<MinecraftProfile> authenticateWithDeviceCode(
             MicrosoftAuthConfig config, DeviceCodePrompt prompt) {
         return authenticateWithDeviceCode(config, prompt, DeviceCodeTiming.STANDARD);
     }
 
     // Exists so the polling can be exercised in tests without waiting out real five-second intervals.
-    static CompletableFuture<MinecraftProfile> authenticateWithDeviceCode(
+    CompletableFuture<MinecraftProfile> authenticateWithDeviceCode(
             MicrosoftAuthConfig config, DeviceCodePrompt prompt, DeviceCodeTiming timing) {
         Objects.requireNonNull(config, "config");
         Objects.requireNonNull(prompt, "prompt");
@@ -173,7 +184,7 @@ public final class MicrosoftAuthUtil {
                         tokens.completeExceptionally(failure);
                     }
                 },
-                IoExecutor.executor());
+                http.executor());
         return cancelling(tokens.thenCompose(issued -> completeFrom(config, issued, NO_ACCOUNT)), tokens);
     }
 
@@ -185,15 +196,14 @@ public final class MicrosoftAuthUtil {
      * @param timing how advertised seconds map onto real delays
      * @param tokens the future the polling completes
      */
-    private static void startDeviceCode(
+    private void startDeviceCode(
             MicrosoftAuthConfig config,
             DeviceCodePrompt prompt,
             DeviceCodeTiming timing,
             CompletableFuture<MsTokens> tokens) {
         String body = "client_id=" + encode(config.clientId()) + "&scope=" + encode(config.scope());
-        HttpUtil.HttpResponse response = send(
-                "Device code request",
-                () -> HttpUtil.postFormForStatus(config.deviceCodeUrl(), null, body, NO_ACCOUNT));
+        HttpTransport.HttpResponse response = send(
+                "Device code request", () -> http.postFormForStatus(config.deviceCodeUrl(), null, body, NO_ACCOUNT));
 
         DeviceAuthorization issued;
         try {
@@ -243,7 +253,7 @@ public final class MicrosoftAuthUtil {
      * between them, and each one first checks whether the login is still wanted, which is what makes a
      * cancelled future stop the polling rather than merely stop listening to it.
      */
-    private static final class DeviceCodePoll implements Runnable {
+    private final class DeviceCodePoll implements Runnable {
 
         private final MicrosoftAuthConfig config;
         private final String deviceCode;
@@ -272,7 +282,7 @@ public final class MicrosoftAuthUtil {
         }
 
         void schedule() {
-            CompletableFuture.delayedExecutor(intervalMillis, TimeUnit.MILLISECONDS, IoExecutor.executor())
+            CompletableFuture.delayedExecutor(intervalMillis, TimeUnit.MILLISECONDS, http.executor())
                     .execute(this);
         }
 
@@ -293,11 +303,11 @@ public final class MicrosoftAuthUtil {
                 throw new AuthFlowException("Device code expired before it was used", FailureReason.TIMED_OUT);
             }
 
-            HttpUtil.HttpResponse response;
+            HttpTransport.HttpResponse response;
             try {
                 String body = "grant_type=" + encode(DEVICE_CODE_GRANT) + "&client_id=" + encode(config.clientId())
                         + "&device_code=" + encode(deviceCode);
-                response = HttpUtil.postFormForStatus(config.deviceTokenUrl(), null, body, NO_ACCOUNT);
+                response = http.postFormForStatus(config.deviceTokenUrl(), null, body, NO_ACCOUNT);
             } catch (Exception transportFailure) {
                 unanswered(unreachable("Device code poll", transportFailure));
                 return;
@@ -472,7 +482,7 @@ public final class MicrosoftAuthUtil {
      * @param account a scope naming the account this is for, or one naming none
      * @return a future containing the resolved profile
      */
-    private static CompletableFuture<MinecraftProfile> completeFrom(
+    private CompletableFuture<MinecraftProfile> completeFrom(
             MicrosoftAuthConfig config, MsTokens tokens, NetworkScope account) {
         return authenticateWithXboxLive(config, tokens, account)
                 .thenCompose(xblToken -> authenticateWithXSTS(config, xblToken, account))
@@ -586,7 +596,7 @@ public final class MicrosoftAuthUtil {
      * @param codeVerifier the PKCE verifier whose challenge the authorization request carried
      * @return a future containing the raw Microsoft tokens
      */
-    static CompletableFuture<MsTokens> exchangeCodeForToken(
+    CompletableFuture<MsTokens> exchangeCodeForToken(
             MicrosoftAuthConfig config, String code, String redirectUri, String codeVerifier) {
         return CompletableFuture.supplyAsync(
                 () -> {
@@ -595,14 +605,14 @@ public final class MicrosoftAuthUtil {
                             + encode(config.scope()) + "&code_verifier=" + encode(codeVerifier);
                     JsonObject json = send(
                                     "Token exchange",
-                                    () -> HttpUtil.postFormForStatus(config.tokenUrl(), null, body, NO_ACCOUNT))
+                                    () -> http.postFormForStatus(config.tokenUrl(), null, body, NO_ACCOUNT))
                             .body();
                     return read(
                             "Token exchange",
                             () -> new MsTokens(
                                     json.get("access_token").getAsString(), stringOrNull(json, "refresh_token")));
                 },
-                IoExecutor.executor());
+                http.executor());
     }
 
     /**
@@ -615,11 +625,11 @@ public final class MicrosoftAuthUtil {
      * @param account a scope naming the account this is for, or one naming none
      * @return a future containing the freshly issued Microsoft tokens
      */
-    private static CompletableFuture<MsTokens> exchangeRefreshForToken(
+    private CompletableFuture<MsTokens> exchangeRefreshForToken(
             MicrosoftAuthConfig config, String refreshToken, NetworkScope account) {
         return CompletableFuture.supplyAsync(
                 () -> {
-                    HttpUtil.HttpResponse response;
+                    HttpTransport.HttpResponse response;
                     try {
                         String body = String.format(
                                 "client_id=%s&refresh_token=%s&grant_type=refresh_token&scope=%s",
@@ -631,7 +641,7 @@ public final class MicrosoftAuthUtil {
                         if (config.redirectUri() != null) {
                             body += "&redirect_uri=" + URLEncoder.encode(config.redirectUri(), StandardCharsets.UTF_8);
                         }
-                        response = HttpUtil.postFormForStatus(
+                        response = http.postFormForStatus(
                                 config.tokenUrl(), null, body, scope(NetworkScope.Purpose.AUTH, account));
                     } catch (Exception transportFailure) {
                         throw new RefreshRejectedException("refresh transport failure", false, transportFailure);
@@ -660,7 +670,7 @@ public final class MicrosoftAuthUtil {
                     String rotated = stringOrNull(json, "refresh_token");
                     return new MsTokens(access, isBlank(rotated) ? refreshToken : rotated);
                 },
-                IoExecutor.executor());
+                http.executor());
     }
 
     /**
@@ -674,7 +684,7 @@ public final class MicrosoftAuthUtil {
      * @param response the token endpoint's rejection
      * @return true only if the token will never be redeemable again
      */
-    private static boolean tokenIsSpent(HttpUtil.HttpResponse response) {
+    private static boolean tokenIsSpent(HttpTransport.HttpResponse response) {
         int status = response.status();
         if (status < 400 || status >= 500 || status == 408 || status == 429) {
             return false;
@@ -694,7 +704,7 @@ public final class MicrosoftAuthUtil {
      * @param account a scope naming the account this is for, or one naming none
      * @return a future containing the Xbox Live token
      */
-    private static CompletableFuture<String> authenticateWithXboxLive(
+    private CompletableFuture<String> authenticateWithXboxLive(
             MicrosoftAuthConfig config, MsTokens tokens, NetworkScope account) {
         return CompletableFuture.supplyAsync(
                 () -> {
@@ -711,7 +721,7 @@ public final class MicrosoftAuthUtil {
                             .body();
                     return read("Xbox Live auth", () -> json.get("Token").getAsString());
                 },
-                IoExecutor.executor());
+                http.executor());
     }
 
     /**
@@ -722,7 +732,7 @@ public final class MicrosoftAuthUtil {
      * @param account a scope naming the account this is for, or one naming none
      * @return a future containing the XSTS token and user hash
      */
-    private static CompletableFuture<XstsData> authenticateWithXSTS(
+    private CompletableFuture<XstsData> authenticateWithXSTS(
             MicrosoftAuthConfig config, String xblToken, NetworkScope account) {
         return CompletableFuture.supplyAsync(
                 () -> {
@@ -739,7 +749,7 @@ public final class MicrosoftAuthUtil {
                     // Read the status so an XSTS refusal's XErr can be decoded: the endpoint answers a
                     // rejection with a code that says exactly what is wrong, which a bare "auth failed"
                     // throws away.
-                    HttpUtil.HttpResponse status;
+                    HttpTransport.HttpResponse status;
                     try {
                         status = postJson(config.xstsAuthUrl(), body, account);
                     } catch (Exception transportFailure) {
@@ -760,7 +770,7 @@ public final class MicrosoftAuthUtil {
                                             .get("uhs")
                                             .getAsString()));
                 },
-                IoExecutor.executor());
+                http.executor());
     }
 
     /**
@@ -771,7 +781,7 @@ public final class MicrosoftAuthUtil {
      * @param account a scope naming the account this is for, or one naming none
      * @return a future containing the Minecraft services session and its lifetime
      */
-    private static CompletableFuture<McSession> authenticateWithMinecraft(
+    private CompletableFuture<McSession> authenticateWithMinecraft(
             MicrosoftAuthConfig config, XstsData xstsData, NetworkScope account) {
         return CompletableFuture.supplyAsync(
                 () -> {
@@ -787,7 +797,7 @@ public final class MicrosoftAuthUtil {
                         return new McSession(json.get("access_token").getAsString(), expiresIn);
                     });
                 },
-                IoExecutor.executor());
+                http.executor());
     }
 
     /**
@@ -799,13 +809,13 @@ public final class MicrosoftAuthUtil {
      * @param account a scope naming the account this is for, or one naming none
      * @return a future containing the populated profile
      */
-    private static CompletableFuture<MinecraftProfile> getMinecraftProfile(
+    private CompletableFuture<MinecraftProfile> getMinecraftProfile(
             MicrosoftAuthConfig config, McSession session, MsTokens tokens, NetworkScope account) {
         return CompletableFuture.supplyAsync(
                 () -> {
-                    HttpUtil.HttpResponse response;
+                    HttpTransport.HttpResponse response;
                     try {
-                        response = HttpUtil.getForStatus(
+                        response = http.getForStatus(
                                 config.minecraftProfileUrl(),
                                 Map.of("Authorization", "Bearer " + session.accessToken()),
                                 scope(NetworkScope.Purpose.PROFILE, account));
@@ -830,7 +840,7 @@ public final class MicrosoftAuthUtil {
                                     tokens.refreshToken(),
                                     absoluteExpiry(session.expiresIn())));
                 },
-                IoExecutor.executor());
+                http.executor());
     }
 
     /**
@@ -842,8 +852,8 @@ public final class MicrosoftAuthUtil {
      * @return the status and parsed body
      * @throws Exception if a network or protocol error occurs
      */
-    private static HttpUtil.HttpResponse postJson(String url, JsonObject body, NetworkScope account) throws Exception {
-        return HttpUtil.sendForStatus(
+    private HttpTransport.HttpResponse postJson(String url, JsonObject body, NetworkScope account) throws Exception {
+        return http.sendForStatus(
                 "POST",
                 url,
                 "application/json",
@@ -859,8 +869,8 @@ public final class MicrosoftAuthUtil {
      * @param request the request to send
      * @return the successful response, whose body is never null
      */
-    private static HttpUtil.HttpResponse send(String step, Callable<HttpUtil.HttpResponse> request) {
-        HttpUtil.HttpResponse response;
+    private static HttpTransport.HttpResponse send(String step, Callable<HttpTransport.HttpResponse> request) {
+        HttpTransport.HttpResponse response;
         try {
             response = request.call();
         } catch (Exception transportFailure) {
@@ -900,7 +910,7 @@ public final class MicrosoftAuthUtil {
      * @param response the failing response
      * @return the exception to fail the flow with
      */
-    static AuthFlowException stepFailure(String step, HttpUtil.HttpResponse response) {
+    static AuthFlowException stepFailure(String step, HttpTransport.HttpResponse response) {
         AuthFlowException classified = stepFailure(step, response.status());
         return response.retryAfter() == null
                 ? classified
@@ -908,7 +918,7 @@ public final class MicrosoftAuthUtil {
     }
 
     /**
-     * Classifies a failure status; see {@link #stepFailure(String, HttpUtil.HttpResponse)}.
+     * Classifies a failure status; see {@link #stepFailure(String, HttpTransport.HttpResponse)}.
      *
      * @param step the step's name
      * @param status the failing HTTP status
@@ -1116,7 +1126,7 @@ public final class MicrosoftAuthUtil {
      * @param response the XSTS rejection
      * @return the exception to fail the flow with
      */
-    private static AuthFlowException xstsFailure(HttpUtil.HttpResponse response) {
+    private static AuthFlowException xstsFailure(HttpTransport.HttpResponse response) {
         long xerr = 0L;
         JsonObject body = response.body();
         if (body != null && body.has("XErr") && body.get("XErr").isJsonPrimitive()) {

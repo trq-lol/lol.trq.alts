@@ -19,6 +19,8 @@ import org.junit.jupiter.api.Test;
  */
 class HeaderInjectionTest {
 
+    private final HttpTransport http = TestTransports.direct();
+
     private static final String SECRET = "eyJhbGciOiJIUzI1NiJ9.secret-part-one";
     private static final String SECRET_TAIL = "secret-part-two";
 
@@ -58,7 +60,7 @@ class HeaderInjectionTest {
         for (String breaker : new String[] {"\n", "\r\n", "\r", "\u0000", "\n "}) {
             Map<String, String> headers = Map.of("Authorization", "Bearer " + SECRET + breaker + SECRET_TAIL);
 
-            Exception failure = assertThrows(Exception.class, () -> HttpUtil.getForStatus(url(), headers, null));
+            Exception failure = assertThrows(Exception.class, () -> http.getForStatus(url(), headers, null));
 
             assertSilentAbout(failure);
         }
@@ -69,13 +71,13 @@ class HeaderInjectionTest {
     void everyRequestShapeRefusesIt() {
         Map<String, String> headers = Map.of("Authorization", "Bearer " + SECRET + "\n" + SECRET_TAIL);
 
-        assertSilentAbout(assertThrows(Exception.class, () -> HttpUtil.get(url(), headers, null)));
-        assertSilentAbout(assertThrows(Exception.class, () -> HttpUtil.postJson(url(), headers, "{}", null)));
-        assertSilentAbout(assertThrows(Exception.class, () -> HttpUtil.postFormForStatus(url(), headers, "a=b", null)));
-        assertSilentAbout(assertThrows(Exception.class, () -> HttpUtil.getBytes(url(), headers, 1024, null)));
-        assertSilentAbout(assertThrows(Exception.class, () -> HttpUtil.getHeader(url(), headers, "Location", null)));
+        assertSilentAbout(assertThrows(Exception.class, () -> http.get(url(), headers, null)));
+        assertSilentAbout(assertThrows(Exception.class, () -> http.postJson(url(), headers, "{}", null)));
+        assertSilentAbout(assertThrows(Exception.class, () -> http.postFormForStatus(url(), headers, "a=b", null)));
+        assertSilentAbout(assertThrows(Exception.class, () -> http.getBytes(url(), headers, 1024, null)));
+        assertSilentAbout(assertThrows(Exception.class, () -> http.getHeader(url(), headers, "Location", null)));
         assertSilentAbout(
-                assertThrows(Exception.class, () -> HttpUtil.sendForStatus("PUT", url(), null, headers, null, null)));
+                assertThrows(Exception.class, () -> http.sendForStatus("PUT", url(), null, headers, null, null)));
         assertEquals(0, requests.get());
     }
 
@@ -83,14 +85,14 @@ class HeaderInjectionTest {
     void aHeaderNameWithALineBreakIsRefusedToo() {
         Map<String, String> headers = Map.of("X-secret-part\nInjected", "value");
 
-        assertSilentAbout(assertThrows(Exception.class, () -> HttpUtil.getForStatus(url(), headers, null)));
+        assertSilentAbout(assertThrows(Exception.class, () -> http.getForStatus(url(), headers, null)));
         assertEquals(0, requests.get());
     }
 
     @Test
     void anOrdinaryHeaderStillGoesThrough() throws Exception {
-        HttpUtil.HttpResponse response =
-                HttpUtil.getForStatus(url(), Map.of("Authorization", "Bearer " + SECRET), null);
+        HttpTransport.HttpResponse response =
+                http.getForStatus(url(), Map.of("Authorization", "Bearer " + SECRET), null);
 
         assertEquals(204, response.status());
     }

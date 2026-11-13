@@ -16,50 +16,57 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Executor;
 import java.util.function.Predicate;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLSocketFactory;
 import lol.trq.alts.spi.ProxyProvider;
 
 /**
- * Centralized utility for handling HTTP requests to Microsoft, Xbox, and Mojang APIs. Supports JSON
- * and form-encoded payloads with automated header management.
+ * The runtime's way out to the network: every request the library makes goes through one instance of
+ * this, which the runtime constructs, hands to each service through its constructor, and closes. It
+ * holds the host's {@link ProxyProvider}, the proxy tunnel connections, and the executor blocking work
+ * runs on; nothing in the library reads a static to reach the network.
  *
- * <p>Every request the library makes goes through here, which is what lets a host route them: install a
- * {@link ProxyProvider} and each call resolves a {@link ProxyRoute} from its {@link NetworkScope} first.
- * The scope-less overloads are kept for compatibility and resolve as {@link NetworkScope.Purpose#AUTH}.
+ * <p>Each call resolves a {@link ProxyRoute} from its {@link NetworkScope} first. The scope-less
+ * overloads resolve as {@link NetworkScope.Purpose#AUTH}.
  *
  * <p>It is also where the transport rules are enforced, once, for every caller:
  *
  * <ul>
  *   <li>Timeouts are finite: ten seconds to connect, thirty to read.
- *   <li>Route resolution fails closed. An installed provider that throws or names no route fails the
- *       request, and a proxy that refuses a tunnel fails it too; nothing falls back to a direct
- *       connection.
+ *   <li>Route resolution fails closed. A provider that throws or names no route fails the request, and
+ *       a proxy that refuses a tunnel fails it too; nothing falls back to a direct connection. Without
+ *       a provider every request is direct.
  *   <li>A proxy credential is sent to the proxy and nowhere else. An HTTPS target behind an HTTP proxy
  *       is reached through a tunnel the library opens itself, so the credential rides the
  *       {@code CONNECT} and is never inside the TLS stream the origin reads.
  *   <li>A kept-alive connection is only reused by the proxy identity that opened it: proxy host, port,
- *       and credential.
+ *       and credential, within this transport. Two transports never share a tunnel.
  *   <li>TLS uses the JVM's default trust with hostname verification on, tunnelled or not.
  *   <li>Redirects are not followed, except by the binary fetch, which never carries a credential across
  *       origins and never steps down from {@code https} to {@code http}.
  *   <li>A JSON or text body is read up to one mebibyte; a longer one fails the request.
  * </ul>
  *
- * <p>The methods here block. Run them on {@link IoExecutor#executor()} rather than the common pool.
+ * <p>The request methods block. Run them on {@link #executor()} rather than the common pool.
  *
- * <p>Nothing here changes process-wide JVM state: no system property, default authenticator, default
- * {@code SSLContext}, or proxy selector is installed.
+ * <p>{@link #close()} closes the pooled tunnel connections and refuses every later request. Nothing here
+ * changes process-wide JVM state: no system property, default authenticator, default {@code SSLContext},
+ * or proxy selector is installed.
+ *
+ * <p>Internal: a host reaches the network through the runtime's services, never through this.
  *
  * @author trq
- * @since 0.1.0
+ * @since 1.0.0
  */
-public final class HttpUtil {
+public final class HttpTransport implements AutoCloseable {
 
     /** How long to wait for the TCP connection before giving the request up. */
     private static final int CONNECT_TIMEOUT_MILLIS = 10_000;
@@ -86,81 +93,100 @@ public final class HttpUtil {
     /** How many proxy identities keep a tunnel factory, and with it a set of reusable connections. */
     static final int MAX_TUNNEL_FACTORIES = 64;
 
-    private static final Map<TunnelIdentity, ProxyTunnelSocketFactory> TUNNEL_FACTORIES =
-            new LinkedHashMap<>(16, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(Map.Entry<TunnelIdentity, ProxyTunnelSocketFactory> eldest) {
-                    return size() > MAX_TUNNEL_FACTORIES;
-                }
-            };
-
-    private static volatile ProxyProvider proxyProvider;
-
-    private static volatile SSLSocketFactory tlsOverride;
-
-    private HttpUtil() {}
+    private final ProxyProvider proxyProvider;
+    private final Executor executor;
+    private final SSLSocketFactory tlsOverride;
+    private final List<ProxyTunnelSocketFactory> retired = new ArrayList<>();
+    private final Map<TunnelIdentity, ProxyTunnelSocketFactory> tunnelFactories = new LinkedHashMap<>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<TunnelIdentity, ProxyTunnelSocketFactory> eldest) {
+            if (size() <= MAX_TUNNEL_FACTORIES) {
+                return false;
+            }
+            // Its idle connections stay in the JDK's pool until they age out, so it is kept where
+            // close() can still reach them.
+            retired.removeIf(ProxyTunnelSocketFactory::idle);
+            retired.add(eldest.getValue());
+            return true;
+        }
+    };
+    private volatile boolean closed;
 
     /**
-     * Binds the host's proxy provider. Called by {@code AltsRuntime.Builder#build()}; until one is bound
-     * every request is direct.
+     * Creates a transport.
      *
-     * <p>A {@code null} never removes a provider that is already installed. The provider is static, so a
-     * second runtime built without one would otherwise turn every request direct behind the back of the
-     * host that installed the first — the same silent disclosure that failing closed exists to prevent.
-     * A later non-null provider replaces the earlier one.
-     *
-     * @param provider the host-supplied proxy provider, or null to leave the current one in place
-     * @since 0.8.0
+     * @param proxyProvider the host's proxy provider, or null for direct connections
+     * @param executor the executor blocking work runs on
+     * @since 1.0.0
      */
-    public static void bind(ProxyProvider provider) {
-        if (provider != null) {
-            proxyProvider = provider;
-        }
+    public HttpTransport(ProxyProvider proxyProvider, Executor executor) {
+        this(proxyProvider, executor, null);
     }
 
     /**
-     * Removes the installed proxy provider, returning every request to direct, and drops a substituted
-     * TLS factory. {@link #bind(ProxyProvider)} ignores {@code null}, so this is the only way to do
-     * either, and it exists for tests alone: they share this static across classes and must not leave a
-     * provider pointing at a closed socket. Removing the provider is exactly the fail-open a host
-     * installs one to rule out, so this is neither public nor usable outside the test suite.
+     * Creates a transport whose TLS is layered by {@code tls} instead of the JVM's default factory, so a
+     * test can trust a certificate it generated for a loopback origin. Package-private: production always
+     * uses the JVM's default trust, and hostname verification stays on either way.
      *
-     * @throws IllegalStateException outside the test suite
+     * @param proxyProvider the host's proxy provider, or null for direct connections
+     * @param executor the executor blocking work runs on
+     * @param tls the TLS socket factory, or null for the JVM default
      */
-    static void resetForTests() {
-        requireTestSeams();
-        proxyProvider = null;
-        tlsOverride = null;
-        synchronized (TUNNEL_FACTORIES) {
-            TUNNEL_FACTORIES.clear();
-        }
+    HttpTransport(ProxyProvider proxyProvider, Executor executor, SSLSocketFactory tls) {
+        this.proxyProvider = proxyProvider;
+        this.executor = Objects.requireNonNull(executor, "executor");
+        this.tlsOverride = tls;
     }
 
     /**
-     * Refuses a test-only seam unless the JVM was started for tests, which the build's test task says
-     * by setting the {@code lol.trq.alts.testSeams} system property. Each of those seams undoes
-     * something a host relies on, so none of them may be a lever in a running application.
+     * Returns the executor blocking library work runs on. Pass it as the executor argument of
+     * {@link java.util.concurrent.CompletableFuture#supplyAsync(java.util.function.Supplier, Executor)}
+     * and its siblings; the one-argument forms run on the JVM-wide common pool, which the library never
+     * uses.
      *
-     * @throws IllegalStateException if the property is not set to {@code true}
+     * @return the executor
+     * @since 1.0.0
      */
-    private static void requireTestSeams() {
-        if (!Boolean.getBoolean("lol.trq.alts.testSeams")) {
-            throw new IllegalStateException("test seams are disabled outside the test suite");
+    public Executor executor() {
+        return executor;
+    }
+
+    /**
+     * Closes every pooled tunnel connection and refuses every request made from now on. Idempotent. A
+     * request already past its route resolution may still complete or fail on its own.
+     *
+     * @since 1.0.0
+     */
+    @Override
+    public void close() {
+        closed = true;
+        List<ProxyTunnelSocketFactory> factories;
+        synchronized (tunnelFactories) {
+            factories = new ArrayList<>(tunnelFactories.values());
+            factories.addAll(retired);
+            tunnelFactories.clear();
+            retired.clear();
+        }
+        for (ProxyTunnelSocketFactory factory : factories) {
+            factory.closeAll();
         }
     }
 
     /**
      * Resolves the route a request should take.
      *
-     * <p>Fails closed once a provider is installed: a provider that throws or returns null fails the
-     * request rather than quietly connecting directly, because a silent fallback discloses the host's
-     * real address at the moment it believed it was proxied.
+     * <p>Fails closed when a provider is set: a provider that throws or returns null fails the request
+     * rather than quietly connecting directly, because a silent fallback discloses the host's real
+     * address at the moment it believed it was proxied.
      *
      * @param scope what is being fetched; null resolves as {@link NetworkScope.Purpose#AUTH}
      * @return the route to use
-     * @throws IOException if an installed provider could not name one
+     * @throws IOException if the transport is closed or the provider could not name a route
      */
-    static ProxyRoute routeFor(NetworkScope scope) throws IOException {
+    ProxyRoute routeFor(NetworkScope scope) throws IOException {
+        if (closed) {
+            throw new IOException("the runtime is closed");
+        }
         ProxyProvider provider = proxyProvider;
         if (provider == null) {
             return ProxyRoute.direct();
@@ -207,7 +233,7 @@ public final class HttpUtil {
      * @return the configured connection
      * @throws IOException if the route cannot be resolved or the connection cannot be opened
      */
-    private static HttpURLConnection open(String urlString, NetworkScope scope) throws IOException {
+    private HttpURLConnection open(String urlString, NetworkScope scope) throws IOException {
         return open(URI.create(urlString), routeFor(scope));
     }
 
@@ -230,7 +256,7 @@ public final class HttpUtil {
      * @return the configured connection
      * @throws IOException if the target is not HTTP(S) or the connection cannot be opened
      */
-    private static HttpURLConnection open(URI uri, ProxyRoute route) throws IOException {
+    private HttpURLConnection open(URI uri, ProxyRoute route) throws IOException {
         String scheme = uri.getScheme();
         boolean https = "https".equalsIgnoreCase(scheme);
         if (!https && !"http".equalsIgnoreCase(scheme)) {
@@ -283,42 +309,26 @@ public final class HttpUtil {
      * @param route an HTTP proxy route
      * @return the factory owning that identity's tunnels
      */
-    private static ProxyTunnelSocketFactory tunnelFactory(ProxyRoute route) {
+    private ProxyTunnelSocketFactory tunnelFactory(ProxyRoute route) {
         TunnelIdentity identity = new TunnelIdentity(
                 route.host().toLowerCase(Locale.ROOT), route.port(), route.username(), route.authorizationHeader());
-        synchronized (TUNNEL_FACTORIES) {
-            return TUNNEL_FACTORIES.computeIfAbsent(
+        synchronized (tunnelFactories) {
+            return tunnelFactories.computeIfAbsent(
                     identity,
                     key -> new ProxyTunnelSocketFactory(
-                            route.host(), key.port(), key.authorization(), HttpUtil::tlsSocketFactory));
+                            route.host(), key.port(), key.authorization(), this::tlsSocketFactory));
         }
     }
 
     /**
      * Returns the factory that layers TLS: the JVM's default for HTTPS, which is what a direct
-     * connection uses, unless a test has substituted its own.
+     * connection uses, unless this transport was built for a test with its own.
      *
      * @return the TLS socket factory
      */
-    private static SSLSocketFactory tlsSocketFactory() {
+    private SSLSocketFactory tlsSocketFactory() {
         SSLSocketFactory tls = tlsOverride;
         return tls != null ? tls : HttpsURLConnection.getDefaultSSLSocketFactory();
-    }
-
-    /**
-     * Substitutes the factory that layers TLS, so a test can trust a certificate it generated for a
-     * loopback origin. Package-private and refused outside the test suite: production always uses the
-     * JVM's default trust, and hostname verification stays on either way.
-     *
-     * @param factory the factory to use, or null to restore the JVM default
-     * @throws IllegalStateException outside the test suite
-     */
-    static void tlsSocketFactoryForTests(SSLSocketFactory factory) {
-        requireTestSeams();
-        tlsOverride = factory;
-        synchronized (TUNNEL_FACTORIES) {
-            TUNNEL_FACTORIES.clear();
-        }
     }
 
     /**
@@ -326,9 +336,9 @@ public final class HttpUtil {
      *
      * @return the size of the factory cache
      */
-    static int tunnelFactoryCount() {
-        synchronized (TUNNEL_FACTORIES) {
-            return TUNNEL_FACTORIES.size();
+    int tunnelFactoryCount() {
+        synchronized (tunnelFactories) {
+            return tunnelFactories.size();
         }
     }
 
@@ -358,7 +368,7 @@ public final class HttpUtil {
      * @return the parsed JSON response, or null if the request returned a non-2xx status
      * @throws Exception if a network or protocol error occurs
      */
-    public static JsonObject postJson(String urlString, Map<String, String> headers, String jsonBody) throws Exception {
+    public JsonObject postJson(String urlString, Map<String, String> headers, String jsonBody) throws Exception {
         return postJson(urlString, headers, jsonBody, null);
     }
 
@@ -373,8 +383,8 @@ public final class HttpUtil {
      * @throws Exception if a network or protocol error occurs
      * @since 0.8.0
      */
-    public static JsonObject postJson(
-            String urlString, Map<String, String> headers, String jsonBody, NetworkScope scope) throws Exception {
+    public JsonObject postJson(String urlString, Map<String, String> headers, String jsonBody, NetworkScope scope)
+            throws Exception {
         return executeRequest(
                 urlString, "POST", "application/json", headers, jsonBody.getBytes(StandardCharsets.UTF_8), scope);
     }
@@ -388,7 +398,7 @@ public final class HttpUtil {
      * @return the parsed JSON response, or null if the request failed
      * @throws Exception if a network or protocol error occurs
      */
-    public static JsonObject postForm(String urlString, Map<String, String> headers, String formBody) throws Exception {
+    public JsonObject postForm(String urlString, Map<String, String> headers, String formBody) throws Exception {
         return postForm(urlString, headers, formBody, null);
     }
 
@@ -403,8 +413,8 @@ public final class HttpUtil {
      * @throws Exception if a network or protocol error occurs
      * @since 0.8.0
      */
-    public static JsonObject postForm(
-            String urlString, Map<String, String> headers, String formBody, NetworkScope scope) throws Exception {
+    public JsonObject postForm(String urlString, Map<String, String> headers, String formBody, NetworkScope scope)
+            throws Exception {
         return executeRequest(
                 urlString,
                 "POST",
@@ -472,7 +482,7 @@ public final class HttpUtil {
      * @throws Exception if a network or protocol error occurs
      * @since 0.6.0
      */
-    public static HttpResponse postFormForStatus(String urlString, Map<String, String> headers, String formBody)
+    public HttpResponse postFormForStatus(String urlString, Map<String, String> headers, String formBody)
             throws Exception {
         return postFormForStatus(urlString, headers, formBody, null);
     }
@@ -489,7 +499,7 @@ public final class HttpUtil {
      * @throws Exception if a network or protocol error occurs
      * @since 0.8.0
      */
-    public static HttpResponse postFormForStatus(
+    public HttpResponse postFormForStatus(
             String urlString, Map<String, String> headers, String formBody, NetworkScope scope) throws Exception {
         return executeForStatus(
                 urlString,
@@ -511,7 +521,7 @@ public final class HttpUtil {
      * @throws Exception if a network or protocol error occurs
      * @since 1.0.0
      */
-    public static HttpResponse postJsonForStatus(String urlString, Map<String, String> headers, String jsonBody)
+    public HttpResponse postJsonForStatus(String urlString, Map<String, String> headers, String jsonBody)
             throws Exception {
         return postJsonForStatus(urlString, headers, jsonBody, null);
     }
@@ -530,7 +540,7 @@ public final class HttpUtil {
      * @throws Exception if a network or protocol error occurs
      * @since 0.12.0
      */
-    public static HttpResponse postJsonForStatus(
+    public HttpResponse postJsonForStatus(
             String urlString, Map<String, String> headers, String jsonBody, NetworkScope scope) throws Exception {
         return executeForStatus(
                 urlString, "POST", "application/json", headers, jsonBody.getBytes(StandardCharsets.UTF_8), scope);
@@ -601,7 +611,7 @@ public final class HttpUtil {
      * @throws Exception if a network or protocol error occurs
      * @since 0.12.0
      */
-    public static JsonResponse postJsonForElement(
+    public JsonResponse postJsonForElement(
             String urlString, Map<String, String> headers, String jsonBody, NetworkScope scope) throws Exception {
         return executeForElement(
                 urlString, "POST", "application/json", headers, jsonBody.getBytes(StandardCharsets.UTF_8), scope);
@@ -615,7 +625,7 @@ public final class HttpUtil {
      * @return the parsed JSON response, or null if the request failed
      * @throws Exception if a network or protocol error occurs
      */
-    public static JsonObject get(String urlString, Map<String, String> headers) throws Exception {
+    public JsonObject get(String urlString, Map<String, String> headers) throws Exception {
         return get(urlString, headers, null);
     }
 
@@ -629,7 +639,7 @@ public final class HttpUtil {
      * @throws Exception if a network or protocol error occurs
      * @since 0.8.0
      */
-    public static JsonObject get(String urlString, Map<String, String> headers, NetworkScope scope) throws Exception {
+    public JsonObject get(String urlString, Map<String, String> headers, NetworkScope scope) throws Exception {
         return executeRequest(urlString, "GET", null, headers, null, scope);
     }
 
@@ -644,7 +654,7 @@ public final class HttpUtil {
      * @throws Exception if a network or protocol error occurs
      * @since 0.8.0
      */
-    public static HttpResponse getForStatus(String urlString, Map<String, String> headers, NetworkScope scope)
+    public HttpResponse getForStatus(String urlString, Map<String, String> headers, NetworkScope scope)
             throws Exception {
         return executeForStatus(urlString, "GET", null, headers, null, scope);
     }
@@ -664,7 +674,7 @@ public final class HttpUtil {
      * @throws Exception if a network or protocol error occurs
      * @since 1.0.0
      */
-    public static HttpResponse sendForStatus(
+    public HttpResponse sendForStatus(
             String method,
             String urlString,
             String contentType,
@@ -721,7 +731,7 @@ public final class HttpUtil {
      * @throws Exception if a network or protocol error occurs
      * @since 0.8.0
      */
-    public static HeaderResponse getHeader(
+    public HeaderResponse getHeader(
             String urlString, Map<String, String> headers, String headerName, NetworkScope scope) throws Exception {
         HttpURLConnection conn = open(urlString, scope);
         conn.setRequestMethod("GET");
@@ -754,7 +764,7 @@ public final class HttpUtil {
      * @throws Exception if a network or protocol error occurs
      * @since 0.8.0
      */
-    public static byte[] getBytes(String urlString, Map<String, String> headers, long maxBytes, NetworkScope scope)
+    public byte[] getBytes(String urlString, Map<String, String> headers, long maxBytes, NetworkScope scope)
             throws Exception {
         return getBytesForStatus(urlString, headers, maxBytes, scope).body();
     }
@@ -807,7 +817,7 @@ public final class HttpUtil {
      * @throws Exception if a network or protocol error occurs
      * @since 0.12.0
      */
-    public static BytesResponse getBytesForStatus(
+    public BytesResponse getBytesForStatus(
             String urlString, Map<String, String> headers, long maxBytes, NetworkScope scope) throws Exception {
         return getBytesForStatus(urlString, headers, maxBytes, scope, anywhere -> true);
     }
@@ -831,7 +841,7 @@ public final class HttpUtil {
      * @throws Exception if a network or protocol error occurs
      * @since 0.12.0
      */
-    public static BytesResponse getBytesForStatus(
+    public BytesResponse getBytesForStatus(
             String urlString,
             Map<String, String> headers,
             long maxBytes,
@@ -1056,7 +1066,7 @@ public final class HttpUtil {
      * @return the parsed JsonObject from the response stream, or null if status is not 2xx
      * @throws Exception if connection fails or stream reading is interrupted
      */
-    private static JsonObject executeRequest(
+    private JsonObject executeRequest(
             String urlString,
             String method,
             String contentType,
@@ -1151,7 +1161,7 @@ public final class HttpUtil {
         }
     }
 
-    private static HttpResponse executeForStatus(
+    private HttpResponse executeForStatus(
             String urlString,
             String method,
             String contentType,
@@ -1180,7 +1190,7 @@ public final class HttpUtil {
      * @return the status and parsed body; the body is null when absent or not JSON
      * @throws Exception if a network or protocol error occurs
      */
-    private static JsonResponse executeForElement(
+    private JsonResponse executeForElement(
             String urlString,
             String method,
             String contentType,

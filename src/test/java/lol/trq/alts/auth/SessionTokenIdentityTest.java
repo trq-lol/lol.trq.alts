@@ -20,6 +20,7 @@ import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.model.SessionData;
+import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,6 +61,7 @@ class SessionTokenIdentityTest {
                 localStore.store(),
                 injected::set,
                 chain.config(),
+                TestTransports.direct(),
                 Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
     }
 

@@ -4,7 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
-import lol.trq.alts.net.HttpUtil;
+import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 
 /**
@@ -42,7 +42,7 @@ final class ProfileServiceImpl implements ProfileService {
         }
         JsonObject request = new JsonObject();
         request.addProperty("profileName", name);
-        HttpUtil.HttpResponse response = http.exchange(
+        HttpTransport.HttpResponse response = http.exchange(
                 "POST",
                 endpoints.profile(),
                 "application/json",
@@ -58,7 +58,7 @@ final class ProfileServiceImpl implements ProfileService {
      * @param response the creation response
      * @return the classified result
      */
-    private ProfileCreationResult classify(HttpUtil.HttpResponse response) {
+    private ProfileCreationResult classify(HttpTransport.HttpResponse response) {
         int status = response.status();
         if (response.successful()) {
             PlayerProfile profile =

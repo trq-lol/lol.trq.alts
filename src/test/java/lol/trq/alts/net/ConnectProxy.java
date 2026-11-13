@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * A stand-in HTTP proxy that only tunnels: it answers {@code CONNECT}, optionally demanding one exact
@@ -28,6 +29,7 @@ final class ConnectProxy implements AutoCloseable {
     private final List<String> requestLines = Collections.synchronizedList(new ArrayList<>());
     private final List<String> authorizations = Collections.synchronizedList(new ArrayList<>());
     private final List<Socket> open = Collections.synchronizedList(new ArrayList<>());
+    private final AtomicInteger closedByClient = new AtomicInteger();
 
     /**
      * Starts the proxy.
@@ -52,6 +54,11 @@ final class ConnectProxy implements AutoCloseable {
     /** The {@code Proxy-Authorization} of every connection accepted, in order; empty when absent. */
     List<String> authorizations() {
         return authorizations;
+    }
+
+    /** How many established tunnels the client itself closed: their client side reached end of stream. */
+    int tunnelsClosedByClient() {
+        return closedByClient.get();
     }
 
     private void accept() {
@@ -98,7 +105,18 @@ final class ConnectProxy implements AutoCloseable {
             toClient.write("HTTP/1.1 200 Connection established\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1));
             toClient.flush();
 
-            Thread.ofPlatform().daemon().name("connect-proxy-upstream").start(() -> relay(client, origin));
+            Thread.ofPlatform().daemon().name("connect-proxy-upstream").start(() -> {
+                try {
+                    client.getInputStream().transferTo(origin.getOutputStream());
+                    // A normal return is end of stream: the client closed its side of the tunnel.
+                    closedByClient.incrementAndGet();
+                } catch (IOException closed) {
+                    // Closed under us, by the other direction or by close().
+                } finally {
+                    closeQuietly(client);
+                    closeQuietly(origin);
+                }
+            });
             relay(origin, client);
         } catch (IOException | RuntimeException failure) {
             closeQuietly(client);

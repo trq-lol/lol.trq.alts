@@ -22,6 +22,8 @@ import org.junit.jupiter.api.Test;
 /** Connection-level guarantees every request shares: it always ends, and it never re-sends its headers. */
 class HttpUtilConnectionTest {
 
+    private final HttpTransport http = TestTransports.direct();
+
     private HttpServer server;
     private final AtomicReference<String> headerSeenByRedirectTarget = new AtomicReference<>();
 
@@ -63,7 +65,7 @@ class HttpUtilConnectionTest {
         HttpURLConnection conn = (HttpURLConnection)
                 URI.create("http://127.0.0.1:1/unused").toURL().openConnection();
 
-        HttpUtil.applyDefaults(conn);
+        HttpTransport.applyDefaults(conn);
 
         assertTrue(
                 conn.getConnectTimeout() > 0 && conn.getConnectTimeout() <= 30_000,
@@ -78,7 +80,7 @@ class HttpUtilConnectionTest {
     void aGetRedirectIsNotFollowedSoTheBearerTokenStaysOnTheOriginalHost() throws Exception {
         String base = startRedirectingServer();
 
-        JsonObject response = HttpUtil.get(base + "/start", Map.of("Authorization", "Bearer secret-token"));
+        JsonObject response = http.get(base + "/start", Map.of("Authorization", "Bearer secret-token"));
 
         assertNull(response, "a redirect is not a successful response");
         assertNull(
@@ -90,7 +92,7 @@ class HttpUtilConnectionTest {
     void aFormPostRedirectIsNotFollowedEither() throws Exception {
         String base = startRedirectingServer();
 
-        HttpUtil.HttpResponse response = HttpUtil.postFormForStatus(
+        HttpTransport.HttpResponse response = http.postFormForStatus(
                 base + "/start", Map.of("Authorization", "Bearer secret-token"), "grant_type=refresh_token");
 
         assertEquals(302, response.status(), "the caller must see the redirect, not silently chase it");

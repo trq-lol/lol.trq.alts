@@ -17,6 +17,7 @@ import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
+import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -95,7 +96,8 @@ class RefreshTokenExchangeTest {
     private static MicrosoftAuthUtil.RefreshRejectedException rejectionFor(MicrosoftAuthConfig config) {
         ExecutionException thrown = assertThrows(
                 ExecutionException.class,
-                () -> MicrosoftAuthUtil.authenticateWithRefreshToken(config, "still-good")
+                () -> new MicrosoftAuthUtil(TestTransports.direct())
+                        .authenticateWithRefreshToken(config, "still-good")
                         .get());
         return assertInstanceOf(MicrosoftAuthUtil.RefreshRejectedException.class, thrown.getCause());
     }
@@ -111,7 +113,8 @@ class RefreshTokenExchangeTest {
     void sendsRefreshGrantAndReturnsRotatedToken() throws Exception {
         MicrosoftAuthConfig config = startServer();
 
-        MinecraftProfile profile = MicrosoftAuthUtil.authenticateWithRefreshToken(config, "original-refresh")
+        MinecraftProfile profile = new MicrosoftAuthUtil(TestTransports.direct())
+                .authenticateWithRefreshToken(config, "original-refresh")
                 .get();
 
         String body = tokenRequestBody.get();
@@ -137,7 +140,8 @@ class RefreshTokenExchangeTest {
     void aModernAppSendsNoRedirectUriAndADelegatedTicket() throws Exception {
         MicrosoftAuthConfig config = startServer();
 
-        MicrosoftAuthUtil.authenticateWithRefreshToken(config, "original-refresh")
+        new MicrosoftAuthUtil(TestTransports.direct())
+                .authenticateWithRefreshToken(config, "original-refresh")
                 .get();
 
         assertFalse(
@@ -157,7 +161,8 @@ class RefreshTokenExchangeTest {
     void aLegacyMsaAppSendsTheDesktopRedirectTheMbiScopeAndAnRpsTicket() throws Exception {
         MicrosoftAuthConfig config = startServer(MicrosoftAuthConfig.legacyMsa("legacy-app-id"));
 
-        MicrosoftAuthUtil.authenticateWithRefreshToken(config, "original-refresh")
+        new MicrosoftAuthUtil(TestTransports.direct())
+                .authenticateWithRefreshToken(config, "original-refresh")
                 .get();
 
         String body = tokenRequestBody.get();
@@ -180,7 +185,8 @@ class RefreshTokenExchangeTest {
         tokenBody = "{\"access_token\":\"ms-access\",\"expires_in\":3600}";
         MicrosoftAuthConfig config = startServer();
 
-        MinecraftProfile profile = MicrosoftAuthUtil.authenticateWithRefreshToken(config, "original-refresh")
+        MinecraftProfile profile = new MicrosoftAuthUtil(TestTransports.direct())
+                .authenticateWithRefreshToken(config, "original-refresh")
                 .get();
 
         assertEquals("original-refresh", profile.refreshToken(), "omitted rotation must not clear the token");
@@ -194,7 +200,8 @@ class RefreshTokenExchangeTest {
 
         ExecutionException thrown = assertThrows(
                 ExecutionException.class,
-                () -> MicrosoftAuthUtil.authenticateWithRefreshToken(config, "revoked")
+                () -> new MicrosoftAuthUtil(TestTransports.direct())
+                        .authenticateWithRefreshToken(config, "revoked")
                         .get());
 
         MicrosoftAuthUtil.RefreshRejectedException rejection =
@@ -206,7 +213,8 @@ class RefreshTokenExchangeTest {
     void theRefreshExchangeEncodesTheClientIdSoItCannotInjectFormParameters() throws Exception {
         MicrosoftAuthConfig config = startServer(HOSTILE_CLIENT_ID);
 
-        MicrosoftAuthUtil.authenticateWithRefreshToken(config, "original-refresh")
+        new MicrosoftAuthUtil(TestTransports.direct())
+                .authenticateWithRefreshToken(config, "original-refresh")
                 .get();
 
         String body = tokenRequestBody.get();
@@ -218,8 +226,8 @@ class RefreshTokenExchangeTest {
     void theAuthorizationCodeExchangeEncodesTheClientIdToo() throws Exception {
         MicrosoftAuthConfig config = startServer(HOSTILE_CLIENT_ID);
 
-        CompletableFuture<?> exchange =
-                MicrosoftAuthUtil.exchangeCodeForToken(config, "auth-code", "http://127.0.0.1/callback", "verifier");
+        CompletableFuture<?> exchange = new MicrosoftAuthUtil(TestTransports.direct())
+                .exchangeCodeForToken(config, "auth-code", "http://127.0.0.1/callback", "verifier");
         exchange.get();
 
         String body = tokenRequestBody.get();
@@ -275,7 +283,8 @@ class RefreshTokenExchangeTest {
 
         ExecutionException thrown = assertThrows(
                 ExecutionException.class,
-                () -> MicrosoftAuthUtil.authenticateWithRefreshToken(config, "fine")
+                () -> new MicrosoftAuthUtil(TestTransports.direct())
+                        .authenticateWithRefreshToken(config, "fine")
                         .get());
 
         MicrosoftAuthUtil.RefreshRejectedException rejection =

@@ -15,8 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import lol.trq.alts.net.FailureText;
-import lol.trq.alts.net.HttpUtil;
-import lol.trq.alts.net.IoExecutor;
+import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.time.TimeSource;
 
@@ -68,15 +67,16 @@ final class NameServiceImpl implements NameService {
 
     @Override
     public NameChangeResult change(String name) throws AccountException {
-        HttpUtil.HttpResponse response;
+        HttpTransport.HttpResponse response;
         try {
-            response = HttpUtil.sendForStatus(
-                    "PUT",
-                    endpoints.nameChange(name),
-                    null,
-                    java.util.Map.of("Authorization", "Bearer " + http.token()),
-                    null,
-                    NetworkScope.forAccount(NetworkScope.Purpose.PROFILE, http.accountUuid(), name));
+            response = http.transport()
+                    .sendForStatus(
+                            "PUT",
+                            endpoints.nameChange(name),
+                            null,
+                            java.util.Map.of("Authorization", "Bearer " + http.token()),
+                            null,
+                            NetworkScope.forAccount(NetworkScope.Purpose.PROFILE, http.accountUuid(), name));
         } catch (Exception transport) {
             throw new AccountException("PUT name change: " + FailureText.of(transport), transport);
         }
@@ -89,7 +89,7 @@ final class NameServiceImpl implements NameService {
      * @param response the change response
      * @return the classified result
      */
-    private NameChangeResult classify(HttpUtil.HttpResponse response) {
+    private NameChangeResult classify(HttpTransport.HttpResponse response) {
         int status = response.status();
         if (status >= 200 && status < 300) {
             PlayerProfile profile =
@@ -108,7 +108,7 @@ final class NameServiceImpl implements NameService {
         return new NameChangeResult(outcome, null, message(response, outcome), response.retryAfter());
     }
 
-    private static String message(HttpUtil.HttpResponse response, NameChangeResult.Outcome outcome) {
+    private static String message(HttpTransport.HttpResponse response, NameChangeResult.Outcome outcome) {
         JsonObject body = response.body();
         if (body != null) {
             for (String field : new String[] {"errorMessage", "error", "details"}) {
@@ -163,7 +163,8 @@ final class NameServiceImpl implements NameService {
         }
         // Re-checked on the worker thread: a run stopped while this attempt sat queued must not fire it.
         return CompletableFuture.supplyAsync(
-                        () -> run.stopped() ? null : attemptChange(run.name), IoExecutor.executor())
+                        () -> run.stopped() ? null : attemptChange(run.name),
+                        http.transport().executor())
                 .thenCompose(result -> {
                     if (result == null) {
                         return CompletableFuture.completedFuture((Void) null);
@@ -210,7 +211,7 @@ final class NameServiceImpl implements NameService {
      * is bounded by that threshold so it never becomes a core-pinning busy loop, and both phases give up
      * as soon as the run is stopped.
      */
-    private static CompletableFuture<Void> waitUntil(Instant target, TimeSource clock, BooleanSupplier stopped) {
+    private CompletableFuture<Void> waitUntil(Instant target, TimeSource clock, BooleanSupplier stopped) {
         if (stopped.getAsBoolean()) {
             return CompletableFuture.completedFuture(null);
         }
@@ -226,20 +227,21 @@ final class NameServiceImpl implements NameService {
                         }
                         return null;
                     },
-                    IoExecutor.executor());
+                    http.transport().executor());
         }
         long sleep = remaining - SPIN_THRESHOLD_MILLIS;
         return delay(Duration.ofMillis(sleep)).thenCompose(ignored -> waitUntil(target, clock, stopped));
     }
 
-    private static CompletableFuture<Void> delay(Duration duration) {
+    private CompletableFuture<Void> delay(Duration duration) {
         long millis = duration == null ? 0L : duration.toMillis();
         if (millis <= 0L) {
             return CompletableFuture.completedFuture(null);
         }
         return CompletableFuture.supplyAsync(
                         () -> null,
-                        CompletableFuture.delayedExecutor(millis, TimeUnit.MILLISECONDS, IoExecutor.executor()))
+                        CompletableFuture.delayedExecutor(
+                                millis, TimeUnit.MILLISECONDS, http.transport().executor()))
                 .thenApply(ignored -> null);
     }
 

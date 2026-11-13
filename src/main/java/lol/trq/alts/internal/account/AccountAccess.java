@@ -4,6 +4,7 @@ import java.util.Objects;
 import lol.trq.alts.account.AccountEndpoints;
 import lol.trq.alts.account.AccountServices;
 import lol.trq.alts.account.ProfileLookupService;
+import lol.trq.alts.net.HttpTransport;
 
 /**
  * How the runtime builds the account services and the profile lookup without either having a public
@@ -73,19 +74,21 @@ public final class AccountAccess {
         /**
          * Builds the services for one account.
          *
+         * @param transport the runtime's transport
          * @param token the account's Minecraft access token
          * @param accountUuid the account UUID, for per-account request routing; may be null
          * @param endpoints the Minecraft services base
          * @return the services
          */
-        AccountServices services(String token, String accountUuid, AccountEndpoints endpoints);
+        AccountServices services(HttpTransport transport, String token, String accountUuid, AccountEndpoints endpoints);
 
         /**
          * Builds the public profile lookup.
          *
+         * @param transport the runtime's transport
          * @param endpoints the Minecraft services base
          * @return the lookup service
          */
-        ProfileLookupService profileLookup(AccountEndpoints endpoints);
+        ProfileLookupService profileLookup(HttpTransport transport, AccountEndpoints endpoints);
     }
 }

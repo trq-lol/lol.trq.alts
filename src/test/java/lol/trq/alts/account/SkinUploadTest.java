@@ -13,7 +13,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import javax.imageio.ImageIO;
-import lol.trq.alts.net.NetTestHooks;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,7 +33,6 @@ class SkinUploadTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        NetTestHooks.resetHttp();
         server = new LoopbackServices();
         server.canned(200, PROFILE);
     }

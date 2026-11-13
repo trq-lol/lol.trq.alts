@@ -11,11 +11,9 @@ import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicBoolean;
 import lol.trq.alts.AltsRuntime;
-import lol.trq.alts.net.NetTestHooks;
 import lol.trq.alts.spi.StoreKeyProvider;
 import lol.trq.alts.store.AccountStore;
 import lol.trq.alts.store.HostSecrets;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -27,12 +25,6 @@ class StoreAccessTest {
 
     @TempDir
     Path dir;
-
-    @AfterEach
-    void resetNetworkStatics() {
-        NetTestHooks.resetHttp();
-        NetTestHooks.resetExecutor();
-    }
 
     @Test
     void aForeignBridgeIsRefusedAndTheLibraryStillBuilds() {

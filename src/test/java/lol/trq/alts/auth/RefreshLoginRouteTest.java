@@ -25,6 +25,7 @@ import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.BanInfo;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.model.SessionData;
+import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -112,7 +113,11 @@ class RefreshLoginRouteTest {
 
     private AltLoginServiceImpl service() {
         return new AltLoginServiceImpl(
-                localStore.store(), injected::set, config, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
+                localStore.store(),
+                injected::set,
+                config,
+                TestTransports.direct(),
+                Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
     }
 
     @Test
@@ -211,7 +216,11 @@ class RefreshLoginRouteTest {
     @Test
     void refreshRouteRequiresConfiguration() throws Exception {
         AltLoginServiceImpl unconfigured = new AltLoginServiceImpl(
-                localStore.store(), injected::set, null, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
+                localStore.store(),
+                injected::set,
+                null,
+                TestTransports.direct(),
+                Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
 
         LoginResult result =
                 unconfigured.loginRefreshToken("original", LoginMode.ADD).get();
@@ -277,6 +286,7 @@ class RefreshLoginRouteTest {
                     throw new IllegalStateException("host injector broke");
                 },
                 config,
+                TestTransports.direct(),
                 Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
 
         LoginResult result = broken.loginAccount(stored).get();

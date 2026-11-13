@@ -37,6 +37,13 @@ import org.junit.jupiter.api.Test;
  */
 class ProxyTunnelTest {
 
+    private HttpTransport http;
+
+    /** Builds the transport a runtime with {@code provider} would hold, trusting the loopback origin. */
+    private void bind(lol.trq.alts.spi.ProxyProvider provider) {
+        http = TestTransports.trusting(provider, tls.trustingFactory());
+    }
+
     private static final String BODY = "{\"id\":\"00000000000040008000000000000001\",\"name\":\"Alex\"}";
     private static final String CREDENTIAL = "Basic dXNlcjpwYXNz";
     private static final NetworkScope PROFILE = NetworkScope.of(NetworkScope.Purpose.PROFILE);
@@ -79,12 +86,13 @@ class ProxyTunnelTest {
             exchange.close();
         });
         origin.start();
-        HttpUtil.tlsSocketFactoryForTests(tls.trustingFactory());
     }
 
     @AfterEach
     void tearDown() throws IOException {
-        HttpUtil.resetForTests();
+        if (http != null) {
+            http.close();
+        }
         origin.stop(0);
         if (proxy != null) {
             proxy.close();
@@ -103,12 +111,35 @@ class ProxyTunnelTest {
         return ProxyRoute.http(loopback(), proxy.port());
     }
 
+    /**
+     * A kept-alive tunnel is a live connection to the proxy, held open under one route's identity. Closing
+     * the transport must close it, and refuse what comes after rather than open a new one.
+     */
+    @Test
+    void closingTheTransportClosesItsPooledTunnels() throws Exception {
+        proxy = new ConnectProxy(CREDENTIAL);
+        bind(scope -> throughProxy().withCredentials("user", "pass".toCharArray()));
+        http.get(originUrl(), null, PROFILE);
+        http.get(originUrl(), null, PROFILE);
+        assertEquals(1, proxy.requestLines().size(), "the second request reused the pooled tunnel");
+        assertEquals(0, proxy.tunnelsClosedByClient(), "and the tunnel is still open");
+
+        http.close();
+
+        for (int i = 0; i < 200 && proxy.tunnelsClosedByClient() == 0; i++) {
+            Thread.sleep(10);
+        }
+        assertEquals(1, proxy.tunnelsClosedByClient(), "the proxy saw the pooled tunnel closed");
+        assertThrows(IOException.class, () -> http.get(originUrl(), null, PROFILE));
+        assertEquals(1, proxy.requestLines().size(), "a closed transport opens no new tunnel");
+    }
+
     @Test
     void anHttpsRequestThroughAnAuthenticatingProxySucceeds() throws Exception {
         proxy = new ConnectProxy(CREDENTIAL);
-        HttpUtil.bind(scope -> throughProxy().withCredentials("user", "pass".toCharArray()));
+        bind(scope -> throughProxy().withCredentials("user", "pass".toCharArray()));
 
-        JsonObject response = HttpUtil.get(originUrl(), null, PROFILE);
+        JsonObject response = http.get(originUrl(), null, PROFILE);
 
         assertNotNull(response, "a proxy that requires a credential must be given one");
         assertEquals("Alex", response.get("name").getAsString());
@@ -118,9 +149,9 @@ class ProxyTunnelTest {
     @Test
     void theProxySeesTheCredentialOnTheConnect() throws Exception {
         proxy = new ConnectProxy(CREDENTIAL);
-        HttpUtil.bind(scope -> throughProxy().withCredentials("user", "pass".toCharArray()));
+        bind(scope -> throughProxy().withCredentials("user", "pass".toCharArray()));
 
-        HttpUtil.get(originUrl(), null, PROFILE);
+        http.get(originUrl(), null, PROFILE);
 
         assertEquals(
                 List.of("CONNECT " + loopback() + ":" + origin.getAddress().getPort() + " HTTP/1.1"),
@@ -131,11 +162,11 @@ class ProxyTunnelTest {
     @Test
     void theOriginNeverReceivesTheProxyCredential() throws Exception {
         proxy = new ConnectProxy(CREDENTIAL);
-        HttpUtil.bind(scope -> throughProxy().withCredentials("user", "pass".toCharArray()));
+        bind(scope -> throughProxy().withCredentials("user", "pass".toCharArray()));
 
-        HttpUtil.get(originUrl(), null, PROFILE);
-        HttpUtil.postJsonForStatus(originUrl(), null, "{}");
-        HttpUtil.getBytes(originUrl(), null, 1 << 20, PROFILE);
+        http.get(originUrl(), null, PROFILE);
+        http.postJsonForStatus(originUrl(), null, "{}");
+        http.getBytes(originUrl(), null, 1 << 20, PROFILE);
 
         assertEquals(3, originHits.get());
         assertFalse(
@@ -146,9 +177,9 @@ class ProxyTunnelTest {
     @Test
     void aWrongCredentialFailsTheRequestRatherThanGoingDirect() throws Exception {
         proxy = new ConnectProxy(CREDENTIAL);
-        HttpUtil.bind(scope -> throughProxy().withCredentials("user", "wrong".toCharArray()));
+        bind(scope -> throughProxy().withCredentials("user", "wrong".toCharArray()));
 
-        assertThrows(IOException.class, () -> HttpUtil.get(originUrl(), null, PROFILE));
+        assertThrows(IOException.class, () -> http.get(originUrl(), null, PROFILE));
 
         assertEquals(1, proxy.requestLines().size(), "the tunnel was attempted through the proxy");
         assertEquals(0, originHits.get(), "a refused tunnel must never fall back to the real address");
@@ -157,9 +188,9 @@ class ProxyTunnelTest {
     @Test
     void aMissingCredentialFailsClosedToo() throws Exception {
         proxy = new ConnectProxy(CREDENTIAL);
-        HttpUtil.bind(scope -> throughProxy());
+        bind(scope -> throughProxy());
 
-        assertThrows(IOException.class, () -> HttpUtil.get(originUrl(), null, PROFILE));
+        assertThrows(IOException.class, () -> http.get(originUrl(), null, PROFILE));
 
         assertEquals(0, originHits.get());
     }
@@ -167,9 +198,9 @@ class ProxyTunnelTest {
     @Test
     void anUnauthenticatedProxyTunnelsWithoutACredential() throws Exception {
         proxy = new ConnectProxy(null);
-        HttpUtil.bind(scope -> throughProxy());
+        bind(scope -> throughProxy());
 
-        assertNotNull(HttpUtil.get(originUrl(), null, PROFILE));
+        assertNotNull(http.get(originUrl(), null, PROFILE));
 
         assertEquals(List.of(""), proxy.authorizations());
         assertEquals(1, originHits.get());
@@ -179,10 +210,10 @@ class ProxyTunnelTest {
     @Test
     void hostnameVerificationStillRunsInsideTheTunnel() throws Exception {
         proxy = new ConnectProxy(null);
-        HttpUtil.bind(scope -> throughProxy());
+        bind(scope -> throughProxy());
         String byAnotherName = "https://localhost:" + origin.getAddress().getPort() + "/profile";
 
-        assertThrows(SSLException.class, () -> HttpUtil.get(byAnotherName, null, PROFILE));
+        assertThrows(SSLException.class, () -> http.get(byAnotherName, null, PROFILE));
 
         assertEquals(
                 List.of("CONNECT localhost:" + origin.getAddress().getPort() + " HTTP/1.1"),
@@ -204,9 +235,9 @@ class ProxyTunnelTest {
                     // The client hanging up is the expected ending.
                 }
             });
-            HttpUtil.bind(scope -> ProxyRoute.http(loopback(), impostor.getLocalPort()));
+            bind(scope -> ProxyRoute.http(loopback(), impostor.getLocalPort()));
 
-            assertThrows(IOException.class, () -> HttpUtil.get(originUrl(), null, PROFILE));
+            assertThrows(IOException.class, () -> http.get(originUrl(), null, PROFILE));
         }
 
         assertEquals(0, originHits.get());
@@ -278,14 +309,13 @@ class ProxyTunnelTest {
         assertThrows(IOException.class, () -> ProxyTunnelSocketFactory.authority("", 443));
     }
 
-    /** Without the test seam the JVM's default trust applies, and it has never heard of this certificate. */
+    /** Without a substituted factory the JVM's default trust applies, and it has never heard of this certificate. */
     @Test
     void defaultTrustStillAppliesInsideTheTunnel() throws Exception {
         proxy = new ConnectProxy(null);
-        HttpUtil.bind(scope -> throughProxy());
-        HttpUtil.tlsSocketFactoryForTests(null);
+        http = TestTransports.through(scope -> throughProxy());
 
-        assertThrows(SSLException.class, () -> HttpUtil.get(originUrl(), null, PROFILE));
+        assertThrows(SSLException.class, () -> http.get(originUrl(), null, PROFILE));
 
         assertEquals(0, originHits.get());
     }
@@ -299,10 +329,10 @@ class ProxyTunnelTest {
         proxy = new ConnectProxy(null);
         ProxyRoute first = throughProxy().withCredentials("session-a", "pass".toCharArray());
         ProxyRoute second = throughProxy().withCredentials("session-b", "pass".toCharArray());
-        HttpUtil.bind(scope -> "a".equals(scope.accountUsername()) ? first : second);
+        bind(scope -> "a".equals(scope.accountUsername()) ? first : second);
 
-        HttpUtil.get(originUrl(), null, NetworkScope.forAccount(NetworkScope.Purpose.PROFILE, null, "a"));
-        HttpUtil.get(originUrl(), null, NetworkScope.forAccount(NetworkScope.Purpose.PROFILE, null, "b"));
+        http.get(originUrl(), null, NetworkScope.forAccount(NetworkScope.Purpose.PROFILE, null, "a"));
+        http.get(originUrl(), null, NetworkScope.forAccount(NetworkScope.Purpose.PROFILE, null, "b"));
 
         assertEquals(
                 List.of(first.authorizationHeader(), second.authorizationHeader()),
@@ -319,16 +349,15 @@ class ProxyTunnelTest {
     void oneIdentityReusesItsTunnelAcrossRequests() throws Exception {
         proxy = new ConnectProxy(null);
         ProxyRoute route = throughProxy().withCredentials("session-a", "pass".toCharArray());
-        HttpUtil.bind(scope -> route);
+        bind(scope -> route);
         String refused = originUrl().replace("/profile", "/refused");
 
-        HttpUtil.get(originUrl(), null, PROFILE);
-        HttpUtil.getBytes(originUrl(), null, 1 << 20, PROFILE);
-        assertEquals(
-                "seen", HttpUtil.getHeader(refused, null, "X-Marker", PROFILE).value());
-        assertEquals(403, HttpUtil.getForStatus(refused, null, PROFILE).status());
-        HttpUtil.get(refused, null, PROFILE);
-        HttpUtil.get(originUrl(), null, PROFILE);
+        http.get(originUrl(), null, PROFILE);
+        http.getBytes(originUrl(), null, 1 << 20, PROFILE);
+        assertEquals("seen", http.getHeader(refused, null, "X-Marker", PROFILE).value());
+        assertEquals(403, http.getForStatus(refused, null, PROFILE).status());
+        http.get(refused, null, PROFILE);
+        http.get(originUrl(), null, PROFILE);
 
         assertEquals(3, originHits.get());
         assertEquals(
@@ -343,10 +372,10 @@ class ProxyTunnelTest {
         ProxyRoute before = throughProxy().withCredentials("user", "old".toCharArray());
         ProxyRoute after = throughProxy().withCredentials("user", "new".toCharArray());
         AtomicInteger calls = new AtomicInteger();
-        HttpUtil.bind(scope -> calls.getAndIncrement() == 0 ? before : after);
+        bind(scope -> calls.getAndIncrement() == 0 ? before : after);
 
-        HttpUtil.get(originUrl(), null, PROFILE);
-        HttpUtil.get(originUrl(), null, PROFILE);
+        http.get(originUrl(), null, PROFILE);
+        http.get(originUrl(), null, PROFILE);
 
         assertEquals(List.of(before.authorizationHeader(), after.authorizationHeader()), proxy.authorizations());
     }
@@ -355,25 +384,25 @@ class ProxyTunnelTest {
     void theIdentityCacheIsBounded() throws Exception {
         proxy = new ConnectProxy(null);
         AtomicInteger next = new AtomicInteger();
-        HttpUtil.bind(scope -> throughProxy().withCredentials("session-" + next.getAndIncrement(), new char[] {'p'}));
+        bind(scope -> throughProxy().withCredentials("session-" + next.getAndIncrement(), new char[] {'p'}));
 
-        int requests = HttpUtil.MAX_TUNNEL_FACTORIES + 8;
+        int requests = HttpTransport.MAX_TUNNEL_FACTORIES + 8;
         for (int i = 0; i < requests; i++) {
-            HttpUtil.get(originUrl(), null, PROFILE);
+            http.get(originUrl(), null, PROFILE);
         }
 
         assertEquals(requests, originHits.get());
         assertTrue(
-                HttpUtil.tunnelFactoryCount() <= HttpUtil.MAX_TUNNEL_FACTORIES,
-                "a host rotating identities must not grow the cache without limit: " + HttpUtil.tunnelFactoryCount());
+                http.tunnelFactoryCount() <= HttpTransport.MAX_TUNNEL_FACTORIES,
+                "a host rotating identities must not grow the cache without limit: " + http.tunnelFactoryCount());
     }
 
     @Test
     void aDirectHttpsRequestIsUnaffected() throws Exception {
         proxy = new ConnectProxy(null);
-        HttpUtil.bind(scope -> ProxyRoute.direct());
+        bind(scope -> ProxyRoute.direct());
 
-        assertNotNull(HttpUtil.get(originUrl(), null, PROFILE));
+        assertNotNull(http.get(originUrl(), null, PROFILE));
 
         assertEquals(0, proxy.requestLines().size());
         assertEquals(1, originHits.get());

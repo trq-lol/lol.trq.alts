@@ -14,11 +14,9 @@ import java.util.List;
 import java.util.Map;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
 import lol.trq.alts.auth.MicrosoftAuthUtil.AuthFlowException;
-import lol.trq.alts.net.HttpUtil;
-import lol.trq.alts.net.NetTestHooks;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.net.ProxyRoute;
-import org.junit.jupiter.api.AfterEach;
+import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -44,12 +42,6 @@ class CookieChainTest {
     private static final String BUNDLE =
             "[{\"Item1\":\"rp://api.minecraftservices.com/\",\"Item2\":{\"Token\":\"xsts-token\","
                     + "\"DisplayClaims\":{\"xui\":[{\"uhs\":\"hash\"}]}}}]";
-
-    @AfterEach
-    void tearDown() {
-        // Static, so leaving a provider installed would route every later test through it.
-        NetTestHooks.resetHttp();
-    }
 
     private static String landing() {
         return LANDING + Base64.getEncoder().encodeToString(BUNDLE.getBytes(StandardCharsets.UTF_8));
@@ -235,15 +227,15 @@ class CookieChainTest {
     @Test
     void theTailOfTheFlowUsesTheConfiguredEndpointsAndCarriesTheAccount() throws Exception {
         List<NetworkScope> scopes = new ArrayList<>();
-        HttpUtil.bind(scope -> {
+        CookieAuthUtil cookies = new CookieAuthUtil(TestTransports.through(scope -> {
             scopes.add(scope);
             return ProxyRoute.direct();
-        });
+        }));
 
         try (AuthChainServer chain = new AuthChainServer()) {
             NetworkScope account = NetworkScope.forAccount(NetworkScope.Purpose.AUTH, AuthChainServer.UUID, "Alex");
 
-            MinecraftProfile profile = CookieAuthUtil.completeFromLanding(landing(), chain.config(), account);
+            MinecraftProfile profile = cookies.completeFromLanding(landing(), chain.config(), account);
 
             assertEquals("Alex", profile.username());
             assertEquals(AuthChainServer.UUID, profile.uuid());
@@ -279,7 +271,8 @@ class CookieChainTest {
 
     private static AuthFlowException tailFailure(AuthChainServer chain) {
         return assertThrows(
-                AuthFlowException.class, () -> CookieAuthUtil.completeFromLanding(landing(), chain.config(), null));
+                AuthFlowException.class,
+                () -> new CookieAuthUtil(TestTransports.direct()).completeFromLanding(landing(), chain.config(), null));
     }
 
     @Test

@@ -5,6 +5,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import lol.trq.alts.account.AccountEndpoints;
 import lol.trq.alts.account.AccountServices;
@@ -23,8 +25,7 @@ import lol.trq.alts.internal.skin.UrlTemplateAvatarSource;
 import lol.trq.alts.internal.store.StoreAccess;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.GameStats;
-import lol.trq.alts.net.HttpUtil;
-import lol.trq.alts.net.IoExecutor;
+import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.skin.SkinAvatarCache;
 import lol.trq.alts.spi.AvatarSource;
 import lol.trq.alts.spi.GameStatsSource;
@@ -75,6 +76,8 @@ public final class AltsRuntime<H> implements AutoCloseable {
     private final StoreAccess.Bridge stores;
     private final AccountStore store;
     private final HostSecrets secrets;
+    private final HttpTransport transport;
+    private final ExecutorService ownedExecutor;
     private final AtomicBoolean closed = new AtomicBoolean();
 
     private AltsRuntime(Builder<H> builder) {
@@ -84,8 +87,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
         Objects.requireNonNull(builder.toastSink, "ToastSink required");
 
         // The stores come first: opening one is the step that can be refused (another runtime holds the
-        // file), and a refused build must leave nothing of its own behind, least of all the process-wide
-        // proxy provider and executor of the runtime that holds the file.
+        // file), and a refused build must leave nothing of its own behind: no lock, no executor.
         //
         // Each store is opened with its key, its directory and its lock in one step, so nothing can be
         // written under another key, and a second runtime on the same files fails here rather than
@@ -111,6 +113,15 @@ public final class AltsRuntime<H> implements AutoCloseable {
             throw refused;
         }
 
+        // The executor and the transport are this runtime's own. A host's executor is used and left alone;
+        // one the library creates here is the runtime's to shut down.
+        this.ownedExecutor = builder.executor == null
+                ? Executors.newThreadPerTaskExecutor(
+                        Thread.ofVirtual().name("alts-io-", 0).factory())
+                : null;
+        Executor executor = builder.executor != null ? builder.executor : ownedExecutor;
+        this.transport = new HttpTransport(builder.proxyProvider, executor);
+
         try {
             // Read what is already on disk here, so a host never has to know that opening and loading
             // are two steps. Both are safe to repeat: each clears its in-memory state before refilling it.
@@ -122,7 +133,8 @@ public final class AltsRuntime<H> implements AutoCloseable {
 
             this.toasts = builder.toastSink;
             this.vaultResolver = builder.vaultTransportResolver;
-            this.loginService = new AltLoginServiceImpl(store, builder.sessionInjector, builder.microsoftAuth);
+            this.loginService =
+                    new AltLoginServiceImpl(store, builder.sessionInjector, builder.microsoftAuth, transport);
 
             // The account services talk to the same host the auth chain validates against, so a host that
             // fronts Minecraft services with a proxy — overriding the profile URL — reaches them through the
@@ -131,21 +143,18 @@ public final class AltsRuntime<H> implements AutoCloseable {
                     ? builder.accountEndpoints
                     : accountEndpointsFrom(builder.microsoftAuth);
             this.accountAccess = AccountAccess.bridge();
-            this.profileLookup = accountAccess.profileLookup(accountEndpoints);
+            this.profileLookup = accountAccess.profileLookup(transport, accountEndpoints);
 
             // The import runs resolve and store through a login service whose injector does nothing, which
             // is what keeps importing fifty credentials from switching session fifty times.
             this.bulk = new BulkOperationsImpl(
                     store,
-                    new AltLoginServiceImpl(store, session -> {}, builder.microsoftAuth),
+                    new AltLoginServiceImpl(store, session -> {}, builder.microsoftAuth, transport),
                     loginService.accountService(),
-                    account -> accountServices(account).entitlements());
+                    account -> accountServices(account).entitlements(),
+                    executor);
             this.skinCache = SkinAccess.bridge()
-                    .cache(
-                            avatarSourceFrom(builder),
-                            builder.textureUploader,
-                            builder.mainThread,
-                            IoExecutor.executor());
+                    .cache(avatarSourceFrom(builder, transport), builder.textureUploader, builder.mainThread, executor);
 
             // Game stats are optional and per-server: one cache per registered source. A request for a
             // server with no source returns the shared empty cache, whose loader always yields null, so
@@ -156,7 +165,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
                 caches.put(
                         entry.getKey(),
                         new AsyncCache<>(
-                                IoExecutor.executor(),
+                                executor,
                                 uuid -> {
                                     try {
                                         return source.fetch(uuid);
@@ -167,13 +176,12 @@ public final class AltsRuntime<H> implements AutoCloseable {
                                 STATS_TTL_MILLIS));
             }
             this.gameStatsCaches = Map.copyOf(caches);
-            this.emptyStatsCache = new AsyncCache<>(IoExecutor.executor(), uuid -> null, STATS_TTL_MILLIS);
-
-            // Bound last, once nothing above can throw. Nothing built above reaches the network or the
-            // executor while it is being built; each reads these when it first does work.
-            HttpUtil.bind(builder.proxyProvider);
-            IoExecutor.bind(builder.executor);
+            this.emptyStatsCache = new AsyncCache<>(executor, uuid -> null, STATS_TTL_MILLIS);
         } catch (RuntimeException | Error failed) {
+            transport.close();
+            if (ownedExecutor != null) {
+                ownedExecutor.shutdown();
+            }
             stores.close(secrets);
             stores.close(store);
             throw failed;
@@ -185,11 +193,12 @@ public final class AltsRuntime<H> implements AutoCloseable {
      * default that crops the face from Mojang's skin.
      *
      * @param builder the builder
+     * @param transport the runtime's transport, which the library's own sources fetch through
      * @return the avatar source
      * @throws IllegalStateException if both a source and a template were set
      * @throws IllegalArgumentException if the template has no {@code {uuid}} placeholder
      */
-    private static AvatarSource avatarSourceFrom(Builder<?> builder) {
+    private static AvatarSource avatarSourceFrom(Builder<?> builder, HttpTransport transport) {
         if (builder.avatarSource != null && builder.avatarUrlTemplate != null) {
             throw new IllegalStateException("set an avatar source or an avatar URL template, not both");
         }
@@ -197,9 +206,9 @@ public final class AltsRuntime<H> implements AutoCloseable {
             return builder.avatarSource;
         }
         if (builder.avatarUrlTemplate != null) {
-            return new UrlTemplateAvatarSource(builder.avatarUrlTemplate);
+            return new UrlTemplateAvatarSource(transport, builder.avatarUrlTemplate);
         }
-        return new MojangAvatarSource();
+        return new MojangAvatarSource(transport);
     }
 
     /**
@@ -244,14 +253,17 @@ public final class AltsRuntime<H> implements AutoCloseable {
 
     /**
      * Closes the runtime: writes both stores' pending changes, releases their file locks, and stops
-     * their background writers and the shutdown hooks that would otherwise flush them at exit.
-     * Idempotent; a second call does nothing. Once this returns, another runtime may open the same
-     * directory.
+     * their background writers and the shutdown hooks that would otherwise flush them at exit; closes the
+     * transport's pooled proxy tunnels; and shuts down the executor if the library created it. An
+     * executor the host passed to {@link Builder#executor(Executor)} is left running. Idempotent; a
+     * second call does nothing. Once this returns, another runtime may open the same directory.
      *
      * <p>Afterwards the stores write nothing. Their contents stay readable; a mutator still changes the
      * store in memory but records "the store is closed" on {@code saveError()} instead of writing, and
-     * {@code load()} reads nothing. A sign-in still in flight when the runtime closes therefore resolves
-     * normally, but what it would have saved is not saved.
+     * {@code load()} reads nothing. The transport refuses every request made from then on, and a
+     * library-created executor refuses new tasks while letting running ones finish, so a sign-in still in
+     * flight when the runtime closes resolves, as a failure if it still had a request to make, and what
+     * it would have saved is not saved.
      *
      * @since 1.0.0
      */
@@ -263,7 +275,17 @@ public final class AltsRuntime<H> implements AutoCloseable {
         try {
             stores.close(store);
         } finally {
-            stores.close(secrets);
+            try {
+                stores.close(secrets);
+            } finally {
+                try {
+                    transport.close();
+                } finally {
+                    if (ownedExecutor != null) {
+                        ownedExecutor.shutdown();
+                    }
+                }
+            }
         }
     }
 
@@ -298,7 +320,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
      * @since 1.0.0
      */
     public AccountServices accountServices(AltAccount account) {
-        return accountAccess.services(account.accessToken(), account.uuid(), accountEndpoints);
+        return accountAccess.services(transport, account.accessToken(), account.uuid(), accountEndpoints);
     }
 
     /**
@@ -311,7 +333,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
      * @since 1.0.0
      */
     public AccountServices accountServices(String accessToken, String accountUuid) {
-        return accountAccess.services(accessToken, accountUuid, accountEndpoints);
+        return accountAccess.services(transport, accessToken, accountUuid, accountEndpoints);
     }
 
     /**
@@ -586,11 +608,12 @@ public final class AltsRuntime<H> implements AutoCloseable {
          * per-account pinning, round-robin, a health-checked pool — lives behind the host's
          * implementation.
          *
-         * <p>Note that resolution fails closed once a provider is installed: see {@link ProxyProvider}.
-         * The provider is process-wide, and leaving this unset never removes one: a second runtime built
-         * without a provider keeps routing through the one an earlier runtime installed.
+         * <p>Note that resolution fails closed when a provider is set: see {@link ProxyProvider}. The
+         * provider belongs to this runtime and is fixed for its lifetime: every request this runtime makes
+         * asks it, and no request of another runtime ever does. A runtime built without one connects
+         * directly, whatever another runtime in the process was given.
          *
-         * @param value the host proxy provider, or null to leave the current one in place
+         * @param value the host proxy provider, or null for direct connections
          * @return this builder
          * @since 0.8.0
          */
@@ -600,13 +623,14 @@ public final class AltsRuntime<H> implements AutoCloseable {
         }
 
         /**
-         * Sets the executor the library runs its blocking work on (optional; defaults to one virtual
-         * thread per task, so a request parked on a slow endpoint holds no platform thread). Install one
-         * to bound concurrency or to propagate the host's own context. It is reachable afterwards as
-         * {@link IoExecutor#executor()}.
+         * Sets the executor this runtime runs its blocking work on (optional; by default the runtime
+         * creates one that starts a virtual thread per task, named {@code alts-io-<n>}, so a request
+         * parked on a slow endpoint holds no platform thread). Install one to bound concurrency or to
+         * propagate the host's own context. Every request, cache load, avatar download and bulk entry of
+         * this runtime runs on it, and nothing of another runtime's does. The runtime never shuts a host's
+         * executor down; one it created itself is shut down by {@link AltsRuntime#close()}.
          *
-         * @param value the host executor, or null to keep the one in place: the default, or the one an
-         *     earlier runtime installed
+         * @param value the host executor, or null for one the runtime creates and owns
          * @return this builder
          * @since 0.12.0
          */

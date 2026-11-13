@@ -30,7 +30,7 @@ public final class Backoff {
      * @return the delay to wait, never longer than {@link #MAX_DELAY}
      * @since 0.9.0
      */
-    public static Duration after(HttpUtil.HttpResponse response, int attempt, Duration base) {
+    public static Duration after(HttpTransport.HttpResponse response, int attempt, Duration base) {
         if (response != null && response.retryAfter() != null) {
             return clamp(response.retryAfter());
         }

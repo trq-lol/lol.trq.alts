@@ -15,6 +15,7 @@ import java.time.ZoneOffset;
 import lol.trq.alts.auth.AccountStatus.State;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
+import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -79,7 +80,10 @@ class UsernameCorrectionTest {
 
     private AltAccountServiceImpl service() {
         return new AltAccountServiceImpl(
-                localStore.store(), config, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
+                localStore.store(),
+                config,
+                TestTransports.direct(),
+                Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
     }
 
     @Test

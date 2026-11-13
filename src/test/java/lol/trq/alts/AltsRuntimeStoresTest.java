@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -15,18 +14,18 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import lol.trq.alts.account.AccountEndpoints;
+import lol.trq.alts.account.AccountException;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
-import lol.trq.alts.net.IoExecutor;
-import lol.trq.alts.net.NetTestHooks;
-import lol.trq.alts.net.NetworkScope;
+import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.net.ProxyRoute;
 import lol.trq.alts.spi.StoreKeyProvider;
 import lol.trq.alts.spi.ToastSink;
 import lol.trq.alts.store.AccountStore;
 import lol.trq.alts.store.HostSecrets;
 import lol.trq.alts.store.StoreTestHooks;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -47,13 +46,6 @@ class AltsRuntimeStoresTest {
 
     @TempDir
     Path dirB;
-
-    @AfterEach
-    void resetNetworkStatics() {
-        // The transport and executor statics are still bound by build(); they are not what this tests.
-        NetTestHooks.resetHttp();
-        NetTestHooks.resetExecutor();
-    }
 
     private static AltsRuntime.Builder<Object> builder(Path dir) {
         return new AltsRuntime.Builder<Object>()
@@ -138,33 +130,53 @@ class AltsRuntimeStoresTest {
     }
 
     @Test
-    void aRefusedBuildLeavesTheFirstRuntimesTransportExecutorAndToastsInPlace() throws Exception {
-        ProxyRoute routeA = ProxyRoute.http("proxy-a.example", 3128);
-        ProxyRoute routeB = ProxyRoute.http("proxy-b.example", 3128);
-        Executor executorA = Runnable::run;
-        Executor executorB = Runnable::run;
+    void aRefusedBuildLeavesTheFirstRuntimesProviderExecutorAndToastsInPlace() throws Exception {
+        List<String> routedA = new CopyOnWriteArrayList<>();
+        List<String> routedB = new CopyOnWriteArrayList<>();
+        AtomicInteger ranOnA = new AtomicInteger();
+        AtomicInteger ranOnB = new AtomicInteger();
+        Executor executorA = task -> {
+            ranOnA.incrementAndGet();
+            Thread.ofVirtual().start(task);
+        };
+        Executor executorB = task -> {
+            ranOnB.incrementAndGet();
+            Thread.ofVirtual().start(task);
+        };
         List<String> toastsA = new CopyOnWriteArrayList<>();
         List<String> toastsB = new CopyOnWriteArrayList<>();
+        // Nothing listens here, so a lookup fails at once, after its route was resolved.
+        AccountEndpoints nowhere = new AccountEndpoints("http://127.0.0.1:1");
 
         try (AltsRuntime<Object> first = builder(dirA)
-                .proxyProvider(scope -> routeA)
+                .accountEndpoints(nowhere)
+                .proxyProvider(scope -> {
+                    routedA.add(scope.purpose().name());
+                    return ProxyRoute.direct();
+                })
                 .executor(executorA)
                 .toastSink((level, title, description, durationMs) -> toastsA.add(title))
                 .build()) {
             assertThrows(
                     IllegalStateException.class,
                     () -> builder(dirA)
-                            .proxyProvider(scope -> routeB)
+                            .accountEndpoints(nowhere)
+                            .proxyProvider(scope -> {
+                                routedB.add(scope.purpose().name());
+                                return ProxyRoute.direct();
+                            })
                             .executor(executorB)
                             .toastSink((level, title, description, durationMs) -> toastsB.add(title))
                             .build());
 
-            assertSame(
-                    routeA,
-                    NetTestHooks.routeFor(NetworkScope.of(NetworkScope.Purpose.PROFILE)),
-                    "the refused build must not have installed its proxy provider");
-            assertSame(executorA, IoExecutor.executor(), "nor its executor");
+            assertThrows(AccountException.class, () -> first.profileLookup().byName("Alex"));
+            first.loginService().loginOffline("Alex", LoginMode.DIRECT).get(5, TimeUnit.SECONDS);
             first.toasts().toast(ToastSink.Level.INFO, "still mine", "", 0);
+
+            assertEquals(List.of("PROFILE"), routedA, "the first runtime still routes through its own provider");
+            assertTrue(routedB.isEmpty(), "the refused build's provider was never asked");
+            assertTrue(ranOnA.get() >= 1, "the first runtime still runs on its own executor");
+            assertEquals(0, ranOnB.get(), "the refused build's executor was never used");
             assertEquals(List.of("still mine"), toastsA, "nor its toast sink");
             assertTrue(toastsB.isEmpty());
         }

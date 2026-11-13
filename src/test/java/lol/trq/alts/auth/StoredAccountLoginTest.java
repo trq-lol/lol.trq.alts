@@ -21,6 +21,7 @@ import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.BanInfo;
 import lol.trq.alts.model.SessionData;
+import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -104,7 +105,7 @@ class StoredAccountLoginTest {
     }
 
     private AltLoginServiceImpl service() {
-        return new AltLoginServiceImpl(localStore.store(), injected::set, config, at(NOW));
+        return new AltLoginServiceImpl(localStore.store(), injected::set, config, TestTransports.direct(), at(NOW));
     }
 
     @Test
@@ -117,7 +118,8 @@ class StoredAccountLoginTest {
         localStore.seed(stored);
 
         // No Microsoft configuration: renewal is impossible, but the stored record is still the record.
-        AltLoginServiceImpl unconfigured = new AltLoginServiceImpl(localStore.store(), injected::set, null, at(NOW));
+        AltLoginServiceImpl unconfigured =
+                new AltLoginServiceImpl(localStore.store(), injected::set, null, TestTransports.direct(), at(NOW));
         LoginResult result = unconfigured.loginAccount(stored).get();
 
         assertTrue(result.success(), result.message());

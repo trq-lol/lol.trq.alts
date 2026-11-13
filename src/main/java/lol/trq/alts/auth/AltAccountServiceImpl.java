@@ -11,7 +11,7 @@ import lol.trq.alts.auth.MicrosoftAuthUtil.RefreshRejectedException;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.net.FailureText;
-import lol.trq.alts.net.IoExecutor;
+import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.store.AccountStore;
 
@@ -29,6 +29,9 @@ public class AltAccountServiceImpl implements AltAccountService {
     private final AccountStore store;
     private final MicrosoftAuthConfig microsoftAuth;
     private final Clock clock;
+    private final HttpTransport http;
+    private final AccountNetworkUtil profiles;
+    private final MicrosoftAuthUtil microsoft;
 
     /**
      * Creates an account service that persists rotated and spent credentials to {@code store}.
@@ -37,17 +40,22 @@ public class AltAccountServiceImpl implements AltAccountService {
      *     it
      * @param microsoftAuth the host's Microsoft authentication configuration, or {@code null} to disable
      *     renewal (validation still works)
+     * @param http the runtime's transport, which every request goes through and whose executor every
+     *     blocking step runs on
      * @since 1.0.0
      */
-    public AltAccountServiceImpl(AccountStore store, MicrosoftAuthConfig microsoftAuth) {
-        this(store, microsoftAuth, Clock.systemUTC());
+    public AltAccountServiceImpl(AccountStore store, MicrosoftAuthConfig microsoftAuth, HttpTransport http) {
+        this(store, microsoftAuth, http, Clock.systemUTC());
     }
 
     // Exists so expiry-sensitive behaviour can be exercised against a fixed clock in tests.
-    AltAccountServiceImpl(AccountStore store, MicrosoftAuthConfig microsoftAuth, Clock clock) {
+    AltAccountServiceImpl(AccountStore store, MicrosoftAuthConfig microsoftAuth, HttpTransport http, Clock clock) {
         this.store = Objects.requireNonNull(store, "store");
         this.microsoftAuth = microsoftAuth;
+        this.http = Objects.requireNonNull(http, "http");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.profiles = new AccountNetworkUtil(http);
+        this.microsoft = new MicrosoftAuthUtil(http);
     }
 
     @Override
@@ -67,7 +75,7 @@ public class AltAccountServiceImpl implements AltAccountService {
                     FailureReason.INVALID_TOKEN,
                     "No stored session token"));
         }
-        return CompletableFuture.supplyAsync(() -> validate(account), IoExecutor.executor());
+        return CompletableFuture.supplyAsync(() -> validate(account), http.executor());
     }
 
     @Override
@@ -87,13 +95,13 @@ public class AltAccountServiceImpl implements AltAccountService {
             // A live token on an account that cannot be renewed is taken at its word, so refreshing is
             // no more expensive than logging in was.
             return expired
-                    ? CompletableFuture.supplyAsync(() -> validate(account), IoExecutor.executor())
+                    ? CompletableFuture.supplyAsync(() -> validate(account), http.executor())
                     : CompletableFuture.completedFuture(AccountStatus.valid(account));
         }
         if (expired) {
             return renew(account);
         }
-        return CompletableFuture.supplyAsync(() -> validate(account), IoExecutor.executor())
+        return CompletableFuture.supplyAsync(() -> validate(account), http.executor())
                 .thenCompose(status -> {
                     // Only a refused token is worth a renewal. An unreachable service, or an account with no
                     // profile, says nothing about the credential -- and the token endpoint rotates the refresh
@@ -114,7 +122,7 @@ public class AltAccountServiceImpl implements AltAccountService {
     private AccountStatus validate(AltAccount account) {
         ProfileLookup lookup;
         try {
-            lookup = AccountNetworkUtil.fetchProfile(account.accessToken(), profileUrl(), scopeFor(account));
+            lookup = profiles.fetchProfile(account.accessToken(), profileUrl(), scopeFor(account));
         } catch (Exception unreachable) {
             return AccountStatus.failure(
                     account,
@@ -160,7 +168,8 @@ public class AltAccountServiceImpl implements AltAccountService {
         // The scope names the account on every hop, so a host proxying per account can route this
         // renewal apart from the next account's.
         NetworkScope scope = NetworkScope.forAccount(NetworkScope.Purpose.AUTH, account.uuid(), account.username());
-        return MicrosoftAuthUtil.authenticateWithRefreshToken(microsoftAuth, account.refreshToken(), scope)
+        return microsoft
+                .authenticateWithRefreshToken(microsoftAuth, account.refreshToken(), scope)
                 .thenApply(profile -> {
                     AltAccount renewed =
                             account.withTokens(profile.accessToken(), profile.refreshToken(), profile.expiresAt());

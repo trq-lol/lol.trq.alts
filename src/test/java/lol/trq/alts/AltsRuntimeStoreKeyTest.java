@@ -10,10 +10,8 @@ import java.nio.file.Path;
 import java.util.List;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
-import lol.trq.alts.net.NetTestHooks;
 import lol.trq.alts.spi.StoreKeyProvider;
 import lol.trq.alts.store.StoreTestHooks;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -29,12 +27,6 @@ class AltsRuntimeStoreKeyTest {
 
     @TempDir
     Path dir;
-
-    @AfterEach
-    void resetNetworkStatics() {
-        NetTestHooks.resetHttp();
-        NetTestHooks.resetExecutor();
-    }
 
     private AltsRuntime.Builder<Object> builder() {
         return new AltsRuntime.Builder<Object>()

@@ -9,7 +9,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import lol.trq.alts.model.GameStats;
-import lol.trq.alts.net.NetTestHooks;
 import lol.trq.alts.spi.StaticGameStatsSource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -24,8 +23,6 @@ class AltsRuntimeGameStatsTest {
     void closeRuntimes() {
         // Each runtime holds its store files locked until it is closed.
         opened.forEach(AltsRuntime::close);
-        NetTestHooks.resetHttp();
-        NetTestHooks.resetExecutor();
     }
 
     private <H> AltsRuntime<H> opened(AltsRuntime<H> alts) {

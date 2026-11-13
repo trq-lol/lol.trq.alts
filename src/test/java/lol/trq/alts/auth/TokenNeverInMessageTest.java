@@ -15,6 +15,7 @@ import lol.trq.alts.auth.AltLoginCallback.LoginResult;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
+import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -75,7 +76,8 @@ class TokenNeverInMessageTest {
     @Test
     void aSessionTokenPastedWithALineBreakNeverReachesTheResultMessage() throws Exception {
         for (String breaker : new String[] {"\n", "\r\n", " \n ", "\t"}) {
-            LoginResult result = new AltLoginServiceImpl(localStore.store(), session -> {}, config)
+            LoginResult result = new AltLoginServiceImpl(
+                            localStore.store(), session -> {}, config, TestTransports.direct())
                     .loginSession(HEAD + breaker + TAIL, LoginMode.ADD)
                     .get();
 
@@ -86,7 +88,7 @@ class TokenNeverInMessageTest {
 
     @Test
     void aTokenWrappedAcrossLinesIsSentAsTheOneTokenItIs() throws Exception {
-        new AltLoginServiceImpl(localStore.store(), session -> {}, config)
+        new AltLoginServiceImpl(localStore.store(), session -> {}, config, TestTransports.direct())
                 .loginSession("Bearer " + HEAD + "\r\n" + TAIL + "\n", LoginMode.ADD)
                 .get();
 
@@ -99,7 +101,8 @@ class TokenNeverInMessageTest {
         AltAccount account =
                 AltAccount.of("00000000-0000-4000-8000-0000000000e1", "Alex", HEAD + "\n" + TAIL, AccountType.SESSION);
 
-        AccountStatus status = new AltAccountServiceImpl(localStore.store(), config, Clock.systemUTC())
+        AccountStatus status = new AltAccountServiceImpl(
+                        localStore.store(), config, TestTransports.direct(), Clock.systemUTC())
                 .check(account)
                 .get();
 
@@ -110,7 +113,7 @@ class TokenNeverInMessageTest {
 
     @Test
     void aRefreshTokenPastedWithALineBreakNeverReachesTheResultMessage() throws Exception {
-        LoginResult result = new AltLoginServiceImpl(localStore.store(), session -> {}, config)
+        LoginResult result = new AltLoginServiceImpl(localStore.store(), session -> {}, config, TestTransports.direct())
                 .loginRefreshToken("M.C5_secret-head\nsecret-tail", LoginMode.ADD)
                 .get();
 

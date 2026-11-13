@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,7 +23,8 @@ class TokenNeverInExceptionTest {
     @BeforeEach
     void start() throws Exception {
         server = new LoopbackServices();
-        services = AccountServices.create(TOKEN, "11111111-2222-3333-4444-555555555555", server.endpoints());
+        services = AccountServices.create(
+                TestTransports.direct(), TOKEN, "11111111-2222-3333-4444-555555555555", server.endpoints());
     }
 
     @AfterEach

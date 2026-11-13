@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import lol.trq.alts.net.HttpUtil;
+import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 
 /**
@@ -30,10 +30,11 @@ final class ProfileLookupServiceImpl implements ProfileLookupService {
     /** The most names the batch endpoint accepts in one request. */
     static final int BATCH_SIZE = 10;
 
-    private final AccountHttp http = AccountHttp.anonymous();
+    private final AccountHttp http;
     private final AccountEndpoints endpoints;
 
-    ProfileLookupServiceImpl(AccountEndpoints endpoints) {
+    ProfileLookupServiceImpl(HttpTransport transport, AccountEndpoints endpoints) {
+        this.http = AccountHttp.anonymous(transport);
         this.endpoints = endpoints;
     }
 
@@ -96,7 +97,8 @@ final class ProfileLookupServiceImpl implements ProfileLookupService {
         JsonArray request = new JsonArray();
         names.forEach(request::add);
         String url = endpoints.lookupByNames();
-        HttpUtil.JsonResponse response = http.exchangeElement(url, request.toString(), NetworkScope.Purpose.PROFILE);
+        HttpTransport.JsonResponse response =
+                http.exchangeElement(url, request.toString(), NetworkScope.Purpose.PROFILE);
         if (response.status() == 404 || response.status() == 204) {
             return List.of();
         }
@@ -105,7 +107,7 @@ final class ProfileLookupServiceImpl implements ProfileLookupService {
             throw AccountHttp.failure(
                     "POST",
                     url,
-                    new HttpUtil.HttpResponse(
+                    new HttpTransport.HttpResponse(
                             response.status(),
                             body != null && body.isJsonObject() ? body.getAsJsonObject() : null,
                             response.retryAfter()));
@@ -135,7 +137,7 @@ final class ProfileLookupServiceImpl implements ProfileLookupService {
      * @throws AccountException on any other refusal, or when the service could not be reached
      */
     private Optional<PublicProfile> lookup(String url) throws AccountException {
-        HttpUtil.HttpResponse response = http.exchange("GET", url, null, null, NetworkScope.Purpose.PROFILE);
+        HttpTransport.HttpResponse response = http.exchange("GET", url, null, null, NetworkScope.Purpose.PROFILE);
         if (response.status() == 404 || response.status() == 204) {
             return Optional.empty();
         }

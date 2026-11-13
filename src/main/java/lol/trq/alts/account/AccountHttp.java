@@ -5,7 +5,7 @@ import com.google.gson.JsonObject;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import lol.trq.alts.net.FailureText;
-import lol.trq.alts.net.HttpUtil;
+import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 
 /**
@@ -21,10 +21,12 @@ import lol.trq.alts.net.NetworkScope;
  */
 final class AccountHttp {
 
+    private final HttpTransport transport;
     private final String token;
     private final String accountUuid;
 
-    AccountHttp(String token, String accountUuid) {
+    AccountHttp(HttpTransport transport, String token, String accountUuid) {
+        this.transport = java.util.Objects.requireNonNull(transport, "transport");
         this.token = token;
         this.accountUuid = accountUuid;
     }
@@ -32,10 +34,16 @@ final class AccountHttp {
     /**
      * Returns plumbing for the public endpoints, which take no token and belong to no account.
      *
+     * @param transport the runtime's transport
      * @return an unauthenticated instance
      */
-    static AccountHttp anonymous() {
-        return new AccountHttp(null, null);
+    static AccountHttp anonymous(HttpTransport transport) {
+        return new AccountHttp(transport, null, null);
+    }
+
+    /** The runtime's transport, for a service that sends a request of its own or needs the executor. */
+    HttpTransport transport() {
+        return transport;
     }
 
     /** The bearer token, for a service that classifies a raw response itself rather than through {@link #send}. */
@@ -116,7 +124,7 @@ final class AccountHttp {
 
     private JsonObject send(String method, String url, String contentType, byte[] body, NetworkScope.Purpose purpose)
             throws AccountException {
-        HttpUtil.HttpResponse response = exchange(method, url, contentType, body, purpose);
+        HttpTransport.HttpResponse response = exchange(method, url, contentType, body, purpose);
         if (!response.successful()) {
             throw failure(method, url, response);
         }
@@ -135,11 +143,11 @@ final class AccountHttp {
      * @return the response, successful or not
      * @throws AccountException only when the service could not be reached
      */
-    HttpUtil.HttpResponse exchange(
+    HttpTransport.HttpResponse exchange(
             String method, String url, String contentType, byte[] body, NetworkScope.Purpose purpose)
             throws AccountException {
         try {
-            return HttpUtil.sendForStatus(method, url, contentType, auth(), body, scope(purpose));
+            return transport.sendForStatus(method, url, contentType, auth(), body, scope(purpose));
         } catch (Exception transport) {
             throw new AccountException(method + " " + describe(url) + ": " + FailureText.of(transport), transport);
         }
@@ -155,10 +163,10 @@ final class AccountHttp {
      * @return the response, successful or not
      * @throws AccountException only when the service could not be reached
      */
-    HttpUtil.JsonResponse exchangeElement(String url, String json, NetworkScope.Purpose purpose)
+    HttpTransport.JsonResponse exchangeElement(String url, String json, NetworkScope.Purpose purpose)
             throws AccountException {
         try {
-            return HttpUtil.postJsonForElement(url, auth(), json, scope(purpose));
+            return transport.postJsonForElement(url, auth(), json, scope(purpose));
         } catch (Exception transport) {
             throw new AccountException("POST " + describe(url) + ": " + FailureText.of(transport), transport);
         }
@@ -172,7 +180,7 @@ final class AccountHttp {
      * @param response the rejected response
      * @return the exception to throw
      */
-    static AccountException failure(String method, String url, HttpUtil.HttpResponse response) {
+    static AccountException failure(String method, String url, HttpTransport.HttpResponse response) {
         return new AccountException(
                 method + " " + describe(url) + ": " + reason(response), response.status(), response.retryAfter());
     }
@@ -198,7 +206,7 @@ final class AccountHttp {
      * @param response the rejected response
      * @return a short reason
      */
-    static String reason(HttpUtil.HttpResponse response) {
+    static String reason(HttpTransport.HttpResponse response) {
         JsonObject body = response.body();
         if (body != null) {
             for (String field : new String[] {"errorMessage", "error", "details"}) {
@@ -217,7 +225,7 @@ final class AccountHttp {
      * @param response the rejected response
      * @return the code, or {@code null} when the body named none
      */
-    static String errorCode(HttpUtil.HttpResponse response) {
+    static String errorCode(HttpTransport.HttpResponse response) {
         JsonObject body = response.body();
         if (body == null) {
             return null;

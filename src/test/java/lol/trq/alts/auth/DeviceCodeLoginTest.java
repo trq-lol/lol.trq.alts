@@ -22,6 +22,7 @@ import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.model.SessionData;
+import lol.trq.alts.net.TestTransports;
 import lol.trq.alts.spi.DeviceCodePrompt;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -71,7 +72,8 @@ class DeviceCodeLoginTest {
     }
 
     private AltLoginServiceImpl service() {
-        AltLoginServiceImpl service = new AltLoginServiceImpl(localStore.store(), injected::set, chain.config());
+        AltLoginServiceImpl service =
+                new AltLoginServiceImpl(localStore.store(), injected::set, chain.config(), TestTransports.direct());
         service.deviceCodeTiming = new DeviceCodeTiming(SECOND_MILLIS, SLOW_DOWN_MILLIS);
         return service;
     }
@@ -284,7 +286,8 @@ class DeviceCodeLoginTest {
 
     @Test
     void aMissingConfigurationOrPromptIsReportedRatherThanThrown() throws Exception {
-        LoginResult unconfigured = new AltLoginServiceImpl(localStore.store(), injected::set, null)
+        LoginResult unconfigured = new AltLoginServiceImpl(
+                        localStore.store(), injected::set, null, TestTransports.direct())
                 .loginDeviceCode(prompt, LoginMode.DIRECT)
                 .get();
         LoginResult noPrompt = service().loginDeviceCode(null, LoginMode.DIRECT).get();

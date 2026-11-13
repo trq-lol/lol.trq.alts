@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -24,14 +25,13 @@ import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.net.Backoff;
 import lol.trq.alts.net.FailureText;
-import lol.trq.alts.net.IoExecutor;
 import lol.trq.alts.store.AccountStore;
 
 /**
  * Concrete {@link BulkOperations}.
  *
  * <p>No executor is created. The concurrency bound is structural: that many worker chains each pull the
- * next entry off a shared cursor and recurse, so everything runs on {@link IoExecutor#executor()} where the
+ * next entry off a shared cursor and recurse, so everything runs on the runtime's executor where the
  * rest of the library's blocking work already runs, and a host is never surprised by threads it did not
  * ask for.
  *
@@ -50,6 +50,7 @@ public final class BulkOperationsImpl implements BulkOperations {
     private final AltLoginService importService;
     private final AltAccountService accountService;
     private final Function<AltAccount, EntitlementService> entitlementServices;
+    private final Executor executor;
 
     /**
      * Creates the bulk surface with a given source of per-account entitlement services: the runtime's
@@ -60,17 +61,20 @@ public final class BulkOperationsImpl implements BulkOperations {
      *     and stores without moving the live session
      * @param accountService the account service the refresh and check runs are built on
      * @param entitlementServices builds the entitlement service for one account, over its access token
+     * @param executor the runtime's executor, which the reads and the waits between entries run on
      * @since 1.0.0
      */
     public BulkOperationsImpl(
             AccountStore store,
             AltLoginService importService,
             AltAccountService accountService,
-            Function<AltAccount, EntitlementService> entitlementServices) {
+            Function<AltAccount, EntitlementService> entitlementServices,
+            Executor executor) {
         this.store = Objects.requireNonNull(store, "store");
         this.importService = Objects.requireNonNull(importService, "importService");
         this.accountService = Objects.requireNonNull(accountService, "accountService");
         this.entitlementServices = Objects.requireNonNull(entitlementServices, "entitlementServices");
+        this.executor = Objects.requireNonNull(executor, "executor");
     }
 
     @Override
@@ -84,6 +88,7 @@ public final class BulkOperationsImpl implements BulkOperations {
         Optional<AltAccount> before = store.currentAccount();
 
         Run run = new Run(
+                executor,
                 items.size(),
                 options,
                 progress,
@@ -107,11 +112,12 @@ public final class BulkOperationsImpl implements BulkOperations {
     public BulkHandle entitlementsAll(List<AltAccount> accounts, BulkOptions options, BulkProgress progress) {
         List<AltAccount> items = List.copyOf(accounts == null ? List.of() : accounts);
         return start(new Run(
+                executor,
                 items.size(),
                 options,
                 progress,
                 index -> items.get(index).username(),
-                index -> CompletableFuture.supplyAsync(() -> entitlementsOf(items.get(index)), IoExecutor.executor())));
+                index -> CompletableFuture.supplyAsync(() -> entitlementsOf(items.get(index)), executor)));
     }
 
     /**
@@ -171,6 +177,7 @@ public final class BulkOperationsImpl implements BulkOperations {
             java.util.function.Function<AltAccount, CompletableFuture<AccountStatus>> operation) {
         List<AltAccount> items = List.copyOf(accounts == null ? List.of() : accounts);
         return start(new Run(
+                executor,
                 items.size(),
                 options,
                 progress,
@@ -307,13 +314,13 @@ public final class BulkOperationsImpl implements BulkOperations {
                             wait = UNSTATED_RATE_LIMIT_WAIT;
                         }
                         run.holdBack(wait);
-                        return delay(wait).thenCompose(ignored -> attempt(run, index, attempt + 1));
+                        return delay(run.executor, wait).thenCompose(ignored -> attempt(run, index, attempt + 1));
                     }
                     boolean retryable = outcome.reason() == FailureReason.NETWORK;
                     if (!retryable || attempt > run.options.maxRetries()) {
                         return CompletableFuture.completedFuture(failed);
                     }
-                    return delay(Backoff.exponential(attempt, run.options.retryBaseDelay()))
+                    return delay(run.executor, Backoff.exponential(attempt, run.options.retryBaseDelay()))
                             .thenCompose(ignored -> attempt(run, index, attempt + 1));
                 });
     }
@@ -321,17 +328,17 @@ public final class BulkOperationsImpl implements BulkOperations {
     /**
      * Waits without holding a thread.
      *
+     * @param executor the executor the wait completes on
      * @param duration how long to wait
      * @return a future completing after it
      */
-    private static CompletableFuture<Void> delay(Duration duration) {
+    private static CompletableFuture<Void> delay(Executor executor, Duration duration) {
         long millis = duration == null ? 0L : duration.toMillis();
         if (millis <= 0L) {
             return CompletableFuture.completedFuture(null);
         }
         return CompletableFuture.supplyAsync(
-                        () -> null,
-                        CompletableFuture.delayedExecutor(millis, TimeUnit.MILLISECONDS, IoExecutor.executor()))
+                        () -> null, CompletableFuture.delayedExecutor(millis, TimeUnit.MILLISECONDS, executor))
                 .thenAccept(ignored -> {});
     }
 
@@ -363,6 +370,7 @@ public final class BulkOperationsImpl implements BulkOperations {
     /** The mutable state of one run, and its handle. */
     private static final class Run implements BulkHandle {
 
+        private final Executor executor;
         private final int total;
         private final BulkOptions options;
         private final BulkProgress progress;
@@ -379,11 +387,13 @@ public final class BulkOperationsImpl implements BulkOperations {
         private long nextStartMillis;
 
         Run(
+                Executor executor,
                 int total,
                 BulkOptions options,
                 BulkProgress progress,
                 IntFunction<String> labeller,
                 IntFunction<CompletableFuture<Attempt>> attempts) {
+            this.executor = executor;
             this.total = total;
             this.options = options == null ? BulkOptions.defaults() : options;
             this.progress = progress == null ? BulkProgress.NONE : progress;
@@ -415,7 +425,7 @@ public final class BulkOperationsImpl implements BulkOperations {
                 waitMillis = earliest - now;
                 nextStartMillis = earliest + options.minSpacing().toMillis();
             }
-            return delay(Duration.ofMillis(waitMillis));
+            return delay(executor, Duration.ofMillis(waitMillis));
         }
 
         /**

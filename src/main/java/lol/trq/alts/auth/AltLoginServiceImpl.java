@@ -22,7 +22,7 @@ import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.model.SessionData;
 import lol.trq.alts.net.FailureText;
-import lol.trq.alts.net.IoExecutor;
+import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.spi.DeviceCodePrompt;
 import lol.trq.alts.spi.SessionInjector;
@@ -47,7 +47,11 @@ public class AltLoginServiceImpl implements AltLoginService {
     private final SessionInjector sessionInjector;
     private final MicrosoftAuthConfig microsoftAuth;
     private final Clock clock;
+    private final HttpTransport http;
     private final AltAccountService accounts;
+    private final AccountNetworkUtil profiles;
+    private final MicrosoftAuthUtil microsoft;
+    private final CookieAuthUtil cookies;
 
     // Replaced in tests so a device-code login's polling does not wait out real intervals.
     DeviceCodeTiming deviceCodeTiming = DeviceCodeTiming.STANDARD;
@@ -64,20 +68,34 @@ public class AltLoginServiceImpl implements AltLoginService {
      * @param sessionInjector the host hook that makes a resolved account the active session
      * @param microsoftAuth the host's Microsoft authentication configuration, or {@code null} to disable
      *     Microsoft login (offline / cookie / session login stay available)
+     * @param http the runtime's transport, which every request goes through and whose executor every
+     *     blocking step runs on
      * @since 1.0.0
      */
-    public AltLoginServiceImpl(AccountStore store, SessionInjector sessionInjector, MicrosoftAuthConfig microsoftAuth) {
-        this(store, sessionInjector, microsoftAuth, Clock.systemUTC());
+    public AltLoginServiceImpl(
+            AccountStore store,
+            SessionInjector sessionInjector,
+            MicrosoftAuthConfig microsoftAuth,
+            HttpTransport http) {
+        this(store, sessionInjector, microsoftAuth, http, Clock.systemUTC());
     }
 
     // Exists so expiry-sensitive behaviour can be exercised against a fixed clock in tests.
     AltLoginServiceImpl(
-            AccountStore store, SessionInjector sessionInjector, MicrosoftAuthConfig microsoftAuth, Clock clock) {
+            AccountStore store,
+            SessionInjector sessionInjector,
+            MicrosoftAuthConfig microsoftAuth,
+            HttpTransport http,
+            Clock clock) {
         this.store = Objects.requireNonNull(store, "store");
         this.sessionInjector = Objects.requireNonNull(sessionInjector, "sessionInjector");
         this.microsoftAuth = microsoftAuth;
+        this.http = Objects.requireNonNull(http, "http");
         this.clock = Objects.requireNonNull(clock, "clock");
-        this.accounts = new AltAccountServiceImpl(store, microsoftAuth, this.clock);
+        this.accounts = new AltAccountServiceImpl(store, microsoftAuth, http, this.clock);
+        this.profiles = new AccountNetworkUtil(http);
+        this.microsoft = new MicrosoftAuthUtil(http);
+        this.cookies = new CookieAuthUtil(http);
     }
 
     /**
@@ -125,7 +143,7 @@ public class AltLoginServiceImpl implements AltLoginService {
                     // with three different remedies, so they are classified apart rather than collapsed.
                     AccountNetworkUtil.ProfileLookup profile;
                     try {
-                        profile = AccountNetworkUtil.fetchProfile(
+                        profile = profiles.fetchProfile(
                                 cleanToken, profileUrl(), NetworkScope.of(NetworkScope.Purpose.PROFILE));
                     } catch (Exception unreachable) {
                         return AltLoginCallback.LoginResult.failure(
@@ -140,7 +158,7 @@ public class AltLoginServiceImpl implements AltLoginService {
                             null,
                             profile.retryAfter());
                 },
-                IoExecutor.executor());
+                http.executor());
     }
 
     /**
@@ -170,7 +188,7 @@ public class AltLoginServiceImpl implements AltLoginService {
                         return AltLoginCallback.LoginResult.failure("Error: " + e.getMessage(), FailureReason.UNKNOWN);
                     }
                 },
-                IoExecutor.executor());
+                http.executor());
     }
 
     /**
@@ -186,7 +204,7 @@ public class AltLoginServiceImpl implements AltLoginService {
             return CompletableFuture.completedFuture(AltLoginCallback.LoginResult.failure(
                     "Microsoft login not configured", FailureReason.NOT_CONFIGURED));
         }
-        return interactive(MicrosoftAuthUtil.authenticate(microsoftAuth, browser), "Microsoft Auth", mode);
+        return interactive(microsoft.authenticate(microsoftAuth, browser), "Microsoft Auth", mode);
     }
 
     /**
@@ -213,9 +231,7 @@ public class AltLoginServiceImpl implements AltLoginService {
                     AltLoginCallback.LoginResult.failure("No device code prompt given", FailureReason.NOT_CONFIGURED));
         }
         return interactive(
-                MicrosoftAuthUtil.authenticateWithDeviceCode(microsoftAuth, prompt, deviceCodeTiming),
-                "Device code",
-                mode);
+                microsoft.authenticateWithDeviceCode(microsoftAuth, prompt, deviceCodeTiming), "Device code", mode);
     }
 
     /**
@@ -289,14 +305,14 @@ public class AltLoginServiceImpl implements AltLoginService {
                     }
                     MinecraftProfile profile;
                     try {
-                        profile = CookieAuthUtil.authenticate(cookieData, microsoftAuth, null);
+                        profile = cookies.authenticate(cookieData, microsoftAuth, null);
                     } catch (Exception e) {
                         return classifiedFailure("Cookie Auth", e);
                     }
                     return finalizeLogin(
                             profile.username(), profile.uuid(), profile.accessToken(), AccountType.COOKIE, mode);
                 },
-                IoExecutor.executor());
+                http.executor());
     }
 
     /**
@@ -328,7 +344,7 @@ public class AltLoginServiceImpl implements AltLoginService {
                                         e);
                             }
                         },
-                        IoExecutor.executor())
+                        http.executor())
                 .thenCompose(cookieData -> loginCookie(cookieData, mode))
                 .exceptionally(failure -> classifiedFailure("Cookie file", failure));
     }
@@ -356,7 +372,8 @@ public class AltLoginServiceImpl implements AltLoginService {
             return CompletableFuture.completedFuture(
                     AltLoginCallback.LoginResult.failure("Refresh token empty", FailureReason.INVALID_TOKEN));
         }
-        return MicrosoftAuthUtil.authenticateWithRefreshToken(microsoftAuth, cleaned)
+        return microsoft
+                .authenticateWithRefreshToken(microsoftAuth, cleaned)
                 .thenApply(profile -> finalizeLogin(profile, AccountType.MICROSOFT, mode))
                 .exceptionally(AltLoginServiceImpl::importFailure);
     }

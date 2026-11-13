@@ -17,6 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
 import lol.trq.alts.auth.AltLoginCallback.LoginResult;
 import lol.trq.alts.model.LoginMode;
+import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -85,7 +86,7 @@ class LoginResultRetryAfterTest {
     }
 
     private LoginResult importRefreshToken() throws Exception {
-        return new AltLoginServiceImpl(localStore.store(), session -> {}, config)
+        return new AltLoginServiceImpl(localStore.store(), session -> {}, config, TestTransports.direct())
                 .loginRefreshToken("M.C123_imported", LoginMode.DIRECT)
                 .get();
     }
@@ -114,7 +115,7 @@ class LoginResultRetryAfterTest {
     void aThrottledSessionTokenImportCarriesTheStatedWait() throws Exception {
         throttle("/mcprofile", "30");
 
-        LoginResult result = new AltLoginServiceImpl(localStore.store(), session -> {}, config)
+        LoginResult result = new AltLoginServiceImpl(localStore.store(), session -> {}, config, TestTransports.direct())
                 .loginSession("not-a-jwt-so-the-profile-is-asked", LoginMode.DIRECT)
                 .get();
 

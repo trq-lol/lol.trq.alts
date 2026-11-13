@@ -50,6 +50,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runtime builds it over its own avatar source and executor.
 - `BulkOperationsImpl` loses the three-argument constructor that read entitlements from the public
   Minecraft services; the runtime passes its own account services.
+- **Breaking: each runtime owns its transport and its executor.** The proxy provider, the proxy tunnel
+  connections and the executor were process-wide statics that every runtime rebound; now each runtime
+  builds its own transport and hands it to every service through its constructor. A runtime's requests
+  are routed by its own `ProxyProvider` only, and a runtime built without one connects directly
+  whatever another runtime was given (before, a second runtime without a provider silently kept the
+  first one's). Its blocking work runs on its own executor: the host's from `Builder#executor`, which
+  the runtime never shuts down, or one the runtime creates (a virtual thread per task, named
+  `alts-io-<n>`) and shuts down in `close()`. Proxy semantics are unchanged: a provider that throws or
+  returns null fails the request, no provider means direct, the credential rides the `CONNECT` only,
+  and tunnels are kept apart per proxy identity, now also per runtime.
+- **Breaking: `AltsRuntime.close()` closes the transport.** It closes the pooled proxy tunnels, refuses
+  every request made afterwards, and shuts down a library-created executor, after flushing the stores
+  as before.
+- `AltLoginServiceImpl`, `AltAccountServiceImpl`, `BulkOperationsImpl`, `MicrosoftCallbackServer`,
+  `MicrosoftAuthUtil`, `CookieAuthUtil` and `AccountNetworkUtil` (all internal, moving under
+  `lol.trq.alts.internal` before the release) take the runtime's transport or executor through their
+  constructors; the auth chain's request methods are instance methods.
 
 ### Removed
 
@@ -74,6 +91,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Mojang source when no `AvatarSource` is set; `.avatarSource(new UrlTemplateAvatarSource(t))`
   becomes the new `Builder#avatarUrlTemplate(t)`. Setting both an avatar source and a template, or a
   template without a `{uuid}` placeholder, fails `build()`. The `AvatarSource` seam stays.
+- **Breaking:** `HttpUtil` (now the internal, per-runtime `HttpTransport`) and `IoExecutor`, with their
+  static `bind` methods. A host sets the provider and the executor on the builder, as before, and
+  nothing else: there is no process-wide transport or executor left to reach.
+- `AccountNetworkUtil.lookupUsername`, which nothing used; `ProfileLookupService.byUuid` does the job.
+- The `lol.trq.alts.testSeams` system property and the test hooks it guarded (`HttpUtil.resetForTests`,
+  `IoExecutor.resetForTests`, `NetTestHooks`): a test builds its own runtime or transport and needs no
+  process-wide reset.
 
 ## [0.12.0] - 2026-11-12
 

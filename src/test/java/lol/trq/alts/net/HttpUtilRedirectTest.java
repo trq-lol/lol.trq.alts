@@ -32,6 +32,8 @@ import org.junit.jupiter.api.Test;
  */
 class HttpUtilRedirectTest {
 
+    private HttpTransport http;
+
     private static final byte[] IMAGE = "not-really-a-png".getBytes(StandardCharsets.UTF_8);
 
     private static LoopbackTls tls;
@@ -83,12 +85,11 @@ class HttpUtilRedirectTest {
         secure.createContext("/downgrade", exchange -> redirect(exchange, base(elsewhere) + "/image"));
         secure.createContext("/image", exchange -> respond(exchange, IMAGE));
         secure.start();
-        HttpUtil.tlsSocketFactoryForTests(tls.trustingFactory());
+        http = TestTransports.trusting(null, tls.trustingFactory());
     }
 
     @AfterEach
     void tearDown() {
-        HttpUtil.resetForTests();
         first.stop(0);
         elsewhere.stop(0);
         secure.stop(0);
@@ -118,7 +119,7 @@ class HttpUtilRedirectTest {
 
     @Test
     void aFetchWithoutACredentialFollowsARedirectToAnotherOrigin() throws Exception {
-        byte[] body = HttpUtil.getBytes(base(first) + "/away", null, 1024, null);
+        byte[] body = http.getBytes(base(first) + "/away", null, 1024, null);
 
         assertArrayEquals(IMAGE, body, "image hosts redirect; the fetch has to arrive");
         assertEquals(1, elsewhereHits.get());
@@ -128,15 +129,15 @@ class HttpUtilRedirectTest {
     void aCallerThatPinnedItsHostIsNotRedirectedOffIt() throws Exception {
         URI pinned = URI.create(base(first));
 
-        HttpUtil.BytesResponse away = HttpUtil.getBytesForStatus(
-                base(first) + "/away", null, 1024, null, hop -> HttpUtil.sameOrigin(pinned, hop));
+        HttpTransport.BytesResponse away = http.getBytesForStatus(
+                base(first) + "/away", null, 1024, null, hop -> HttpTransport.sameOrigin(pinned, hop));
 
         assertEquals(302, away.status(), "the caller sees the redirect instead of having it chased");
         assertNull(away.body());
         assertEquals(0, elsewhereHits.get(), "the host the caller did not choose must never be contacted");
 
-        HttpUtil.BytesResponse nearby = HttpUtil.getBytesForStatus(
-                base(first) + "/nearby", null, 1024, null, hop -> HttpUtil.sameOrigin(pinned, hop));
+        HttpTransport.BytesResponse nearby = http.getBytesForStatus(
+                base(first) + "/nearby", null, 1024, null, hop -> HttpTransport.sameOrigin(pinned, hop));
 
         assertArrayEquals(IMAGE, nearby.body(), "a redirect that stays where the caller allowed is still followed");
     }
@@ -145,7 +146,7 @@ class HttpUtilRedirectTest {
     void anAuthorizationHeaderIsNeverCarriedToAnotherHost() throws Exception {
         Map<String, String> headers = Map.of("authorization", "Bearer secret-token");
 
-        HttpUtil.BytesResponse response = HttpUtil.getBytesForStatus(base(first) + "/away", headers, 1024, null);
+        HttpTransport.BytesResponse response = http.getBytesForStatus(base(first) + "/away", headers, 1024, null);
 
         assertEquals(302, response.status(), "the caller sees the redirect instead of having it chased");
         assertNull(response.body());
@@ -158,7 +159,7 @@ class HttpUtilRedirectTest {
         headers.put("Cookie", "session=secret");
         headers.put("X-Trace", "kept");
 
-        HttpUtil.getBytes(base(first) + "/away", headers, 1024, null);
+        http.getBytes(base(first) + "/away", headers, 1024, null);
 
         Headers seen = headersSeenElsewhere.get();
         assertFalse(seen.containsKey("Cookie"), "a cookie belongs to the origin that set it");
@@ -168,7 +169,7 @@ class HttpUtilRedirectTest {
 
     @Test
     void aCookieSurvivesARedirectWithinTheOrigin() throws Exception {
-        byte[] body = HttpUtil.getBytes(base(first) + "/nearby", Map.of("Cookie", "session=secret"), 1024, null);
+        byte[] body = http.getBytes(base(first) + "/nearby", Map.of("Cookie", "session=secret"), 1024, null);
 
         assertArrayEquals(IMAGE, body);
         assertEquals("session=secret", headersSeenAfterSameOriginRedirect.get().getFirst("Cookie"));
@@ -177,22 +178,22 @@ class HttpUtilRedirectTest {
     /** Following this would repeat, in the clear, a request the caller made over TLS. */
     @Test
     void aRedirectFromHttpsToHttpIsNotFollowed() throws Exception {
-        HttpUtil.BytesResponse response = HttpUtil.getBytesForStatus(secureBase() + "/downgrade", null, 1024, null);
+        HttpTransport.BytesResponse response = http.getBytesForStatus(secureBase() + "/downgrade", null, 1024, null);
 
         assertEquals(302, response.status());
         assertNull(response.body());
         assertEquals(0, elsewhereHits.get(), "the plain-http target must never be contacted");
-        assertNull(HttpUtil.getBytes(secureBase() + "/downgrade", null, 1024, null));
+        assertNull(http.getBytes(secureBase() + "/downgrade", null, 1024, null));
     }
 
     @Test
     void aRedirectFromHttpToHttpsIsFollowed() throws Exception {
-        assertArrayEquals(IMAGE, HttpUtil.getBytes(base(first) + "/upgrade", null, 1024, null));
+        assertArrayEquals(IMAGE, http.getBytes(base(first) + "/upgrade", null, 1024, null));
     }
 
     @Test
     void aRedirectLoopEnds() throws Exception {
-        HttpUtil.BytesResponse response = HttpUtil.getBytesForStatus(base(first) + "/loop", null, 1024, null);
+        HttpTransport.BytesResponse response = http.getBytesForStatus(base(first) + "/loop", null, 1024, null);
 
         assertEquals(302, response.status());
         assertEquals(6, loopHits.get(), "the first request and five redirects, then no more");
@@ -202,7 +203,7 @@ class HttpUtilRedirectTest {
     void aRedirectToSomethingThatIsNotHttpIsNotFollowed() throws Exception {
         assertEquals(
                 302,
-                HttpUtil.getBytesForStatus(base(first) + "/nowhere", null, 1024, null)
+                http.getBytesForStatus(base(first) + "/nowhere", null, 1024, null)
                         .status());
     }
 
@@ -210,24 +211,25 @@ class HttpUtilRedirectTest {
     void redirectTargetsResolveAgainstTheUrlThatSentThem() {
         URI from = URI.create("https://textures.example/skins/a.png");
 
-        assertEquals(URI.create("https://textures.example/skins/b.png"), HttpUtil.redirectTarget(from, "b.png"));
+        assertEquals(URI.create("https://textures.example/skins/b.png"), HttpTransport.redirectTarget(from, "b.png"));
         assertEquals(
-                URI.create("https://cdn.example/b.png"), HttpUtil.redirectTarget(from, "https://cdn.example/b.png"));
-        assertNull(HttpUtil.redirectTarget(from, "http://textures.example/skins/a.png"), "a downgrade");
-        assertNull(HttpUtil.redirectTarget(from, "HTTP://textures.example/skins/a.png"), "however it is spelled");
-        assertNull(HttpUtil.redirectTarget(from, "//"), "no host");
-        assertNull(HttpUtil.redirectTarget(from, "https://bad host/"), "malformed");
-        assertNull(HttpUtil.redirectTarget(from, null));
-        assertNull(HttpUtil.redirectTarget(from, " "));
+                URI.create("https://cdn.example/b.png"),
+                HttpTransport.redirectTarget(from, "https://cdn.example/b.png"));
+        assertNull(HttpTransport.redirectTarget(from, "http://textures.example/skins/a.png"), "a downgrade");
+        assertNull(HttpTransport.redirectTarget(from, "HTTP://textures.example/skins/a.png"), "however it is spelled");
+        assertNull(HttpTransport.redirectTarget(from, "//"), "no host");
+        assertNull(HttpTransport.redirectTarget(from, "https://bad host/"), "malformed");
+        assertNull(HttpTransport.redirectTarget(from, null));
+        assertNull(HttpTransport.redirectTarget(from, " "));
     }
 
     @Test
     void anOriginIsSchemeHostAndPort() {
         URI origin = URI.create("https://textures.example/a");
 
-        assertTrue(HttpUtil.sameOrigin(origin, URI.create("https://TEXTURES.example:443/b")));
-        assertFalse(HttpUtil.sameOrigin(origin, URI.create("https://textures.example:8443/a")));
-        assertFalse(HttpUtil.sameOrigin(origin, URI.create("https://cdn.example/a")));
-        assertFalse(HttpUtil.sameOrigin(origin, URI.create("http://textures.example/a")));
+        assertTrue(HttpTransport.sameOrigin(origin, URI.create("https://TEXTURES.example:443/b")));
+        assertFalse(HttpTransport.sameOrigin(origin, URI.create("https://textures.example:8443/a")));
+        assertFalse(HttpTransport.sameOrigin(origin, URI.create("https://cdn.example/a")));
+        assertFalse(HttpTransport.sameOrigin(origin, URI.create("http://textures.example/a")));
     }
 }

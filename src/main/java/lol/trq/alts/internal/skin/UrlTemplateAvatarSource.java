@@ -1,7 +1,7 @@
 package lol.trq.alts.internal.skin;
 
 import java.util.Objects;
-import lol.trq.alts.net.HttpUtil;
+import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.spi.AvatarSource;
 
@@ -27,15 +27,19 @@ public final class UrlTemplateAvatarSource implements AvatarSource {
     /** Cap on a fetched avatar. Far past any real face PNG, and a guard on a service the library does not control. */
     private static final long MAX_AVATAR_BYTES = 1L << 20;
 
+    private final HttpTransport http;
     private final String template;
 
     /**
      * Creates a source that fills the given template.
      *
+     * @param http the runtime's transport, which every fetch goes through
      * @param template a URL with {@code {uuid}} and optionally {@code {size}} placeholders
-     * @since 0.10.0
+     * @throws IllegalArgumentException if the template has no {@code {uuid}} placeholder
+     * @since 1.0.0
      */
-    public UrlTemplateAvatarSource(String template) {
+    public UrlTemplateAvatarSource(HttpTransport http, String template) {
+        this.http = Objects.requireNonNull(http, "http");
         this.template = Objects.requireNonNull(template, "template");
         if (!template.contains("{uuid}")) {
             throw new IllegalArgumentException("avatar template must contain a {uuid} placeholder");
@@ -45,7 +49,7 @@ public final class UrlTemplateAvatarSource implements AvatarSource {
     @Override
     public byte[] avatarPng(String uuid, int sizePx) throws Exception {
         String url = template.replace("{uuid}", uuid).replace("{size}", Integer.toString(sizePx));
-        return HttpUtil.getBytes(
+        return http.getBytes(
                 url, null, MAX_AVATAR_BYTES, NetworkScope.forAccount(NetworkScope.Purpose.AVATAR, uuid, null));
     }
 }

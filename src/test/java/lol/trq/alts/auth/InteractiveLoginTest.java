@@ -25,6 +25,7 @@ import lol.trq.alts.auth.AltLoginCallback.LoginResult;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.model.SessionData;
+import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,7 +61,8 @@ class InteractiveLoginTest {
 
     /** A service whose "browser" completes the sign-in the moment it is opened. */
     private AltLoginServiceImpl service() {
-        AltLoginServiceImpl service = new AltLoginServiceImpl(localStore.store(), injected::set, chain.config());
+        AltLoginServiceImpl service =
+                new AltLoginServiceImpl(localStore.store(), injected::set, chain.config(), TestTransports.direct());
         service.browser = url -> {
             authorizationUrl.set(url);
             AuthChainServer.completeInBrowser(url);
@@ -117,7 +119,8 @@ class InteractiveLoginTest {
 
     @Test
     void cancellingTheLoginReleasesTheCallbackPort() throws Exception {
-        AltLoginServiceImpl service = new AltLoginServiceImpl(localStore.store(), injected::set, chain.config());
+        AltLoginServiceImpl service =
+                new AltLoginServiceImpl(localStore.store(), injected::set, chain.config(), TestTransports.direct());
         service.browser = authorizationUrl::set;
 
         CompletableFuture<LoginResult> login = service.loginMicrosoft(LoginMode.DIRECT);
@@ -178,7 +181,8 @@ class InteractiveLoginTest {
         AltLoginServiceImpl service = new AltLoginServiceImpl(
                 localStore.store(),
                 injected::set,
-                chain.config().withEndpoints(null, dead + "/token", null, null, null, null));
+                chain.config().withEndpoints(null, dead + "/token", null, null, null, null),
+                TestTransports.direct());
         service.browser = AuthChainServer::completeInBrowser;
 
         LoginResult result = service.loginMicrosoft(LoginMode.DIRECT).get(30, TimeUnit.SECONDS);

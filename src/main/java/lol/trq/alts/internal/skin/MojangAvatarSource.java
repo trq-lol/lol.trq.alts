@@ -12,7 +12,7 @@ import java.util.Iterator;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
 import javax.imageio.stream.ImageInputStream;
-import lol.trq.alts.net.HttpUtil;
+import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.spi.AvatarSource;
 
@@ -59,12 +59,17 @@ public final class MojangAvatarSource implements AvatarSource {
     /** The only host a skin texture is fetched from. */
     private static final String TEXTURE_HOST = "textures.minecraft.net";
 
+    private final HttpTransport http;
+
     /**
-     * Creates the source. It holds no state; one instance serves every lookup.
+     * Creates the source. It holds no state but its transport; one instance serves every lookup.
      *
-     * @since 0.10.0
+     * @param http the runtime's transport, which every fetch goes through
+     * @since 1.0.0
      */
-    public MojangAvatarSource() {}
+    public MojangAvatarSource(HttpTransport http) {
+        this.http = java.util.Objects.requireNonNull(http, "http");
+    }
 
     /**
      * The largest canvas accepted, per side. A skin is 64x64 (64x32 for the legacy layout); this leaves
@@ -80,7 +85,7 @@ public final class MojangAvatarSource implements AvatarSource {
         }
         // The address was admitted because of its host, so a redirect is held to the same host: left
         // to follow redirects freely, the fetch would end wherever the last response pointed it.
-        byte[] skinBytes = HttpUtil.getBytesForStatus(
+        byte[] skinBytes = http.getBytesForStatus(
                         skinUrl,
                         null,
                         MAX_SKIN_BYTES,
@@ -101,9 +106,9 @@ public final class MojangAvatarSource implements AvatarSource {
      * @return the skin PNG URL, or {@code null} when the profile has no skin
      * @throws Exception if the profile lookup fails
      */
-    private static String skinUrl(String uuid) throws Exception {
+    private String skinUrl(String uuid) throws Exception {
         String cleanUuid = uuid.replace("-", "");
-        JsonObject profile = HttpUtil.get(
+        JsonObject profile = http.get(
                 PROFILE_URL + cleanUuid, null, NetworkScope.forAccount(NetworkScope.Purpose.AVATAR, uuid, null));
         if (profile == null || !profile.has("properties")) {
             return null;

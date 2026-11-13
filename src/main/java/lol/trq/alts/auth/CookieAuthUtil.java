@@ -13,10 +13,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.regex.Pattern;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
 import lol.trq.alts.auth.MicrosoftAuthUtil.AuthFlowException;
-import lol.trq.alts.net.HttpUtil;
+import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 
 /**
@@ -71,7 +72,19 @@ public final class CookieAuthUtil {
         "uaid"
     };
 
-    private CookieAuthUtil() {}
+    private final HttpTransport http;
+    private final AccountNetworkUtil profiles;
+
+    /**
+     * Creates the cookie chain over a transport: every hop goes through it.
+     *
+     * @param http the runtime's transport
+     * @since 1.0.0
+     */
+    public CookieAuthUtil(HttpTransport http) {
+        this.http = Objects.requireNonNull(http, "http");
+        this.profiles = new AccountNetworkUtil(http);
+    }
 
     /** Where the sign-in starts: the Xbox Live SISU endpoint, asked to land on the Minecraft login page. */
     private static final String SISU_START =
@@ -88,18 +101,6 @@ public final class CookieAuthUtil {
 
     /** The relying party whose XSTS token Minecraft services accept. */
     private static final String MINECRAFT_RELYING_PARTY = "rp://api.minecraftservices.com/";
-
-    /**
-     * Executes the full cookie-based authentication flow against the default Minecraft services
-     * endpoints, with no account named on its requests.
-     *
-     * @param cookieData the raw string containing cookie information
-     * @return a {@link MinecraftProfile} containing the authenticated session data
-     * @throws Exception if parsing fails or the redirect chain is interrupted
-     */
-    public static MinecraftProfile authenticate(String cookieData) throws Exception {
-        return authenticate(cookieData, null, null);
-    }
 
     /**
      * Executes the full cookie-based authentication flow.
@@ -123,7 +124,7 @@ public final class CookieAuthUtil {
      *     classify is an {@link AuthFlowException}
      * @since 0.12.0
      */
-    public static MinecraftProfile authenticate(String cookieData, MicrosoftAuthConfig config, NetworkScope account)
+    public MinecraftProfile authenticate(String cookieData, MicrosoftAuthConfig config, NetworkScope account)
             throws Exception {
         List<Cookie> cookies = parseCookieList(cookieData);
         NetworkScope auth = scope(NetworkScope.Purpose.AUTH, account);
@@ -145,7 +146,7 @@ public final class CookieAuthUtil {
      * @param account a scope naming the account the requests are for, or {@code null} for none
      * @return the authenticated profile
      */
-    static MinecraftProfile completeFromLanding(String landing, MicrosoftAuthConfig config, NetworkScope account) {
+    MinecraftProfile completeFromLanding(String landing, MicrosoftAuthConfig config, NetworkScope account) {
         XstsTokenData xstsData = extractXstsFromRedirect(landing);
         String loginUrl = config != null ? config.minecraftLoginUrl() : MicrosoftAuthConfig.DEFAULT_MINECRAFT_LOGIN_URL;
         String profileUrl =
@@ -505,7 +506,7 @@ public final class CookieAuthUtil {
     /**
      * Performs a GET request to a URL and returns the {@code Location} header for redirection.
      *
-     * <p>Goes through {@link HttpUtil} like every other request the library makes, which is what gives
+     * <p>Goes through {@link HttpTransport} like every other request the library makes, which is what gives
      * this chain the finite timeouts, the refusal to follow redirects on its own, and the host's proxy.
      * Opening its own connection meant it had none of the three.
      *
@@ -515,7 +516,7 @@ public final class CookieAuthUtil {
      * @return the target redirection URL
      * @throws AuthFlowException if the server does not return a redirect or cannot be reached
      */
-    private static String followRedirect(String urlString, String cookies, NetworkScope scope) {
+    private String followRedirect(String urlString, String cookies, NetworkScope scope) {
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8");
         headers.put("Accept-Encoding", "*");
@@ -527,9 +528,9 @@ public final class CookieAuthUtil {
             headers.put("Cookie", cookies);
         }
 
-        HttpUtil.HeaderResponse response;
+        HttpTransport.HeaderResponse response;
         try {
-            response = HttpUtil.getHeader(urlString, headers, "Location", scope);
+            response = http.getHeader(urlString, headers, "Location", scope);
         } catch (Exception transportFailure) {
             throw MicrosoftAuthUtil.unreachable("Cookie sign-in", transportFailure);
         }
@@ -648,14 +649,14 @@ public final class CookieAuthUtil {
      * @return the Minecraft services bearer token
      * @throws AuthFlowException if Minecraft services reject the identity token or cannot be reached
      */
-    private static String authenticateWithMinecraft(XstsTokenData xstsData, String loginUrl, NetworkScope scope) {
+    private String authenticateWithMinecraft(XstsTokenData xstsData, String loginUrl, NetworkScope scope) {
         JsonObject body = new JsonObject();
         body.addProperty("identityToken", "XBL3.0 x=" + xstsData.uhs() + ";" + xstsData.token());
         body.addProperty("ensureLegacyEnabled", true);
 
-        HttpUtil.HttpResponse response;
+        HttpTransport.HttpResponse response;
         try {
-            response = HttpUtil.sendForStatus(
+            response = http.sendForStatus(
                     "POST",
                     loginUrl,
                     "application/json",
@@ -686,10 +687,10 @@ public final class CookieAuthUtil {
      * @return the populated {@link MinecraftProfile}
      * @throws AuthFlowException if the profile could not be retrieved
      */
-    private static MinecraftProfile getMinecraftProfile(String mcToken, String profileUrl, NetworkScope scope) {
+    private MinecraftProfile getMinecraftProfile(String mcToken, String profileUrl, NetworkScope scope) {
         AccountNetworkUtil.ProfileLookup lookup;
         try {
-            lookup = AccountNetworkUtil.fetchProfile(mcToken, profileUrl, scope);
+            lookup = profiles.fetchProfile(mcToken, profileUrl, scope);
         } catch (Exception transportFailure) {
             throw MicrosoftAuthUtil.unreachable("Profile fetch", transportFailure);
         }

@@ -24,6 +24,7 @@ import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.BanInfo;
 import lol.trq.alts.model.LoginMode;
+import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -111,7 +112,10 @@ class AccountServiceTest {
 
     private AltAccountServiceImpl service() {
         return new AltAccountServiceImpl(
-                localStore.store(), config, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
+                localStore.store(),
+                config,
+                TestTransports.direct(),
+                Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
     }
 
     private static AltAccount renewable(long expiresAt) {
@@ -306,7 +310,8 @@ class AccountServiceTest {
     void aRateLimitedRefreshTokenImportIsClassifiedAsOne() throws Exception {
         server.removeContext("/token");
         server.createContext("/token", exchange -> respond(exchange, 429, "{}"));
-        AltLoginServiceImpl logins = new AltLoginServiceImpl(localStore.store(), session -> {}, config);
+        AltLoginServiceImpl logins =
+                new AltLoginServiceImpl(localStore.store(), session -> {}, config, TestTransports.direct());
 
         AltLoginCallback.LoginResult throttled =
                 logins.loginRefreshToken("M.C123_imported", LoginMode.DIRECT).get();

@@ -21,6 +21,8 @@ import org.junit.jupiter.api.Test;
  */
 class HttpUtilBodyLimitTest {
 
+    private final HttpTransport http = TestTransports.direct();
+
     private HttpServer server;
 
     @AfterEach
@@ -54,50 +56,50 @@ class HttpUtilBodyLimitTest {
 
     @Test
     void aBodyAtTheLimitIsRead() throws Exception {
-        String url = startServer(200, HttpUtil.MAX_TEXT_BODY_BYTES);
+        String url = startServer(200, HttpTransport.MAX_TEXT_BODY_BYTES);
 
-        JsonObject response = HttpUtil.get(url, null);
+        JsonObject response = http.get(url, null);
 
         assertNotNull(response);
         assertEquals(
-                HttpUtil.MAX_TEXT_BODY_BYTES - 10,
+                HttpTransport.MAX_TEXT_BODY_BYTES - 10,
                 response.get("pad").getAsString().length());
     }
 
     @Test
     void aJsonBodyPastTheLimitFailsTheRequest() throws Exception {
-        String url = startServer(200, HttpUtil.MAX_TEXT_BODY_BYTES + 1);
+        String url = startServer(200, HttpTransport.MAX_TEXT_BODY_BYTES + 1);
 
-        assertThrows(IOException.class, () -> HttpUtil.get(url, null));
-        assertThrows(IOException.class, () -> HttpUtil.postJson(url, null, "{}"));
+        assertThrows(IOException.class, () -> http.get(url, null));
+        assertThrows(IOException.class, () -> http.postJson(url, null, "{}"));
     }
 
     @Test
     void aStatusResponsePastTheLimitFailsTheRequestRatherThanReportingAnEmptyBody() throws Exception {
-        String url = startServer(200, HttpUtil.MAX_TEXT_BODY_BYTES + 1);
+        String url = startServer(200, HttpTransport.MAX_TEXT_BODY_BYTES + 1);
 
-        assertThrows(IOException.class, () -> HttpUtil.postFormForStatus(url, null, "a=b"));
+        assertThrows(IOException.class, () -> http.postFormForStatus(url, null, "a=b"));
     }
 
     @Test
     void anErrorBodyPastTheLimitFailsTheRequestToo() throws Exception {
-        String url = startServer(400, HttpUtil.MAX_TEXT_BODY_BYTES + 1);
+        String url = startServer(400, HttpTransport.MAX_TEXT_BODY_BYTES + 1);
 
-        assertThrows(IOException.class, () -> HttpUtil.postFormForStatus(url, null, "a=b"));
+        assertThrows(IOException.class, () -> http.postFormForStatus(url, null, "a=b"));
     }
 
     @Test
     void anOversizedErrorBodyNobodyReadsDoesNotFailTheRequest() throws Exception {
-        String url = startServer(500, 4 * HttpUtil.MAX_TEXT_BODY_BYTES);
+        String url = startServer(500, 4 * HttpTransport.MAX_TEXT_BODY_BYTES);
 
-        assertNull(HttpUtil.get(url, null), "a rejection stays a rejection however large its body");
+        assertNull(http.get(url, null), "a rejection stays a rejection however large its body");
     }
 
     @Test
     void theBinaryCapIsTheCallersOwn() throws Exception {
-        String url = startServer(200, 2 * HttpUtil.MAX_TEXT_BODY_BYTES);
+        String url = startServer(200, 2 * HttpTransport.MAX_TEXT_BODY_BYTES);
 
-        assertNotNull(HttpUtil.getBytes(url, null, 4L * HttpUtil.MAX_TEXT_BODY_BYTES, null));
-        assertNull(HttpUtil.getBytes(url, null, 1024, null), "a body past the caller's cap is not returned");
+        assertNotNull(http.getBytes(url, null, 4L * HttpTransport.MAX_TEXT_BODY_BYTES, null));
+        assertNull(http.getBytes(url, null, 1024, null), "a body past the caller's cap is not returned");
     }
 }

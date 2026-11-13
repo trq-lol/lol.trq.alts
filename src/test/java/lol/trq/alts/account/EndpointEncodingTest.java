@@ -3,7 +3,6 @@ package lol.trq.alts.account;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.IOException;
-import lol.trq.alts.net.NetTestHooks;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,7 +18,6 @@ class EndpointEncodingTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        NetTestHooks.resetHttp();
         server = new LoopbackServices();
     }
 

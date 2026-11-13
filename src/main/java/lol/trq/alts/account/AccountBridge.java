@@ -1,6 +1,7 @@
 package lol.trq.alts.account;
 
 import lol.trq.alts.internal.account.AccountAccess;
+import lol.trq.alts.net.HttpTransport;
 
 /**
  * The account package's side of {@link AccountAccess}: the runtime builds the services through it, so
@@ -24,12 +25,13 @@ final class AccountBridge implements AccountAccess.Bridge {
     }
 
     @Override
-    public AccountServices services(String token, String accountUuid, AccountEndpoints endpoints) {
-        return AccountServices.create(token, accountUuid, endpoints);
+    public AccountServices services(
+            HttpTransport transport, String token, String accountUuid, AccountEndpoints endpoints) {
+        return AccountServices.create(transport, token, accountUuid, endpoints);
     }
 
     @Override
-    public ProfileLookupService profileLookup(AccountEndpoints endpoints) {
-        return new ProfileLookupServiceImpl(endpoints == null ? AccountEndpoints.defaults() : endpoints);
+    public ProfileLookupService profileLookup(HttpTransport transport, AccountEndpoints endpoints) {
+        return new ProfileLookupServiceImpl(transport, endpoints == null ? AccountEndpoints.defaults() : endpoints);
     }
 }

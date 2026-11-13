@@ -17,13 +17,14 @@ import org.junit.jupiter.api.Test;
 
 class HttpUtilStatusTest {
 
+    private final HttpTransport http = TestTransports.direct();
+
     private HttpServer server;
 
     private volatile String retryAfter;
 
     @AfterEach
     void stopServer() {
-        HttpUtil.resetForTests();
         if (server != null) {
             server.stop(0);
         }
@@ -50,7 +51,7 @@ class HttpUtilStatusTest {
     void reportsSuccessStatusAndBody() throws Exception {
         String url = startServer(200, "{\"access_token\":\"a\"}");
 
-        HttpUtil.HttpResponse response = HttpUtil.postFormForStatus(url, null, "grant_type=refresh_token");
+        HttpTransport.HttpResponse response = http.postFormForStatus(url, null, "grant_type=refresh_token");
 
         assertEquals(200, response.status());
         assertTrue(response.successful());
@@ -62,7 +63,7 @@ class HttpUtilStatusTest {
     void reportsClientErrorStatusAndParsesErrorBody() throws Exception {
         String url = startServer(400, "{\"error\":\"invalid_grant\"}");
 
-        HttpUtil.HttpResponse response = HttpUtil.postFormForStatus(url, null, "grant_type=refresh_token");
+        HttpTransport.HttpResponse response = http.postFormForStatus(url, null, "grant_type=refresh_token");
 
         assertEquals(400, response.status());
         assertFalse(response.successful());
@@ -74,7 +75,7 @@ class HttpUtilStatusTest {
     void reportsServerErrorStatus() throws Exception {
         String url = startServer(503, "unavailable");
 
-        HttpUtil.HttpResponse response = HttpUtil.postFormForStatus(url, null, "grant_type=refresh_token");
+        HttpTransport.HttpResponse response = http.postFormForStatus(url, null, "grant_type=refresh_token");
 
         assertEquals(503, response.status());
         assertFalse(response.successful());
@@ -86,9 +87,9 @@ class HttpUtilStatusTest {
     void anArrayBodyIsReadByTheElementMethodAndInvisibleToTheObjectOne() throws Exception {
         String url = startServer(200, "[{\"id\":\"1\"},{\"id\":\"2\"}]");
 
-        HttpUtil.JsonResponse element =
-                HttpUtil.postJsonForElement(url, null, "[\"a\",\"b\"]", NetworkScope.of(NetworkScope.Purpose.PROFILE));
-        HttpUtil.HttpResponse object = HttpUtil.postJsonForStatus(url, null, "[\"a\",\"b\"]", null);
+        HttpTransport.JsonResponse element =
+                http.postJsonForElement(url, null, "[\"a\",\"b\"]", NetworkScope.of(NetworkScope.Purpose.PROFILE));
+        HttpTransport.HttpResponse object = http.postJsonForStatus(url, null, "[\"a\",\"b\"]", null);
 
         assertTrue(element.successful());
         assertTrue(element.body().isJsonArray());
@@ -101,7 +102,7 @@ class HttpUtilStatusTest {
         retryAfter = "21";
         String url = startServer(429, "{\"error\":\"TooManyRequests\"}");
 
-        HttpUtil.JsonResponse response = HttpUtil.postJsonForElement(url, null, "[]", null);
+        HttpTransport.JsonResponse response = http.postJsonForElement(url, null, "[]", null);
 
         assertEquals(429, response.status());
         assertTrue(response.rateLimited());
@@ -115,11 +116,11 @@ class HttpUtilStatusTest {
     @Test
     void theElementMethodReportsANonJsonOrEmptyBodyAsNull() throws Exception {
         String url = startServer(503, "unavailable");
-        assertNull(HttpUtil.postJsonForElement(url, null, "[]", null).body());
+        assertNull(http.postJsonForElement(url, null, "[]", null).body());
         server.stop(0);
 
         url = startServer(200, "null");
-        assertNull(HttpUtil.postJsonForElement(url, null, "[]", null).body(), "a JSON null is no body");
+        assertNull(http.postJsonForElement(url, null, "[]", null).body(), "a JSON null is no body");
     }
 
     /** The new method is one more way out of the library, so it must fail closed like the rest. */
@@ -135,19 +136,19 @@ class HttpUtilStatusTest {
         server.start();
         String url = "http://" + InetAddress.getLoopbackAddress().getHostAddress() + ":"
                 + server.getAddress().getPort() + "/token";
-        HttpUtil.bind(scope -> null);
+        HttpTransport http = TestTransports.through(scope -> null);
 
         assertThrows(
                 IOException.class,
-                () -> HttpUtil.postJsonForElement(url, null, "[]", NetworkScope.of(NetworkScope.Purpose.PROFILE)));
+                () -> http.postJsonForElement(url, null, "[]", NetworkScope.of(NetworkScope.Purpose.PROFILE)));
         assertEquals(0, hits.get(), "a provider with no answer must not become a direct connection");
     }
 
     @Test
     void theElementMethodRefusesABodyPastTheCap() throws Exception {
-        String url = startServer(200, "[\"" + "x".repeat(HttpUtil.MAX_TEXT_BODY_BYTES) + "\"]");
+        String url = startServer(200, "[\"" + "x".repeat(HttpTransport.MAX_TEXT_BODY_BYTES) + "\"]");
 
-        assertThrows(IOException.class, () -> HttpUtil.postJsonForElement(url, null, "[]", null));
+        assertThrows(IOException.class, () -> http.postJsonForElement(url, null, "[]", null));
     }
 
     /**
@@ -158,9 +159,10 @@ class HttpUtilStatusTest {
     void aResponsePrintsItsStatusButNeverItsBodyOrHeaderValue() throws Exception {
         String url = startServer(200, "{\"access_token\":\"SECRET-TOKEN\"}");
 
-        String object = HttpUtil.postJsonForStatus(url, null, "{}", null).toString();
-        String element = HttpUtil.postJsonForElement(url, null, "{}", null).toString();
-        String header = new HttpUtil.HeaderResponse(302, "https://login.example/#accessToken=SECRET-TOKEN").toString();
+        String object = http.postJsonForStatus(url, null, "{}", null).toString();
+        String element = http.postJsonForElement(url, null, "{}", null).toString();
+        String header =
+                new HttpTransport.HeaderResponse(302, "https://login.example/#accessToken=SECRET-TOKEN").toString();
 
         assertFalse(object.contains("SECRET-TOKEN"), object);
         assertFalse(element.contains("SECRET-TOKEN"), element);

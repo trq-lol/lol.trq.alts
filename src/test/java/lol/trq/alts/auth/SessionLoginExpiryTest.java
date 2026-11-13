@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import lol.trq.alts.auth.AltLoginCallback.LoginResult;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.model.SessionData;
+import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -96,7 +97,11 @@ class SessionLoginExpiryTest {
 
     private AltLoginServiceImpl service() {
         return new AltLoginServiceImpl(
-                localStore.store(), injected::set, config, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
+                localStore.store(),
+                injected::set,
+                config,
+                TestTransports.direct(),
+                Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
     }
 
     @Test

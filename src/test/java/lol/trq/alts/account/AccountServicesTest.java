@@ -15,7 +15,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
-import lol.trq.alts.net.NetTestHooks;
+import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,7 +38,6 @@ class AccountServicesTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        NetTestHooks.resetHttp();
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/", exchange -> {
             lastMethod.set(exchange.getRequestMethod());
@@ -68,7 +67,7 @@ class AccountServicesTest {
     }
 
     private AccountServices services() {
-        return AccountServices.create("test-token", "uuid-1", new AccountEndpoints(base));
+        return AccountServices.create(TestTransports.direct(), "test-token", "uuid-1", new AccountEndpoints(base));
     }
 
     private void canned(int status, String body) {

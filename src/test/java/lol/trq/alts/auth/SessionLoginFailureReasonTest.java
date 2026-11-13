@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
 import lol.trq.alts.auth.AltLoginCallback.LoginResult;
 import lol.trq.alts.model.LoginMode;
+import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -85,7 +86,7 @@ class SessionLoginFailureReasonTest {
     void aRefusedTokenIsInvalidNotANetworkProblem() throws Exception {
         MicrosoftAuthConfig config = pointingAt(loopbackBase(server.getAddress().getPort()));
 
-        LoginResult result = new AltLoginServiceImpl(localStore.store(), session -> {}, config)
+        LoginResult result = new AltLoginServiceImpl(localStore.store(), session -> {}, config, TestTransports.direct())
                 .loginSession(OPAQUE_TOKEN, LoginMode.DIRECT)
                 .get();
 
@@ -97,7 +98,7 @@ class SessionLoginFailureReasonTest {
     void anUnreachableServiceIsANetworkFailure() throws Exception {
         MicrosoftAuthConfig config = pointingAt(loopbackBase(closedPort()));
 
-        LoginResult result = new AltLoginServiceImpl(localStore.store(), session -> {}, config)
+        LoginResult result = new AltLoginServiceImpl(localStore.store(), session -> {}, config, TestTransports.direct())
                 .loginSession(OPAQUE_TOKEN, LoginMode.DIRECT)
                 .get();
 

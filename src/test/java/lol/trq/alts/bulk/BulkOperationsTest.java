@@ -18,12 +18,11 @@ import lol.trq.alts.auth.AltLoginCallback.LoginResult;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
-import lol.trq.alts.net.HttpUtil;
-import lol.trq.alts.net.NetTestHooks;
+import lol.trq.alts.net.HttpTransport;
+import lol.trq.alts.net.TestTransports;
 import lol.trq.alts.store.AccountStore;
 import lol.trq.alts.store.StoreTestHooks;
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -80,15 +79,14 @@ class BulkOperationsTest {
             }
         };
         // The import service is unused by these runs; a null-injecting login service would need a config.
-        return new BulkOperationsImpl(store, new UnusedLoginService(), service, account -> {
-            throw new AssertionError("this run reads no entitlements");
-        });
-    }
-
-    /** One test here installs a proxy provider to watch the scopes; it must not outlive the test. */
-    @AfterEach
-    void resetTransport() {
-        NetTestHooks.resetHttp();
+        return new BulkOperationsImpl(
+                store,
+                new UnusedLoginService(),
+                service,
+                account -> {
+                    throw new AssertionError("this run reads no entitlements");
+                },
+                TestTransports.EXECUTOR);
     }
 
     @Test
@@ -405,7 +403,8 @@ class BulkOperationsTest {
                 unused,
                 account -> {
                     throw new AssertionError("an import reads no entitlements");
-                });
+                },
+                TestTransports.EXECUTOR);
     }
 
     @Test
@@ -490,7 +489,6 @@ class BulkOperationsTest {
         volatile String retryAfter;
 
         EntitlementServer() throws java.io.IOException {
-            NetTestHooks.resetHttp();
             server = com.sun.net.httpserver.HttpServer.create(
                     new java.net.InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), 0), 0);
             server.createContext("/entitlements/mcstore", exchange -> {
@@ -516,6 +514,9 @@ class BulkOperationsTest {
             server.start();
         }
 
+        /** The transport the sweep's reads go through; a test that watches the routing replaces it. */
+        HttpTransport transport = TestTransports.direct();
+
         BulkOperations bulk() {
             lol.trq.alts.account.AccountEndpoints endpoints = new lol.trq.alts.account.AccountEndpoints("http://"
                     + java.net.InetAddress.getLoopbackAddress().getHostAddress() + ":"
@@ -536,14 +537,14 @@ class BulkOperationsTest {
                     new UnusedLoginService(),
                     unused,
                     account -> lol.trq.alts.internal.account.AccountAccess.bridge()
-                            .services(account.accessToken(), account.uuid(), endpoints)
-                            .entitlements());
+                            .services(transport, account.accessToken(), account.uuid(), endpoints)
+                            .entitlements(),
+                    transport.executor());
         }
 
         @Override
         public void close() {
             server.stop(0);
-            NetTestHooks.resetHttp();
         }
     }
 
@@ -583,7 +584,7 @@ class BulkOperationsTest {
     void anEntitlementSweepRoutesEachRequestForItsOwnAccount() throws Exception {
         try (EntitlementServer server = new EntitlementServer()) {
             List<lol.trq.alts.net.NetworkScope> scopes = new java.util.concurrent.CopyOnWriteArrayList<>();
-            HttpUtil.bind(scope -> {
+            server.transport = TestTransports.through(scope -> {
                 scopes.add(scope);
                 return lol.trq.alts.net.ProxyRoute.direct();
             });

@@ -33,6 +33,13 @@ import org.junit.jupiter.api.Test;
  */
 class ProxyRoutingTest {
 
+    private HttpTransport http = TestTransports.direct();
+
+    /** Replaces the transport with one routed by {@code provider}, as a runtime built with it would hold. */
+    private void bind(lol.trq.alts.spi.ProxyProvider provider) {
+        http = TestTransports.through(provider);
+    }
+
     private static final String BODY = "{\"id\":\"00000000000040008000000000000001\",\"name\":\"Alex\"}";
 
     private HttpServer origin;
@@ -55,8 +62,6 @@ class ProxyRoutingTest {
 
     @AfterEach
     void tearDown() throws IOException {
-        // Static, so leaving it installed would route every later test through a closed socket.
-        HttpUtil.resetForTests();
         if (origin != null) {
             origin.stop(0);
         }
@@ -76,9 +81,9 @@ class ProxyRoutingTest {
 
     @Test
     void aRequestLeavesThroughTheRouteTheHostNamed() throws Exception {
-        HttpUtil.bind(scope -> throughProxy());
+        bind(scope -> throughProxy());
 
-        HttpUtil.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE));
+        http.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE));
 
         assertEquals(1, proxy.requestLines().size(), "the proxy must have seen the request");
         assertTrue(
@@ -90,9 +95,9 @@ class ProxyRoutingTest {
 
     @Test
     void anExplicitlyDirectRouteBypassesTheProxy() throws Exception {
-        HttpUtil.bind(scope -> ProxyRoute.direct());
+        bind(scope -> ProxyRoute.direct());
 
-        HttpUtil.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE));
+        http.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE));
 
         assertEquals(1, originHits.get());
         assertEquals(0, proxy.requestLines().size());
@@ -100,19 +105,19 @@ class ProxyRoutingTest {
 
     @Test
     void credentialsRideOnTheConnectionRatherThanOnAGlobalAuthenticator() throws Exception {
-        HttpUtil.bind(scope -> throughProxy().withCredentials("user", "pass".toCharArray()));
+        bind(scope -> throughProxy().withCredentials("user", "pass".toCharArray()));
 
-        HttpUtil.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE));
+        http.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE));
 
         assertEquals("Basic dXNlcjpwYXNz", proxy.authorizations().get(0));
     }
 
     @Test
     void eachScopeIsRoutedOnItsOwn() throws Exception {
-        HttpUtil.bind(scope -> scope.purpose() == NetworkScope.Purpose.PROFILE ? throughProxy() : ProxyRoute.direct());
+        bind(scope -> scope.purpose() == NetworkScope.Purpose.PROFILE ? throughProxy() : ProxyRoute.direct());
 
-        HttpUtil.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE));
-        HttpUtil.getBytes(originUrl(), null, 1 << 20, NetworkScope.of(NetworkScope.Purpose.AVATAR));
+        http.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE));
+        http.getBytes(originUrl(), null, 1 << 20, NetworkScope.of(NetworkScope.Purpose.AVATAR));
 
         assertEquals(1, proxy.requestLines().size(), "the profile lookup went through the proxy");
         assertEquals(1, originHits.get(), "the avatar fetch went direct");
@@ -125,59 +130,47 @@ class ProxyRoutingTest {
      */
     @Test
     void aProviderThatThrowsFailsTheRequestRatherThanGoingDirect() {
-        HttpUtil.bind(scope -> {
+        bind(scope -> {
             throw new IllegalStateException("no proxies left in the pool");
         });
 
         assertThrows(
-                IOException.class,
-                () -> HttpUtil.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE)));
+                IOException.class, () -> http.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE)));
         assertEquals(0, originHits.get(), "a failed resolution must never fall back to the real address");
     }
 
     @Test
     void aProviderThatNamesNoRouteFailsTheRequestToo() {
-        HttpUtil.bind(scope -> null);
+        bind(scope -> null);
 
         assertThrows(
-                IOException.class,
-                () -> HttpUtil.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE)));
+                IOException.class, () -> http.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE)));
         assertEquals(0, originHits.get());
     }
 
     @Test
     void withoutAProviderEverythingIsDirect() throws Exception {
-        HttpUtil.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE));
+        http.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE));
 
         assertEquals(1, originHits.get());
         assertEquals(0, proxy.requestLines().size());
     }
 
     /**
-     * The provider is static, so a second runtime built without one reaches {@code bind(null)}. Were that
-     * to clear the first runtime's provider, every later request would leave from the machine's own
-     * address with nothing having failed.
+     * Each transport has its own provider, fixed when it is built. One built without a provider is
+     * direct, whatever another transport in the process was given, and never borrows its routes.
      */
     @Test
-    void bindingNothingDoesNotRemoveAnInstalledProvider() throws Exception {
-        HttpUtil.bind(scope -> throughProxy());
+    void aTransportWithoutAProviderNeverUsesAnotherTransportsProvider() throws Exception {
+        bind(scope -> throughProxy());
+        HttpTransport proxied = http;
+        HttpTransport direct = TestTransports.direct();
 
-        HttpUtil.bind(null);
-        HttpUtil.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE));
+        direct.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE));
+        proxied.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE));
 
-        assertEquals(1, proxy.requestLines().size(), "the request must still leave through the proxy");
-        assertEquals(0, originHits.get(), "and must not have gone direct");
-    }
-
-    @Test
-    void aLaterProviderReplacesAnEarlierOne() throws Exception {
-        HttpUtil.bind(scope -> throughProxy());
-
-        HttpUtil.bind(scope -> ProxyRoute.direct());
-        HttpUtil.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE));
-
-        assertEquals(1, originHits.get());
-        assertEquals(0, proxy.requestLines().size());
+        assertEquals(1, originHits.get(), "the transport with no provider went direct");
+        assertEquals(1, proxy.requestLines().size(), "the proxied one went through its own provider");
     }
 
     /**

@@ -10,6 +10,9 @@ import java.net.Socket;
 import java.net.SocketAddress;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSocket;
@@ -37,7 +40,8 @@ import javax.net.ssl.SSLSocketFactory;
  *
  * <p>Every path that could reach the origin without the proxy throws. One instance serves one route
  * identity — proxy host, port, and credential — and the JDK keys its keep-alive pool on the factory
- * instance, which is what stops two identities on one gateway from sharing a tunnel.
+ * instance, which is what stops two identities on one gateway from sharing a tunnel. The factory keeps
+ * track of the tunnels it opened, so closing the transport closes the pooled ones too.
  *
  * @author trq
  * @since 0.12.0
@@ -54,6 +58,9 @@ final class ProxyTunnelSocketFactory extends SSLSocketFactory {
     private final int proxyPort;
     private final String authorization;
     private final Supplier<SSLSocketFactory> tls;
+
+    /** Every tunnel this factory opened that is not yet closed, pooled or in use. */
+    private final Set<TunnelSocket> open = ConcurrentHashMap.newKeySet();
 
     /**
      * Creates the factory for one route identity.
@@ -77,7 +84,33 @@ final class ProxyTunnelSocketFactory extends SSLSocketFactory {
      */
     @Override
     public Socket createSocket() {
-        return new TunnelSocket();
+        TunnelSocket socket = new TunnelSocket();
+        open.add(socket);
+        return socket;
+    }
+
+    /**
+     * Returns whether every tunnel this factory opened has been closed.
+     *
+     * @return true when none is open
+     */
+    boolean idle() {
+        return open.isEmpty();
+    }
+
+    /**
+     * Closes every tunnel this factory opened and has not seen closed, the JDK's pooled keep-alive ones
+     * included. The transport calls this when it closes: a pooled tunnel is a live connection to the
+     * proxy, held open under the route's identity, that nothing else would ever close.
+     */
+    void closeAll() {
+        for (TunnelSocket socket : List.copyOf(open)) {
+            try {
+                socket.close();
+            } catch (IOException ignored) {
+                // Closing is best effort; the socket is dropped from the set either way.
+            }
+        }
     }
 
     /**
@@ -214,6 +247,15 @@ final class ProxyTunnelSocketFactory extends SSLSocketFactory {
 
         boolean established() {
             return established;
+        }
+
+        @Override
+        public void close() throws IOException {
+            try {
+                super.close();
+            } finally {
+                open.remove(this);
+            }
         }
 
         @Override

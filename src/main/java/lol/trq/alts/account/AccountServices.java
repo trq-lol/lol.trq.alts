@@ -2,6 +2,7 @@ package lol.trq.alts.account;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import lol.trq.alts.net.HttpTransport;
 
 /**
  * The whole post-login account surface, built over one live Minecraft access token. Hands out the
@@ -32,8 +33,8 @@ public final class AccountServices {
     private final CertificateService certificates;
     private final BlocklistService blocklist;
 
-    private AccountServices(String token, String accountUuid, AccountEndpoints endpoints) {
-        AccountHttp http = new AccountHttp(token, accountUuid);
+    private AccountServices(HttpTransport transport, String token, String accountUuid, AccountEndpoints endpoints) {
+        AccountHttp http = new AccountHttp(transport, token, accountUuid);
         this.profile = new ProfileServiceImpl(http, endpoints, GSON);
         this.entitlements = new EntitlementServiceImpl(http, endpoints);
         this.name = new NameServiceImpl(http, endpoints, GSON);
@@ -48,13 +49,16 @@ public final class AccountServices {
      * Builds the services against a given endpoint base. Package-private: the runtime reaches it through
      * {@link AccountBridge}, and a host through {@code AltsRuntime#accountServices}.
      *
+     * @param transport the runtime's transport
      * @param token the account's Minecraft access token
      * @param accountUuid the account UUID, for per-account request routing; may be null
      * @param endpoints the Minecraft services base
      * @return the services
      */
-    static AccountServices create(String token, String accountUuid, AccountEndpoints endpoints) {
-        return new AccountServices(token, accountUuid, endpoints == null ? AccountEndpoints.defaults() : endpoints);
+    static AccountServices create(
+            HttpTransport transport, String token, String accountUuid, AccountEndpoints endpoints) {
+        return new AccountServices(
+                transport, token, accountUuid, endpoints == null ? AccountEndpoints.defaults() : endpoints);
     }
 
     /**

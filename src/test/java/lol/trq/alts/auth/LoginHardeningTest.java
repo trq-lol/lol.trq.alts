@@ -17,6 +17,7 @@ import lol.trq.alts.auth.AltLoginCallback.FailureReason;
 import lol.trq.alts.auth.AltLoginCallback.LoginResult;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.model.SessionData;
+import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -55,6 +56,7 @@ class LoginHardeningTest {
                 localStore.store(),
                 injected::set,
                 chain.config(),
+                TestTransports.direct(),
                 Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
     }
 

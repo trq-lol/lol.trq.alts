@@ -20,6 +20,7 @@ import lol.trq.alts.auth.AltLoginCallback.LoginResult;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
+import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -90,7 +91,7 @@ class RefreshClassificationTest {
     }
 
     private LoginResult imported() throws Exception {
-        return new AltLoginServiceImpl(localStore.store(), session -> {}, config)
+        return new AltLoginServiceImpl(localStore.store(), session -> {}, config, TestTransports.direct())
                 .loginRefreshToken("M.C123_imported", LoginMode.DIRECT)
                 .get();
     }
@@ -100,7 +101,10 @@ class RefreshClassificationTest {
                 .withTokens("stored-access", "stored-refresh", NOW - 1);
         localStore.seed(account);
         return new AltAccountServiceImpl(
-                        localStore.store(), config, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC))
+                        localStore.store(),
+                        config,
+                        TestTransports.direct(),
+                        Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC))
                 .refresh(account)
                 .get();
     }
