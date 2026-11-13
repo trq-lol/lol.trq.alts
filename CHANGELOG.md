@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **One error model.** `lol.trq.alts.AltsFailure` is the one value that describes a failure anywhere in
+  the library: a `kind()` to branch on, a `message()` the library builds (never a transport exception's
+  text, a token or a path), an `Optional<Duration> retryAfter()`, an `Optional<XstsError> xstsError()`
+  (present only on `XBOX_DENIED`), and `at()`, the instant it was recorded. `retryable()` is true for
+  `NETWORK`, and for `RATE_LIMITED` once a stated `retryAfter` has passed since `at()`; a rate limit
+  that stated no wait is not retryable, and neither is any other kind. `AltsFailure.Kind` is one enum
+  for the whole library: `NETWORK`, `RATE_LIMITED`, `UNAUTHORIZED`, `REAUTH_REQUIRED`, `NOT_ENTITLED`,
+  `NOT_FOUND`, `XBOX_DENIED`, `DECLINED`, `TIMED_OUT`, `CANCELLED`, `INVALID_INPUT`, `CONFLICT`,
+  `NOT_CONFIGURED`, `STORAGE`, `CRYPTO`, `PROTOCOL`, `UNKNOWN`. `lol.trq.alts.AltsException` (unchecked)
+  carries one in `failure()`, and is the only exception a library future completes with exceptionally.
+- `account.SkinProblem` (`UNREADABLE`, `EMPTY`, `TOO_LARGE`, `NOT_PNG`, `WRONG_DIMENSIONS`) and
+  `SkinService.validate(byte[])`, which says why bytes are not an uploadable skin without sending
+  anything.
+
 ### Changed
 
 - **Breaking: each runtime owns its stores.** `AltsRuntime` now constructs and owns an
@@ -14,8 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   process-wide statics. Every operation keeps its name and its rules: `AltStore.accounts()` becomes
   `alts.store().accounts()`, `AltStore.addAccount(a)` becomes `alts.store().addAccount(a)`, and each
   `SecretStore` call becomes the same call on `alts.secrets()`. `loadError()`, `loadWarning()` and
-  `saveError()` still return `Optional<String>`. Two runtimes in one process, on two directories, no
-  longer share accounts, secrets, a store key or a write delay.
+  `saveError()` return `Optional<AltsFailure>` (see the error model below). Two runtimes in one
+  process, on two directories, no longer share accounts, secrets, a store key or a write delay.
 - **Breaking: `AltsRuntime` is `AutoCloseable`.** `close()` writes what the stores still hold, releases
   their files, stops their background writers and removes their shutdown hooks; it is idempotent. After
   it the stores write nothing: a mutator changes memory only and reports "the store is closed" on
@@ -23,9 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking: a store file has one owner.** Each store holds an exclusive lock on a sidecar
   `<file>.lock` (for example `accounts.dat.lock`) beside its file for its lifetime, which also covers two
   processes sharing a directory. A second runtime on the same directory fails in `build()` with an
-  `IllegalStateException` saying the store file is in use (the message names the file, never the path),
-  and a build that fails holds no lock. `build()` also fails when the store directory cannot be created
-  or locked, where it used to build and report the failure on `loadError()`.
+  `AltsException` of kind `CONFLICT` saying the store file is in use (the message names the file, never
+  the path), and a build that fails holds no lock. `build()` also fails, with kind `STORAGE`, when the
+  store directory cannot be created or locked, where it used to build and report the failure on
+  `loadError()`.
 - **Breaking: a store file that could not be read is never written over.** Before, only a load that
   failed for want of the store key refused writes; any other unreadable file (the wrong key, a damaged
   file, a read error) was copied aside and replaced by the next write, so a runtime without the host's
@@ -85,8 +102,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   credential is placed only by the route: on the `CONNECT` of a tunnel, or on a plain request to the
   proxy itself, never on a connection the JDK would send to the origin.
 
+- **Breaking: a failure is an `AltsFailure` everywhere.** An outcome a caller branches on is a result
+  carrying `Optional<AltsFailure> failure()`; everything else throws `AltsException`. Sign-in returns
+  `auth.LoginResult(account, failure)` (`success()` and `message()` remain as methods); `AccountStatus`
+  is `(account, state, failure)` and keeps its `State`, whose exhaustive mapping from the kind is
+  unchanged (`RATE_LIMITED` and `NETWORK` are `UNREACHABLE`, `XBOX_DENIED` is `NOT_ENTITLED`);
+  `BulkEntryResult` is `(index, label, account, failure, message, attempts, entitlements)` with
+  `success()` a method. `NameChangeResult` and `ProfileCreationResult` keep the outcomes a host shows
+  (a name changed, invalid, unavailable, taken, blocked) and fold every failure into `FAILED`, which
+  carries the failure and its wait; an unreachable service is a `FAILED` result, no longer an
+  exception. `ClaimResult` gains `failure()`, present exactly on `TERMINAL_FAILURE`, which now also
+  ends a run that met a rate limit or a closed runtime. The account services, `ProfileLookupService`
+  and `SkinService` throw `AltsException` and declare no checked exception. The stores report
+  `loadError()`, `saveError()` and `loadWarning()` as `Optional<AltsFailure>` of kind `STORAGE`. Read
+  `failure().map(AltsFailure::kind)` where you read a reason, `failure().flatMap(AltsFailure::retryAfter)`
+  where you read `retryAfter()`, and `failure().flatMap(AltsFailure::xstsError)` where you read
+  `xstsError()`. The table below maps every former constant to its kind.
+- **Breaking: a failure message is the library's own.** A failed account-service call says which
+  request failed and with what status; the service's `errorMessage` is no longer repeated, since a
+  service may echo what it was sent. A sign-in no longer repeats what the host's session injector
+  threw.
+- **Breaking: nothing a closed runtime starts throws at the caller.** A sign-in route, a check or a
+  refresh started after `close()`, or refused by its executor, returns a result whose failure is
+  `CANCELLED` (it used to throw `RejectedExecutionException` on a runtime-created executor); a browser
+  sign-in no longer binds a port or opens a browser once the runtime is closed. A scheduled name claim
+  that the closing runtime ends completes with a `TERMINAL_FAILURE` result of kind `CANCELLED` instead
+  of an exception. An account-service call on a closed runtime throws `AltsException` of kind
+  `CANCELLED`.
+
 ### Removed
 
+- **Breaking:** `AltLoginCallback` and `AltLoginCallback.FailureReason`: every route returns a future,
+  and the reason is `AltsFailure.Kind`. `AltLoginCallback.LoginResult` is now `auth.LoginResult`; its
+  constructors with three to six arguments, `failure(String)`, `failure(String, FailureReason, ...)`
+  and `rateLimited()` go, replaced by `LoginResult.failure(AltsFailure)` and
+  `LoginResult.failure(Kind, String)`.
+- **Breaking:** `AccountException` and `SkinValidationException` (with `SkinValidationException.Reason`,
+  replaced by `SkinProblem` constant for constant). Their `status()`, `tokenRefused()`, `rateLimited()`,
+  `notFound()` and `retryAfter()` become `failure().kind()` and `failure().retryAfter()`.
+- **Breaking:** `AccountStatus.rateLimited()`, `AccountStatus.retryAfter()`, `AccountStatus.reason()`,
+  the `AccountStatus.failure` overloads taking a reason and a message, `ClaimResult.rateLimited()`,
+  `ClaimResult`'s three-argument constructor and its stop-reason inference, and the result records'
+  `retryAfter` components.
+- Internal: `MicrosoftAuthUtil.AuthFlowException`, `MicrosoftAuthUtil.XstsAuthException` and
+  `MicrosoftAuthUtil.RefreshRejectedException`; the sign-in chain fails with `AltsException`.
 - **Breaking:** `AltStore` and `SecretStore`, with no deprecation bridge. Their static `bind`,
   `configure`, `keyProvider` and `writeDelay` have no replacement call: the builder sets the directory,
   file names, key bindings and key provider, and a runtime always coalesces writes (100 ms).
@@ -120,6 +179,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `lol.trq.alts.testSeams` system property and the test hooks it guarded (`HttpUtil.resetForTests`,
   `IoExecutor.resetForTests`, `NetTestHooks`): a test builds its own runtime or transport and needs no
   process-wide reset.
+
+### Error kinds
+
+Every former reason, outcome and exception case, and the kind it becomes. *kept* means the constant is
+still there and carries no failure of its own (`FAILED` and `TERMINAL_FAILURE` carry the failure that
+says the kind); *none* means success, so `failure()` is empty.
+
+| Former | Kind | Notes |
+| --- | --- | --- |
+| `FailureReason.NONE` | none | |
+| `FailureReason.UNKNOWN` | `UNKNOWN` | |
+| `FailureReason.REAUTH_REQUIRED` | `REAUTH_REQUIRED` | The credential is spent and was discarded. |
+| `FailureReason.INVALID_TOKEN` | `UNAUTHORIZED` | Empty, malformed or refused; a refresh token may still renew. |
+| `FailureReason.NETWORK` | `NETWORK` | |
+| `FailureReason.NOT_CONFIGURED` | `NOT_CONFIGURED` | |
+| `FailureReason.NOT_ENTITLED` | `NOT_ENTITLED` | |
+| `FailureReason.RATE_LIMITED` | `RATE_LIMITED` | The wait is `failure().retryAfter()`. |
+| `FailureReason.XBOX_DENIED` | `XBOX_DENIED` | The reason is `failure().xstsError()`. |
+| `FailureReason.DECLINED` | `DECLINED` | |
+| `FailureReason.TIMED_OUT` | `TIMED_OUT` | |
+| `AccountException.tokenRefused()` | `UNAUTHORIZED` | Status 401 or 403. |
+| `AccountException.notFound()` | `NOT_FOUND` | Status 404; `fetchIfPresent()` still treats it as no profile. |
+| `AccountException.rateLimited()` | `RATE_LIMITED` | Status 429, with its wait. |
+| `AccountException` status 5xx or 408 | `NETWORK` | |
+| `AccountException` status 400 or 422 | `INVALID_INPUT` | |
+| `AccountException` status 409 | `CONFLICT` | |
+| `AccountException` another status | `UNKNOWN` | |
+| `AccountException` status 0, unreachable | `NETWORK` | `CANCELLED` once the runtime is closed. |
+| `AccountException` status 0, unreadable answer | `PROTOCOL` | |
+| `XstsAuthException` | `XBOX_DENIED` | |
+| `RefreshRejectedException.permanent()` | `REAUTH_REQUIRED` | A stated `invalid_grant` only. |
+| `RefreshRejectedException.rateLimited()` | `RATE_LIMITED` | |
+| `RefreshRejectedException`, an outage | `NETWORK` | Status 5xx or 408, or unreachable. |
+| `RefreshRejectedException`, another refusal | `UNAUTHORIZED` | Was `NETWORK`; the stored token is kept. |
+| `SkinValidationException.Reason.UNREADABLE` | `INVALID_INPUT` | `SkinProblem.UNREADABLE` |
+| `SkinValidationException.Reason.EMPTY` | `INVALID_INPUT` | `SkinProblem.EMPTY` |
+| `SkinValidationException.Reason.TOO_LARGE` | `INVALID_INPUT` | `SkinProblem.TOO_LARGE` |
+| `SkinValidationException.Reason.NOT_PNG` | `INVALID_INPUT` | `SkinProblem.NOT_PNG` |
+| `SkinValidationException.Reason.WRONG_DIMENSIONS` | `INVALID_INPUT` | `SkinProblem.WRONG_DIMENSIONS` |
+| `NameChangeResult.Outcome.CHANGED` | kept | |
+| `NameChangeResult.Outcome.INVALID_NAME` | kept | |
+| `NameChangeResult.Outcome.UNAVAILABLE` | kept | |
+| `NameChangeResult.Outcome.NOT_ENTITLED` | `NOT_ENTITLED` | Now `FAILED`. |
+| `NameChangeResult.Outcome.UNAUTHORIZED` | `UNAUTHORIZED` | Now `FAILED`. |
+| `NameChangeResult.Outcome.RATE_LIMITED` | `RATE_LIMITED` | Now `FAILED`, with its wait. |
+| `NameChangeResult.Outcome.FAILED` | kept | Its failure carries the kind. |
+| `ProfileCreationResult.Outcome.CREATED` | kept | |
+| `ProfileCreationResult.Outcome.INVALID_NAME` | kept | |
+| `ProfileCreationResult.Outcome.DUPLICATE` | kept | |
+| `ProfileCreationResult.Outcome.NOT_ALLOWED` | kept | |
+| `ProfileCreationResult.Outcome.NOT_ENTITLED` | `NOT_ENTITLED` | Now `FAILED`. |
+| `ProfileCreationResult.Outcome.UNAUTHORIZED` | `UNAUTHORIZED` | Now `FAILED`. |
+| `ProfileCreationResult.Outcome.RATE_LIMITED` | `RATE_LIMITED` | Now `FAILED`, with its wait. |
+| `ProfileCreationResult.Outcome.FAILED` | kept | Its failure carries the kind. |
+| `ClaimResult.StopReason.CLAIMED` | kept | |
+| `ClaimResult.StopReason.WINDOW_ELAPSED` | kept | |
+| `ClaimResult.StopReason.RATE_LIMITED` | `RATE_LIMITED` | Now `TERMINAL_FAILURE`, with its wait. |
+| `ClaimResult.StopReason.TERMINAL_FAILURE` | kept | Its failure carries the kind. |
+| `ClaimResult.StopReason.CANCELLED` | kept | |
+| `ClaimResult.StopReason.UNKNOWN` | `UNKNOWN` | Now `TERMINAL_FAILURE`. |
+| Store `loadError()`, `saveError()`, `loadWarning()` strings | `STORAGE` | |
+| `build()`'s `IllegalStateException`, store file in use | `CONFLICT` | |
+| `build()`'s `IllegalStateException`, store not lockable | `STORAGE` | |
+
+An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in the rows above.
+`CryptoException` and `VaultException` stay until the shared vault moves to AVP 0.5; their failures
+will be kinds `CRYPTO`, `PROTOCOL` and the transport kinds.
 
 ### Fixed
 
