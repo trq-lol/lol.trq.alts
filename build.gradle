@@ -59,6 +59,8 @@ tasks.withType(Javadoc).configureEach {
 
 tasks.named('test') {
     useJUnitPlatform()
+    // ErrorKindMigrationTableTest reads the changelog's error-kind table, so a changed table reruns it.
+    inputs.file('CHANGELOG.md').withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 tasks.named('jar') {
