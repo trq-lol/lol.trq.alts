@@ -330,7 +330,9 @@ class DeviceCodeLoginTest {
                 .get(10, TimeUnit.SECONDS)
                 .success());
 
-        assertEquals(0, TestTransports.closerCount(transport), "a successful login unregistered everything");
+        // Unregistering is a dependent of the same future the result hangs off, and the JDK runs
+        // dependents in no promised order, so it is waited for rather than read at once.
+        waitUntil(() -> TestTransports.closerCount(transport) == 0);
     }
 
     @Test
@@ -344,7 +346,9 @@ class DeviceCodeLoginTest {
                 .get(10, TimeUnit.SECONDS)
                 .success());
 
-        assertEquals(0, TestTransports.closerCount(transport), "a declined login unregistered everything");
+        // Unregistering is a dependent of the same future the result hangs off, and the JDK runs
+        // dependents in no promised order, so it is waited for rather than read at once.
+        waitUntil(() -> TestTransports.closerCount(transport) == 0);
     }
 
     @Test
