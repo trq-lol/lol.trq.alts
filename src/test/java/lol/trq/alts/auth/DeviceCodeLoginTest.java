@@ -167,6 +167,19 @@ class DeviceCodeLoginTest {
                 "the longer interval is kept, not applied once: " + chain.millisBetweenPolls(2, 3) + "ms");
     }
 
+    /** A poll refused for the host's client registration is the host's configuration, not the user. */
+    @Test
+    void aPollRefusedForTheClientIsNotConfigured() throws Exception {
+        chain.deviceTokenError("invalid_client");
+
+        LoginResult result = login(LoginMode.DIRECT);
+
+        assertEquals(
+                Kind.NOT_CONFIGURED, result.failure().map(AltsFailure::kind).orElse(null));
+        assertNull(injected.get());
+        assertEquals(1, chain.deviceTokenPolls(), "a refused client ends the polling");
+    }
+
     @Test
     void aDeclinedCodeFailsAsDeclined() throws Exception {
         chain.deviceTokenError("authorization_pending");
