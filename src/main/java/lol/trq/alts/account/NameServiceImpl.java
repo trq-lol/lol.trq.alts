@@ -9,7 +9,6 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -233,16 +232,10 @@ final class NameServiceImpl implements NameService {
         return delay(Duration.ofMillis(sleep)).thenCompose(ignored -> waitUntil(target, clock, stopped));
     }
 
+    // Fails, rather than waiting for good, once the runtime has closed: a claim scheduled for hours
+    // ahead ends with the runtime instead of outliving it.
     private CompletableFuture<Void> delay(Duration duration) {
-        long millis = duration == null ? 0L : duration.toMillis();
-        if (millis <= 0L) {
-            return CompletableFuture.completedFuture(null);
-        }
-        return CompletableFuture.supplyAsync(
-                        () -> null,
-                        CompletableFuture.delayedExecutor(
-                                millis, TimeUnit.MILLISECONDS, http.transport().executor()))
-                .thenApply(ignored -> null);
+        return http.transport().delay(duration);
     }
 
     private static Instant parseInstant(String value) {

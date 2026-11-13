@@ -87,7 +87,7 @@ class BulkOperationsTest {
                 account -> {
                     throw new AssertionError("this run reads no entitlements");
                 },
-                TestTransports.EXECUTOR);
+                TestTransports.direct());
     }
 
     @Test
@@ -405,7 +405,7 @@ class BulkOperationsTest {
                 account -> {
                     throw new AssertionError("an import reads no entitlements");
                 },
-                TestTransports.EXECUTOR);
+                TestTransports.direct());
     }
 
     @Test
@@ -540,7 +540,7 @@ class BulkOperationsTest {
                     account -> lol.trq.alts.internal.account.AccountAccess.bridge()
                             .services(transport, account.accessToken(), account.uuid(), endpoints)
                             .entitlements(),
-                    transport.executor());
+                    transport);
         }
 
         @Override

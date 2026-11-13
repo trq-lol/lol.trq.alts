@@ -139,7 +139,7 @@ class HostExecutorAdoptionTest {
                     onHostThread();
                     return new Entitlements(Set.of());
                 },
-                host);
+                transport);
         List<AltAccount> accounts = List.of(
                 AltAccount.of("00000000-0000-4000-8000-000000000001", "AltOne", "token", AccountType.MICROSOFT),
                 AltAccount.of("00000000-0000-4000-8000-000000000002", "AltTwo", "token", AccountType.MICROSOFT));

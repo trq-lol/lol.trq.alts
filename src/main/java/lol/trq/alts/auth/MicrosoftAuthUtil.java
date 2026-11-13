@@ -90,6 +90,9 @@ public final class MicrosoftAuthUtil {
                 new MicrosoftCallbackServer(state, config, codeChallenge(verifier), browser, http.executor());
 
         CompletableFuture<String> code = server.start();
+        // A runtime closed while the user is still in the browser ends the sign-in, which stops the
+        // callback listener and releases its port, rather than holding it until the sign-in times out.
+        endWhenClosed(code);
         CompletableFuture<MinecraftProfile> chain = code.thenCompose(
                         received -> exchangeCodeForToken(config, received, server.redirectUri(), verifier))
                 .thenCompose(tokens -> completeFrom(config, tokens, NO_ACCOUNT));
@@ -176,7 +179,10 @@ public final class MicrosoftAuthUtil {
         Objects.requireNonNull(timing, "timing");
 
         CompletableFuture<MsTokens> tokens = new CompletableFuture<>();
-        CompletableFuture.runAsync(
+        // Closing the runtime ends the polling at once, however long the next interval is.
+        endWhenClosed(tokens);
+        http.schedule(
+                0L,
                 () -> {
                     try {
                         startDeviceCode(config, prompt, timing, tokens);
@@ -184,7 +190,7 @@ public final class MicrosoftAuthUtil {
                         tokens.completeExceptionally(failure);
                     }
                 },
-                http.executor());
+                tokens::completeExceptionally);
         return cancelling(tokens.thenCompose(issued -> completeFrom(config, issued, NO_ACCOUNT)), tokens);
     }
 
@@ -282,8 +288,8 @@ public final class MicrosoftAuthUtil {
         }
 
         void schedule() {
-            CompletableFuture.delayedExecutor(intervalMillis, TimeUnit.MILLISECONDS, http.executor())
-                    .execute(this);
+            // A runtime closed between polls ends the login rather than leaving it waiting for good.
+            http.schedule(intervalMillis, this, tokens::completeExceptionally);
         }
 
         @Override
@@ -444,6 +450,24 @@ public final class MicrosoftAuthUtil {
                     + ", verificationUri=" + verificationUri + ", expiresIn=" + expiresIn + ", interval=" + interval
                     + ", message=" + redacted(message) + "]";
         }
+    }
+
+    /**
+     * Fails {@code waiting} with an {@link java.io.IOException} saying the runtime is closed when the
+     * transport closes first, and forgets it once it completes some other way.
+     *
+     * @param waiting the future a sign-in is waiting on
+     */
+    private void endWhenClosed(CompletableFuture<?> waiting) {
+        AutoCloseable registration =
+                http.whenClosed(() -> waiting.completeExceptionally(new java.io.IOException("the runtime is closed")));
+        waiting.whenComplete((value, failure) -> {
+            try {
+                registration.close();
+            } catch (Exception ignored) {
+                // Unregistering removes from a set; it does not fail.
+            }
+        });
     }
 
     /**

@@ -152,7 +152,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
                     new AltLoginServiceImpl(store, session -> {}, builder.microsoftAuth, transport),
                     loginService.accountService(),
                     account -> accountServices(account).entitlements(),
-                    executor);
+                    transport);
             this.skinCache = SkinAccess.bridge()
                     .cache(avatarSourceFrom(builder, transport), builder.textureUploader, builder.mainThread, executor);
 

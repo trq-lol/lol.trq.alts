@@ -2,6 +2,8 @@ package lol.trq.alts.account;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.net.httpserver.HttpServer;
@@ -12,8 +14,13 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -64,6 +71,28 @@ class ScheduledClaimTest {
     private NameService name() {
         return AccountServices.create(TestTransports.direct(), "token", "uuid", new AccountEndpoints(base))
                 .name();
+    }
+
+    /**
+     * A claim scheduled an hour ahead must not outlive the runtime: closing it ends the wait at once,
+     * as a failure, and nothing fires afterwards.
+     */
+    @Test
+    void aClaimWaitingWhenTheRuntimeClosesResolves() throws Exception {
+        ExecutorService owned =
+                Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory());
+        HttpTransport transport = TestTransports.on(null, owned);
+        NameService name = AccountServices.create(transport, "token", "uuid", new AccountEndpoints(base))
+                .name();
+        CompletableFuture<ClaimResult> claim =
+                name.claimAt("Wanted", Instant.now().plus(Duration.ofHours(1)), null);
+
+        transport.close();
+        owned.shutdown();
+
+        ExecutionException ended = assertThrows(ExecutionException.class, () -> claim.get(2, TimeUnit.SECONDS));
+        assertInstanceOf(IOException.class, ended.getCause(), "the wait ended because the runtime closed");
+        assertEquals(0, changeCalls.get(), "nothing fired");
     }
 
     @Test

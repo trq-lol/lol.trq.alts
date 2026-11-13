@@ -23,7 +23,14 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLSocketFactory;
@@ -189,6 +196,99 @@ public final class HttpTransport implements AutoCloseable {
     }
 
     /**
+     * Registers an action to run when this transport closes, or at once if it already has: the way
+     * something waiting on the runtime (a sign-in's callback listener, a scheduled wait) is ended by
+     * {@link #close()} rather than left waiting for an event that will not come.
+     *
+     * @param action what to run; it runs at most once, and a failure it throws is not propagated
+     * @return a handle that unregisters the action, for once its wait has ended some other way
+     * @since 1.0.0
+     */
+    public AutoCloseable whenClosed(Runnable action) {
+        Objects.requireNonNull(action, "action");
+        tunnels.closers.add(action);
+        if (tunnels.closed && tunnels.closers.remove(action)) {
+            Tunnels.runQuietly(action);
+        }
+        return () -> tunnels.closers.remove(action);
+    }
+
+    /**
+     * Runs {@code task} on this transport's executor after {@code delayMillis}, without holding a thread
+     * while it waits. If the transport closes first, or the executor refuses the task (a runtime's own
+     * executor does once the runtime has closed), {@code refused} is called instead, with an
+     * {@link IOException} saying the runtime is closed, and the task never runs. Exactly one of the two
+     * happens.
+     *
+     * <p>Every wait in the library goes through here. The JDK's own delayed executor swallows a
+     * rejection, which would leave whatever waits on the task waiting for good.
+     *
+     * @param delayMillis how long to wait first; zero or less runs it now
+     * @param task what to run
+     * @param refused what to run instead when the task cannot be run
+     * @since 1.0.0
+     */
+    public void schedule(long delayMillis, Runnable task, Consumer<IOException> refused) {
+        Objects.requireNonNull(task, "task");
+        Objects.requireNonNull(refused, "refused");
+        AtomicBoolean settled = new AtomicBoolean();
+        AutoCloseable registration = whenClosed(() -> {
+            if (settled.compareAndSet(false, true)) {
+                refused.accept(closedFailure(null));
+            }
+        });
+        Runnable fire = () -> {
+            if (!settled.compareAndSet(false, true)) {
+                return;
+            }
+            closeQuietly(registration);
+            try {
+                executor.execute(task);
+            } catch (RejectedExecutionException rejection) {
+                refused.accept(closedFailure(rejection));
+            }
+        };
+        if (delayMillis <= 0) {
+            fire.run();
+        } else {
+            // The delayer thread only hands the task over; the task itself runs on the executor.
+            CompletableFuture.delayedExecutor(delayMillis, TimeUnit.MILLISECONDS, Runnable::run)
+                    .execute(fire);
+        }
+    }
+
+    /**
+     * Returns a future that completes after {@code duration}, on this transport's executor, or completes
+     * exceptionally with an {@link IOException} as soon as the transport closes or the executor refuses
+     * to run it; see {@link #schedule(long, Runnable, Consumer)}.
+     *
+     * @param duration how long to wait; null or not positive completes at once
+     * @return the wait
+     * @since 1.0.0
+     */
+    public CompletableFuture<Void> delay(Duration duration) {
+        long millis = duration == null ? 0L : duration.toMillis();
+        if (millis <= 0L) {
+            return CompletableFuture.completedFuture(null);
+        }
+        CompletableFuture<Void> waited = new CompletableFuture<>();
+        schedule(millis, () -> waited.complete(null), waited::completeExceptionally);
+        return waited;
+    }
+
+    private static IOException closedFailure(Throwable cause) {
+        return new IOException("the runtime is closed", cause);
+    }
+
+    private static void closeQuietly(AutoCloseable closeable) {
+        try {
+            closeable.close();
+        } catch (Exception ignored) {
+            // Unregistering removes from a set; it does not fail.
+        }
+    }
+
+    /**
      * Resolves the route a request should take, with this view's route tag stamped on the scope.
      *
      * <p>Fails closed when a provider is set: a provider that throws or returns null fails the request
@@ -244,11 +344,12 @@ public final class HttpTransport implements AutoCloseable {
                 return true;
             }
         };
+        private final Set<Runnable> closers = ConcurrentHashMap.newKeySet();
         private volatile boolean closed;
 
         void close() {
-            closed = true;
             List<ProxyTunnelSocketFactory> open;
+            closed = true;
             synchronized (factories) {
                 open = new ArrayList<>(factories.values());
                 open.addAll(retired);
@@ -257,6 +358,19 @@ public final class HttpTransport implements AutoCloseable {
             }
             for (ProxyTunnelSocketFactory factory : open) {
                 factory.closeAll();
+            }
+            for (Runnable closer : List.copyOf(closers)) {
+                if (closers.remove(closer)) {
+                    runQuietly(closer);
+                }
+            }
+        }
+
+        static void runQuietly(Runnable action) {
+            try {
+                action.run();
+            } catch (RuntimeException ignored) {
+                // One waiter's failure must not keep the rest of the runtime from closing.
             }
         }
     }

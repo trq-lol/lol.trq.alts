@@ -62,7 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and tunnels are kept apart per proxy identity, now also per runtime.
 - **Breaking: `AltsRuntime.close()` closes the transport.** It closes the pooled proxy tunnels, refuses
   every request made afterwards, and shuts down a library-created executor, after flushing the stores
-  as before.
+  as before. Whatever was waiting on the runtime ends with it, as a failure: a bulk run paced between
+  entries (its report completes), a device-code sign-in between polls, a scheduled name claim, and a
+  browser sign-in still waiting for its callback, whose loopback port is released.
 - `AltLoginServiceImpl`, `AltAccountServiceImpl`, `BulkOperationsImpl`, `MicrosoftCallbackServer`,
   `MicrosoftAuthUtil`, `CookieAuthUtil` and `AccountNetworkUtil` (all internal, moving under
   `lol.trq.alts.internal` before the release) take the runtime's transport or executor through their

@@ -10,9 +10,11 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -23,6 +25,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import lol.trq.alts.auth.AltLoginCallback.LoginResult;
 import lol.trq.alts.auth.MicrosoftAuthConfig;
+import lol.trq.alts.bulk.BulkOptions;
+import lol.trq.alts.bulk.BulkReport;
 import lol.trq.alts.model.GameStats;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.net.NetworkScope;
@@ -294,5 +298,26 @@ class AltsRuntimeIsolationTest {
         assertFalse(threads.containsKey("after"), "nothing runs on a closed runtime's own executor");
         Set<String> names = Set.copyOf(threads.values());
         assertTrue(names.stream().noneMatch(name -> name.contains("ForkJoinPool")), names.toString());
+    }
+
+    /**
+     * A paced run waiting between entries when its runtime closes must end, its report completing,
+     * rather than wait for good on a delay its stopped executor would never run.
+     */
+    @Test
+    void aPacedImportInFlightWhenTheRuntimeClosesStillReports() throws Exception {
+        AltsRuntime<Object> alts = builder(dirA).build();
+        CompletableFuture<BulkReport> report = alts.bulk()
+                .importCredentials(
+                        List.of("Alpha1", "Bravo2", "Charl3"),
+                        LoginMode.ADD,
+                        new BulkOptions(1, Duration.ofMillis(500), 0, Duration.ofMillis(10), true),
+                        null)
+                .report();
+
+        alts.close();
+
+        BulkReport done = report.get(5, TimeUnit.SECONDS);
+        assertTrue(done.results().size() < 3, "the entries after close did not run: " + done.results());
     }
 }

@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
@@ -97,7 +98,14 @@ public class MicrosoftCallbackServer {
         // Registered before anything can complete the future, and run off the completing thread: the
         // completion usually happens on the server's own dispatcher, which must not be asked to stop
         // itself before it has finished writing the response.
-        codeFuture.whenCompleteAsync((code, failure) -> stop(), executor);
+        codeFuture.whenComplete((code, failure) -> {
+            try {
+                executor.execute(this::stop);
+            } catch (RejectedExecutionException closed) {
+                // The runtime's executor has shut down: stop here rather than leave the port bound.
+                stop();
+            }
+        });
         try {
             bindToAvailablePort();
             for (HttpServer listener : servers) {

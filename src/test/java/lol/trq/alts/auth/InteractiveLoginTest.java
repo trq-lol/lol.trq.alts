@@ -18,6 +18,8 @@ import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
@@ -25,6 +27,7 @@ import lol.trq.alts.auth.AltLoginCallback.LoginResult;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.model.SessionData;
+import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -132,6 +135,34 @@ class InteractiveLoginTest {
         assertTrue(login.cancel(true));
 
         assertThrows(CancellationException.class, login::join);
+        waitUntil(() -> canBind(port));
+        assertNull(injected.get());
+    }
+
+    /**
+     * A runtime closed while the user is still in the browser ends the sign-in and releases the port,
+     * rather than holding it until the sign-in times out; with the runtime's own executor shut down, the
+     * listener is stopped on the thread that ends it.
+     */
+    @Test
+    void closingTheRuntimeEndsTheSignInAndReleasesTheCallbackPort() throws Exception {
+        ExecutorService owned =
+                Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory());
+        HttpTransport transport = TestTransports.on(null, owned);
+        AltLoginServiceImpl service =
+                new AltLoginServiceImpl(localStore.store(), injected::set, chain.config(), transport);
+        service.browser = authorizationUrl::set;
+
+        CompletableFuture<LoginResult> login = service.loginMicrosoft(LoginMode.DIRECT);
+        waitUntil(() -> authorizationUrl.get() != null);
+        int port = URI.create(AuthChainServer.query(authorizationUrl.get()).get("redirect_uri"))
+                .getPort();
+        assertFalse(canBind(port), "the callback server is listening while the login is pending");
+
+        transport.close();
+        owned.shutdown();
+
+        assertFalse(login.get(2, TimeUnit.SECONDS).success(), "the sign-in ended with the runtime");
         waitUntil(() -> canBind(port));
         assertNull(injected.get());
     }

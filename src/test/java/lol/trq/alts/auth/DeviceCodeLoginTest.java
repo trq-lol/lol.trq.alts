@@ -12,6 +12,8 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -22,6 +24,7 @@ import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.model.SessionData;
+import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.TestTransports;
 import lol.trq.alts.spi.DeviceCodePrompt;
 import org.junit.jupiter.api.AfterEach;
@@ -304,6 +307,35 @@ class DeviceCodeLoginTest {
 
         assertFalse(result.message().contains("secret-device-code"), result.message());
         assertFalse(result.message().contains("ABCD-EFGH"), result.message());
+    }
+
+    /**
+     * A runtime closed while the user is still entering the code ends the login at once. Its own
+     * executor refuses the next poll, and a wait the JDK's delayer could not hand over would otherwise
+     * leave the future pending for good.
+     */
+    @Test
+    void aLoginInFlightWhenTheRuntimeClosesResolves() throws Exception {
+        chain.deviceTokenError("authorization_pending");
+        ExecutorService owned =
+                Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory());
+        HttpTransport transport = TestTransports.on(null, owned);
+        AltLoginServiceImpl service =
+                new AltLoginServiceImpl(localStore.store(), injected::set, chain.config(), transport);
+        // Real seconds, so the next poll is seconds away when the runtime closes.
+        service.deviceCodeTiming = new DeviceCodeTiming(1000L, 5000L);
+
+        CompletableFuture<LoginResult> login = service.loginDeviceCode(prompt, LoginMode.DIRECT);
+        waitUntil(() -> prompts.get() == 1);
+        transport.close();
+        owned.shutdown();
+
+        LoginResult result = login.get(2, TimeUnit.SECONDS);
+        assertFalse(result.success(), "a closed runtime does not finish the sign-in");
+        int polls = chain.deviceTokenPolls();
+        Thread.sleep(300);
+        assertEquals(polls, chain.deviceTokenPolls(), "and nothing polls after it closed");
+        assertNull(injected.get());
     }
 
     private static void waitUntil(java.util.function.BooleanSupplier condition) throws InterruptedException {
