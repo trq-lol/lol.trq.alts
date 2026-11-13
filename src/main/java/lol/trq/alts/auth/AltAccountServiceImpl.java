@@ -74,7 +74,7 @@ public class AltAccountServiceImpl implements AltAccountService {
                     renewable(account) ? State.EXPIRED : State.REAUTH_REQUIRED,
                     AltsFailure.of(Kind.UNAUTHORIZED, "No stored session token")));
         }
-        return guarded(account, () -> CompletableFuture.supplyAsync(() -> validate(account), http.executor()));
+        return guarded("Check", account, () -> CompletableFuture.supplyAsync(() -> validate(account), http.executor()));
     }
 
     @Override
@@ -94,13 +94,17 @@ public class AltAccountServiceImpl implements AltAccountService {
             // A live token on an account that cannot be renewed is taken at its word, so refreshing is
             // no more expensive than logging in was.
             return expired
-                    ? guarded(account, () -> CompletableFuture.supplyAsync(() -> validate(account), http.executor()))
+                    ? guarded(
+                            "Refresh",
+                            account,
+                            () -> CompletableFuture.supplyAsync(() -> validate(account), http.executor()))
                     : CompletableFuture.completedFuture(AccountStatus.valid(account));
         }
         if (expired) {
-            return guarded(account, () -> renew(account));
+            return guarded("Refresh", account, () -> renew(account));
         }
         return guarded(
+                "Refresh",
                 account,
                 () -> CompletableFuture.supplyAsync(() -> validate(account), http.executor())
                         .thenCompose(status -> {
@@ -119,25 +123,26 @@ public class AltAccountServiceImpl implements AltAccountService {
      * (an executor that refuses the task once the runtime is closed) and a future that fails both become
      * a classified failed status, never an exception at the caller or a future completed exceptionally.
      *
+     * @param label what is being done ("Check" or "Refresh"), prefixed to a failure message
      * @param account the account the status describes
      * @param start what starts the work
      * @return a future that always completes with a status
      */
     private CompletableFuture<AccountStatus> guarded(
-            AltAccount account, Supplier<CompletableFuture<AccountStatus>> start) {
+            String label, AltAccount account, Supplier<CompletableFuture<AccountStatus>> start) {
         if (http.isClosed()) {
             return CompletableFuture.completedFuture(AccountStatus.failure(
                     account, State.UNKNOWN, AltsFailure.of(Kind.CANCELLED, "the runtime is closed")));
         }
         try {
-            return start.get().exceptionally(failure -> unexpectedFailure(account, failure));
+            return start.get().exceptionally(failure -> unexpectedFailure(label, account, failure));
         } catch (RuntimeException refused) {
-            return CompletableFuture.completedFuture(unexpectedFailure(account, refused));
+            return CompletableFuture.completedFuture(unexpectedFailure(label, account, refused));
         }
     }
 
-    private static AccountStatus unexpectedFailure(AltAccount account, Throwable failure) {
-        AltsFailure classified = FailureText.toFailure("Check", failure);
+    private static AccountStatus unexpectedFailure(String label, AltAccount account, Throwable failure) {
+        AltsFailure classified = FailureText.toFailure(label, failure);
         return AccountStatus.failure(account, stateFor(classified.kind(), false), classified);
     }
 
