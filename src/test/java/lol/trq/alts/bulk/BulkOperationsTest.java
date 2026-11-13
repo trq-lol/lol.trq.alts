@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -19,8 +20,12 @@ import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.net.HttpUtil;
 import lol.trq.alts.net.NetTestHooks;
+import lol.trq.alts.store.AccountStore;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * The pacing and stopping rules, exercised against a stub account service so no network is involved.
@@ -31,6 +36,22 @@ import org.junit.jupiter.api.Test;
 class BulkOperationsTest {
 
     private static final BulkOptions FAST = new BulkOptions(4, Duration.ZERO, 2, Duration.ofMillis(1), true);
+
+    @TempDir
+    static Path storeDir;
+
+    /** The store an import puts the current account back into; nothing here asserts on its file. */
+    private static AccountStore store;
+
+    @BeforeAll
+    static void openStore() {
+        store = AccountStore.open(storeDir);
+    }
+
+    @AfterAll
+    static void closeStore() {
+        store.close();
+    }
 
     private static AltAccount account(int index) {
         return AltAccount.of("0000000-0000-4000-8000-" + index, "Alt" + index, "token", AccountType.MICROSOFT);
@@ -58,7 +79,7 @@ class BulkOperationsTest {
             }
         };
         // The import service is unused by these runs; a null-injecting login service would need a config.
-        return new BulkOperationsImpl(new UnusedLoginService(), service);
+        return new BulkOperationsImpl(store, new UnusedLoginService(), service);
     }
 
     /** One test here installs a proxy provider to watch the scopes; it must not outlive the test. */
@@ -371,6 +392,7 @@ class BulkOperationsTest {
             }
         };
         return new BulkOperationsImpl(
+                store,
                 new UnusedLoginService() {
                     @Override
                     public CompletableFuture<LoginResult> loginSession(String sessionToken, LoginMode mode) {
@@ -504,6 +526,7 @@ class BulkOperationsTest {
                 }
             };
             return new BulkOperationsImpl(
+                    store,
                     new UnusedLoginService(),
                     unused,
                     account -> lol.trq.alts.account.AccountServices.of(account.accessToken(), account.uuid(), endpoints)

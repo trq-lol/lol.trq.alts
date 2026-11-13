@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking: each runtime owns its stores.** `AltsRuntime` now constructs and owns an
+  `AccountStore` (`alts.store()`) and a `HostSecrets` (`alts.secrets()`) of its own, instead of binding
+  process-wide statics. Every operation keeps its name and its rules: `AltStore.accounts()` becomes
+  `alts.store().accounts()`, `AltStore.addAccount(a)` becomes `alts.store().addAccount(a)`, and each
+  `SecretStore` call becomes the same call on `alts.secrets()`. `loadError()`, `loadWarning()` and
+  `saveError()` still return `Optional<String>`. Two runtimes in one process, on two directories, no
+  longer share accounts, secrets, a store key or a write delay.
+- **Breaking: `AltsRuntime` is `AutoCloseable`.** `close()` writes what the stores still hold, releases
+  their files, stops their background writers and removes their shutdown hooks; it is idempotent. After
+  it the stores write nothing: a mutator changes memory only and reports "the store is closed" on
+  `saveError()`. A host that never calls it still loses nothing on a normal exit.
+- **Breaking: a store file has one owner.** Each store holds an exclusive lock on a sidecar
+  `<file>.lock` (for example `accounts.dat.lock`) beside its file for its lifetime, which also covers two
+  processes sharing a directory. A second runtime on the same directory fails in `build()` with an
+  `IllegalStateException` saying the store file is in use (the message names the file, never the path),
+  and a build that fails holds no lock. `build()` also fails when the store directory cannot be created
+  or locked, where it used to build and report the failure on `loadError()`.
+- The `VaultDirectoryProvider` is asked once, in `build()`; the stores keep that directory for the
+  runtime's lifetime. The store key provider applies to the runtime that was given it and nothing else.
+- `AltLoginServiceImpl`, `AltAccountServiceImpl` and `BulkOperationsImpl` take the `AccountStore` they
+  persist to as their first constructor argument.
+
+### Removed
+
+- **Breaking:** `AltStore` and `SecretStore`, with no deprecation bridge. Their static `bind`,
+  `configure`, `keyProvider` and `writeDelay` have no replacement call: the builder sets the directory,
+  file names, key bindings and key provider, and a runtime always coalesces writes
+  (`AccountStore.DEFAULT_WRITE_DELAY`, 100 ms). `AltStore.DEFAULT_WRITE_DELAY` moved to `AccountStore`.
+  A store can be opened directly with `AccountStore.open(...)` / `HostSecrets.open(...)`, which takes
+  the same lock.
+- The store test seam (`StoreTestHooks.reset()` and the package-private `resetForTests()` behind it);
+  a test that owns its runtime or store needs no process-wide reset.
+
 ## [0.12.0] - 2026-11-12
 
 Device-code login, a wider account surface, a host-supplied store key, and a hardening pass over the

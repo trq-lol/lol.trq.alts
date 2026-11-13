@@ -7,23 +7,29 @@ import java.nio.file.Path;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.BanInfo;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /** Re-adding an alt the store already holds must refresh its credentials, not reset what it knows. */
-class AltStoreMergeTest {
+class AccountStoreMergeTest {
 
     private static final String UUID = "00000000-0000-4000-8000-000000000009";
 
     @TempDir
     Path storeDir;
 
+    private AccountStore store;
+
     @BeforeEach
-    void bindStore() {
-        AltStore.bind(() -> storeDir);
-        AltStore.accounts().clear();
-        AltStore.useAccount(null);
+    void openStore() {
+        store = AccountStore.open(storeDir);
+    }
+
+    @AfterEach
+    void closeStore() {
+        store.close();
     }
 
     private static AltAccount richStoredAccount() {
@@ -36,13 +42,13 @@ class AltStoreMergeTest {
 
     @Test
     void reAddingAnAccountMergesOntoTheStoredRecord() {
-        AltStore.addAccount(richStoredAccount());
+        store.addAccount(richStoredAccount());
 
-        AltStore.addAccount(AltAccount.of(UUID, "Alex", "new-access", AccountType.MICROSOFT)
+        store.addAccount(AltAccount.of(UUID, "Alex", "new-access", AccountType.MICROSOFT)
                 .withTokens("new-access", "new-refresh", 2_000L));
 
-        assertEquals(1, AltStore.accounts().size(), "the account is still stored once");
-        AltAccount stored = AltStore.accounts().get(0);
+        assertEquals(1, store.accounts().size(), "the account is still stored once");
+        AltAccount stored = store.accounts().get(0);
         assertEquals("new-access", stored.accessToken(), "the fresh credential must land");
         assertEquals("new-refresh", stored.refreshToken(), "the rotated credential must land");
         assertEquals(2_000L, stored.expiresAt(), "the expiry must describe the token now held");
@@ -54,11 +60,11 @@ class AltStoreMergeTest {
 
     @Test
     void aRouteThatIssuesNoRefreshTokenKeepsTheStoredOne() {
-        AltStore.addAccount(richStoredAccount());
+        store.addAccount(richStoredAccount());
 
-        AltStore.addAccount(AltAccount.of(UUID, "Alex", "cookie-access", AccountType.COOKIE));
+        store.addAccount(AltAccount.of(UUID, "Alex", "cookie-access", AccountType.COOKIE));
 
-        AltAccount stored = AltStore.accounts().get(0);
+        AltAccount stored = store.accounts().get(0);
         assertEquals("cookie-access", stored.accessToken());
         assertEquals(AccountType.COOKIE, stored.type(), "the route that just authenticated defines the type");
         assertEquals("old-refresh", stored.refreshToken(), "a route with no refresh token must not clear one");
@@ -68,9 +74,9 @@ class AltStoreMergeTest {
     void anUnknownAccountIsStoredAsGiven() {
         AltAccount fresh = AltAccount.of(UUID, "Alex", "access", AccountType.MICROSOFT);
 
-        AltStore.addAccount(fresh);
+        store.addAccount(fresh);
 
-        assertEquals(1, AltStore.accounts().size());
-        assertEquals("access", AltStore.accounts().get(0).accessToken());
+        assertEquals(1, store.accounts().size());
+        assertEquals("access", store.accounts().get(0).accessToken());
     }
 }

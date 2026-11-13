@@ -26,12 +26,12 @@ import lol.trq.alts.net.IoExecutor;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.spi.DeviceCodePrompt;
 import lol.trq.alts.spi.SessionInjector;
-import lol.trq.alts.store.AltStore;
+import lol.trq.alts.store.AccountStore;
 
 /**
  * Concrete {@link AltLoginService} implementing authentication across protocols (JWT fast-path, Mojang
  * lookups, OAuth2, and browser cookie injection). On success it hands a {@link SessionData} to the
- * host-provided {@link SessionInjector} and updates the local {@link AltStore}; it holds no Minecraft
+ * host-provided {@link SessionInjector} and updates the runtime's {@link AccountStore}; it holds no Minecraft
  * types itself.
  *
  * @author trq
@@ -43,6 +43,7 @@ public class AltLoginServiceImpl implements AltLoginService {
     private static final Pattern JWT_NAME_CLAIM = Pattern.compile("\"name\"\\s*:\\s*\"([^\"]+)\"");
     private static final Pattern NOT_USERNAME = Pattern.compile("[^a-zA-Z0-9_]");
 
+    private final AccountStore store;
     private final SessionInjector sessionInjector;
     private final MicrosoftAuthConfig microsoftAuth;
     private final Clock clock;
@@ -55,22 +56,28 @@ public class AltLoginServiceImpl implements AltLoginService {
     Consumer<String> browser = MicrosoftAuthUtil::openBrowser;
 
     /**
-     * Creates a login service that installs resolved sessions through the given injector.
+     * Creates a login service that installs resolved sessions through the given injector and records
+     * them in the given store.
      *
+     * @param store the runtime's account store, which an {@code ADD} login adds to and every login marks
+     *     as current
      * @param sessionInjector the host hook that makes a resolved account the active session
      * @param microsoftAuth the host's Microsoft authentication configuration, or {@code null} to disable
      *     Microsoft login (offline / cookie / session login stay available)
+     * @since 1.0.0
      */
-    public AltLoginServiceImpl(SessionInjector sessionInjector, MicrosoftAuthConfig microsoftAuth) {
-        this(sessionInjector, microsoftAuth, Clock.systemUTC());
+    public AltLoginServiceImpl(AccountStore store, SessionInjector sessionInjector, MicrosoftAuthConfig microsoftAuth) {
+        this(store, sessionInjector, microsoftAuth, Clock.systemUTC());
     }
 
     // Exists so expiry-sensitive behaviour can be exercised against a fixed clock in tests.
-    AltLoginServiceImpl(SessionInjector sessionInjector, MicrosoftAuthConfig microsoftAuth, Clock clock) {
+    AltLoginServiceImpl(
+            AccountStore store, SessionInjector sessionInjector, MicrosoftAuthConfig microsoftAuth, Clock clock) {
+        this.store = Objects.requireNonNull(store, "store");
         this.sessionInjector = Objects.requireNonNull(sessionInjector, "sessionInjector");
         this.microsoftAuth = microsoftAuth;
         this.clock = Objects.requireNonNull(clock, "clock");
-        this.accounts = new AltAccountServiceImpl(microsoftAuth, this.clock);
+        this.accounts = new AltAccountServiceImpl(store, microsoftAuth, this.clock);
     }
 
     /**
@@ -391,7 +398,7 @@ public class AltLoginServiceImpl implements AltLoginService {
         try {
             sessionInjector.inject(
                     new SessionData(account.username(), account.uuid(), account.accessToken(), account.type()));
-            AltStore.useAccount(account);
+            store.useAccount(account);
             return AltLoginCallback.LoginResult.success(account);
         } catch (Exception e) {
             return AltLoginCallback.LoginResult.failure("Session Injection: " + e.getMessage(), FailureReason.UNKNOWN);
@@ -460,7 +467,7 @@ public class AltLoginServiceImpl implements AltLoginService {
 
         if (mode == LoginMode.ADD) {
             account = account.mergedOnto(storedRecord(account.uuid()));
-            AltStore.addAccount(account);
+            store.addAccount(account);
         }
         return inject(account);
     }
@@ -472,8 +479,8 @@ public class AltLoginServiceImpl implements AltLoginService {
      * @param uuid the dashed UUID to look up
      * @return the stored account, or {@code null} when the store holds none for that UUID
      */
-    private static AltAccount storedRecord(String uuid) {
-        return AltStore.accounts().stream()
+    private AltAccount storedRecord(String uuid) {
+        return store.accounts().stream()
                 .filter(a -> a.uuid().equals(uuid))
                 .findFirst()
                 .orElse(null);
@@ -503,8 +510,8 @@ public class AltLoginServiceImpl implements AltLoginService {
             sessionInjector.inject(
                     new SessionData(account.username(), account.uuid(), account.accessToken(), account.type()));
 
-            if (mode == LoginMode.ADD) AltStore.addAccount(account);
-            AltStore.useAccount(account);
+            if (mode == LoginMode.ADD) store.addAccount(account);
+            store.useAccount(account);
 
             return AltLoginCallback.LoginResult.success(account);
         } catch (Exception e) {

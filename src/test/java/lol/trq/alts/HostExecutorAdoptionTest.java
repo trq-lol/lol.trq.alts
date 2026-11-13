@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
@@ -26,9 +27,11 @@ import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.net.IoExecutor;
 import lol.trq.alts.net.NetTestHooks;
 import lol.trq.alts.skin.SkinAvatarCache;
+import lol.trq.alts.store.AccountStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * A host that names its own executor gets the library's blocking work on it. The seam is worthless if
@@ -48,13 +51,20 @@ class HostExecutorAdoptionTest {
         Thread.ofPlatform().daemon().name(HOST_THREAD_PREFIX + id).start(task);
     };
 
+    @TempDir
+    Path storeDir;
+
+    private AccountStore store;
+
     @BeforeEach
     void bindHostExecutor() {
         IoExecutor.bind(host);
+        store = AccountStore.open(storeDir);
     }
 
     @AfterEach
     void restoreDefault() {
+        store.close();
         NetTestHooks.resetExecutor();
     }
 
@@ -105,7 +115,7 @@ class HostExecutorAdoptionTest {
 
     @Test
     void aLoginResolvesOnTheHostExecutor() throws Exception {
-        AltLoginServiceImpl logins = new AltLoginServiceImpl(session -> {}, null);
+        AltLoginServiceImpl logins = new AltLoginServiceImpl(store, session -> {}, null);
 
         // An empty token is refused before any request, but only after the route has gone off-thread.
         LoginResult result = logins.loginSession("", LoginMode.DIRECT).get(5, TimeUnit.SECONDS);
@@ -116,11 +126,12 @@ class HostExecutorAdoptionTest {
 
     @Test
     void aBulkSweepRunsItsEntriesOnTheHostExecutor() throws Exception {
-        AltLoginServiceImpl logins = new AltLoginServiceImpl(session -> {}, null);
-        BulkOperationsImpl bulk = new BulkOperationsImpl(logins, new AltAccountServiceImpl(null), account -> () -> {
-            onHostThread();
-            return new Entitlements(Set.of());
-        });
+        AltLoginServiceImpl logins = new AltLoginServiceImpl(store, session -> {}, null);
+        BulkOperationsImpl bulk =
+                new BulkOperationsImpl(store, logins, new AltAccountServiceImpl(store, null), account -> () -> {
+                    onHostThread();
+                    return new Entitlements(Set.of());
+                });
         List<AltAccount> accounts = List.of(
                 AltAccount.of("00000000-0000-4000-8000-000000000001", "AltOne", "token", AccountType.MICROSOFT),
                 AltAccount.of("00000000-0000-4000-8000-000000000002", "AltTwo", "token", AccountType.MICROSOFT));

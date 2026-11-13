@@ -9,21 +9,12 @@ import java.util.List;
 import java.util.stream.Stream;
 
 /**
- * Reaches the stores' package-private test seams from tests in other packages. It lives in the test
- * sources, in the stores' own package, so the seams themselves never have to be public in the library.
+ * Reads what the stores leave on disk, for tests in any package. Each test owns its stores (or its
+ * runtime) and closes them, so there is no process-wide state left to reset.
  */
 public final class StoreTestHooks {
 
     private StoreTestHooks() {}
-
-    /**
-     * Returns both stores to the state of a process that never installed a key provider or loaded a
-     * file. An installed key provider is otherwise permanent, and would follow the next test class.
-     */
-    public static void reset() {
-        AltStore.resetForTests();
-        SecretStore.resetForTests();
-    }
 
     /** Returns the content of every unreadable copy kept beside {@code fileName}, oldest first. */
     public static List<byte[]> unreadableCopies(Path directory, String fileName) throws IOException {
@@ -52,11 +43,16 @@ public final class StoreTestHooks {
         }
     }
 
-    /** Returns every file in {@code directory} that opens under the machine-derived key. */
+    /**
+     * Returns every file in {@code directory} that opens under the machine-derived key. The lock files
+     * are left out: they hold nothing, and an open store's lock file cannot be read on every platform.
+     */
     public static List<Path> filesOpeningUnderMachineKey(Path directory, String keyBinding) throws IOException {
         List<Path> files;
         try (Stream<Path> entries = Files.list(directory)) {
-            files = entries.filter(Files::isRegularFile).toList();
+            files = entries.filter(Files::isRegularFile)
+                    .filter(file -> !isLockFile(file))
+                    .toList();
         }
         List<Path> open = new ArrayList<>();
         for (Path file : files) {
@@ -65,5 +61,10 @@ public final class StoreTestHooks {
             }
         }
         return open;
+    }
+
+    /** Returns whether {@code file} is a store's sidecar lock file. */
+    public static boolean isLockFile(Path file) {
+        return file.getFileName().toString().endsWith(StoreFile.LOCK_SUFFIX);
     }
 }

@@ -33,23 +33,29 @@ class LoginHardeningTest {
     @TempDir
     Path vaultDir;
 
+    private AccountStoreTestSupport localStore;
+
     private AuthChainServer chain;
     private final AtomicReference<SessionData> injected = new AtomicReference<>();
 
     @BeforeEach
     void setUp() throws IOException {
-        AltStoreTestSupport.bindTo(vaultDir);
+        localStore = AccountStoreTestSupport.openIn(vaultDir);
         chain = new AuthChainServer();
     }
 
     @AfterEach
     void tearDown() {
+        localStore.close();
         chain.close();
     }
 
     private AltLoginServiceImpl service() {
         return new AltLoginServiceImpl(
-                injected::set, chain.config(), Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
+                localStore.store(),
+                injected::set,
+                chain.config(),
+                Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
     }
 
     @Test

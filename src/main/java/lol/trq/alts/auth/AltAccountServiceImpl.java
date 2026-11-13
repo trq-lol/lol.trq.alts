@@ -13,7 +13,7 @@ import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.net.FailureText;
 import lol.trq.alts.net.IoExecutor;
 import lol.trq.alts.net.NetworkScope;
-import lol.trq.alts.store.AltStore;
+import lol.trq.alts.store.AccountStore;
 
 /**
  * Concrete {@link AltAccountService}: validation and renewal, with no session anywhere in it.
@@ -26,22 +26,26 @@ import lol.trq.alts.store.AltStore;
  */
 public class AltAccountServiceImpl implements AltAccountService {
 
+    private final AccountStore store;
     private final MicrosoftAuthConfig microsoftAuth;
     private final Clock clock;
 
     /**
-     * Creates an account service.
+     * Creates an account service that persists rotated and spent credentials to {@code store}.
      *
+     * @param store the runtime's account store; a renewal updates an account only if it already holds
+     *     it
      * @param microsoftAuth the host's Microsoft authentication configuration, or {@code null} to disable
      *     renewal (validation still works)
-     * @since 0.8.0
+     * @since 1.0.0
      */
-    public AltAccountServiceImpl(MicrosoftAuthConfig microsoftAuth) {
-        this(microsoftAuth, Clock.systemUTC());
+    public AltAccountServiceImpl(AccountStore store, MicrosoftAuthConfig microsoftAuth) {
+        this(store, microsoftAuth, Clock.systemUTC());
     }
 
     // Exists so expiry-sensitive behaviour can be exercised against a fixed clock in tests.
-    AltAccountServiceImpl(MicrosoftAuthConfig microsoftAuth, Clock clock) {
+    AltAccountServiceImpl(AccountStore store, MicrosoftAuthConfig microsoftAuth, Clock clock) {
+        this.store = Objects.requireNonNull(store, "store");
         this.microsoftAuth = microsoftAuth;
         this.clock = Objects.requireNonNull(clock, "clock");
     }
@@ -136,12 +140,12 @@ public class AltAccountServiceImpl implements AltAccountService {
      * @param currentUsername the username the profile endpoint returned
      * @return the account carrying the current username
      */
-    private static AltAccount correctUsername(AltAccount account, String currentUsername) {
+    private AltAccount correctUsername(AltAccount account, String currentUsername) {
         if (currentUsername == null || currentUsername.equals(account.username())) {
             return account;
         }
         AltAccount renamed = account.withUsername(currentUsername);
-        AltStore.updateCredentials(renamed);
+        store.updateCredentials(renamed);
         return renamed;
     }
 
@@ -160,7 +164,7 @@ public class AltAccountServiceImpl implements AltAccountService {
                 .thenApply(profile -> {
                     AltAccount renewed =
                             account.withTokens(profile.accessToken(), profile.refreshToken(), profile.expiresAt());
-                    AltStore.updateCredentials(renewed);
+                    store.updateCredentials(renewed);
                     return AccountStatus.renewed(renewed);
                 })
                 .exceptionally(failure -> renewalFailure(failure, account));
@@ -200,7 +204,7 @@ public class AltAccountServiceImpl implements AltAccountService {
                     message,
                     classified.retryAfter());
         }
-        AltStore.clearRefreshToken(account.uuid());
+        store.clearRefreshToken(account.uuid());
         return AccountStatus.failure(
                 account.withTokens(account.accessToken(), null, 0L),
                 State.REAUTH_REQUIRED,

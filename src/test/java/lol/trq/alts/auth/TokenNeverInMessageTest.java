@@ -32,13 +32,15 @@ class TokenNeverInMessageTest {
     @TempDir
     Path vaultDir;
 
+    private AccountStoreTestSupport localStore;
+
     private HttpServer server;
     private MicrosoftAuthConfig config;
     private final List<String> authorizations = new CopyOnWriteArrayList<>();
 
     @BeforeEach
     void setUp() throws Exception {
-        AltStoreTestSupport.bindTo(vaultDir);
+        localStore = AccountStoreTestSupport.openIn(vaultDir);
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/", exchange -> {
             authorizations.add(String.valueOf(exchange.getRequestHeaders().getFirst("Authorization")));
@@ -62,6 +64,7 @@ class TokenNeverInMessageTest {
 
     @AfterEach
     void tearDown() {
+        localStore.close();
         server.stop(0);
     }
 
@@ -72,7 +75,7 @@ class TokenNeverInMessageTest {
     @Test
     void aSessionTokenPastedWithALineBreakNeverReachesTheResultMessage() throws Exception {
         for (String breaker : new String[] {"\n", "\r\n", " \n ", "\t"}) {
-            LoginResult result = new AltLoginServiceImpl(session -> {}, config)
+            LoginResult result = new AltLoginServiceImpl(localStore.store(), session -> {}, config)
                     .loginSession(HEAD + breaker + TAIL, LoginMode.ADD)
                     .get();
 
@@ -83,7 +86,7 @@ class TokenNeverInMessageTest {
 
     @Test
     void aTokenWrappedAcrossLinesIsSentAsTheOneTokenItIs() throws Exception {
-        new AltLoginServiceImpl(session -> {}, config)
+        new AltLoginServiceImpl(localStore.store(), session -> {}, config)
                 .loginSession("Bearer " + HEAD + "\r\n" + TAIL + "\n", LoginMode.ADD)
                 .get();
 
@@ -96,7 +99,7 @@ class TokenNeverInMessageTest {
         AltAccount account =
                 AltAccount.of("00000000-0000-4000-8000-0000000000e1", "Alex", HEAD + "\n" + TAIL, AccountType.SESSION);
 
-        AccountStatus status = new AltAccountServiceImpl(config, Clock.systemUTC())
+        AccountStatus status = new AltAccountServiceImpl(localStore.store(), config, Clock.systemUTC())
                 .check(account)
                 .get();
 
@@ -107,7 +110,7 @@ class TokenNeverInMessageTest {
 
     @Test
     void aRefreshTokenPastedWithALineBreakNeverReachesTheResultMessage() throws Exception {
-        LoginResult result = new AltLoginServiceImpl(session -> {}, config)
+        LoginResult result = new AltLoginServiceImpl(localStore.store(), session -> {}, config)
                 .loginRefreshToken("M.C5_secret-head\nsecret-tail", LoginMode.ADD)
                 .get();
 

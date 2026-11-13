@@ -32,11 +32,13 @@ class SessionLoginFailureReasonTest {
     @TempDir
     Path vaultDir;
 
+    private AccountStoreTestSupport localStore;
+
     private HttpServer server;
 
     @BeforeEach
     void setUp() throws IOException {
-        AltStoreTestSupport.bindTo(vaultDir);
+        localStore = AccountStoreTestSupport.openIn(vaultDir);
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/mcprofile", exchange -> respond(exchange, 401, "{}"));
         server.start();
@@ -44,6 +46,7 @@ class SessionLoginFailureReasonTest {
 
     @AfterEach
     void tearDown() {
+        localStore.close();
         if (server != null) {
             server.stop(0);
         }
@@ -82,7 +85,7 @@ class SessionLoginFailureReasonTest {
     void aRefusedTokenIsInvalidNotANetworkProblem() throws Exception {
         MicrosoftAuthConfig config = pointingAt(loopbackBase(server.getAddress().getPort()));
 
-        LoginResult result = new AltLoginServiceImpl(session -> {}, config)
+        LoginResult result = new AltLoginServiceImpl(localStore.store(), session -> {}, config)
                 .loginSession(OPAQUE_TOKEN, LoginMode.DIRECT)
                 .get();
 
@@ -94,7 +97,7 @@ class SessionLoginFailureReasonTest {
     void anUnreachableServiceIsANetworkFailure() throws Exception {
         MicrosoftAuthConfig config = pointingAt(loopbackBase(closedPort()));
 
-        LoginResult result = new AltLoginServiceImpl(session -> {}, config)
+        LoginResult result = new AltLoginServiceImpl(localStore.store(), session -> {}, config)
                 .loginSession(OPAQUE_TOKEN, LoginMode.DIRECT)
                 .get();
 

@@ -20,7 +20,6 @@ import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.model.SessionData;
-import lol.trq.alts.store.AltStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,23 +38,29 @@ class SessionTokenIdentityTest {
     @TempDir
     Path vaultDir;
 
+    private AccountStoreTestSupport localStore;
+
     private AuthChainServer chain;
     private final AtomicReference<SessionData> injected = new AtomicReference<>();
 
     @BeforeEach
     void setUp() throws IOException {
-        AltStoreTestSupport.bindTo(vaultDir);
+        localStore = AccountStoreTestSupport.openIn(vaultDir);
         chain = new AuthChainServer();
     }
 
     @AfterEach
     void tearDown() {
+        localStore.close();
         chain.close();
     }
 
     private AltLoginServiceImpl service() {
         return new AltLoginServiceImpl(
-                injected::set, chain.config(), Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
+                localStore.store(),
+                injected::set,
+                chain.config(),
+                Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
     }
 
     /** Builds an unsigned token whose payload claims the given identity. */
@@ -71,7 +76,7 @@ class SessionTokenIdentityTest {
     void savingATokenStoresTheIdentityTheServiceConfirmsNotTheOneThePayloadClaims() throws Exception {
         AltAccount victim = AltAccount.of(VICTIM_UUID, "Victim", "victim-token", AccountType.MICROSOFT)
                 .withTokens("victim-token", "victim-refresh", NOW + 3_600_000L);
-        AltStoreTestSupport.seed(victim);
+        localStore.seed(victim);
         String forged = jwt(VICTIM_UUID, "Victim", NOW + 3_600_000L);
 
         LoginResult result = service().loginSession(forged, LoginMode.ADD).get(10, TimeUnit.SECONDS);
@@ -81,7 +86,7 @@ class SessionTokenIdentityTest {
         assertEquals(AuthChainServer.UUID, result.account().uuid(), "the stored identity is the confirmed one");
         assertEquals("Alex", result.account().username());
 
-        AltAccount untouched = AltStoreTestSupport.find(VICTIM_UUID);
+        AltAccount untouched = localStore.find(VICTIM_UUID);
         assertEquals("victim-token", untouched.accessToken(), "the claimed account's record was not merged over");
         assertEquals("victim-refresh", untouched.refreshToken());
     }
@@ -96,7 +101,7 @@ class SessionTokenIdentityTest {
         assertFalse(result.success());
         assertEquals(FailureReason.INVALID_TOKEN, result.reason());
         assertNull(injected.get());
-        assertTrue(AltStore.accounts().isEmpty(), "nothing was stored for a token the service refused");
+        assertTrue(localStore.store().accounts().isEmpty(), "nothing was stored for a token the service refused");
     }
 
     @Test

@@ -33,13 +33,15 @@ class UsernameCorrectionTest {
     @TempDir
     Path vaultDir;
 
+    private AccountStoreTestSupport localStore;
+
     private HttpServer server;
     private MicrosoftAuthConfig config;
     private volatile String currentName = "NewName";
 
     @BeforeEach
     void setUp() throws IOException {
-        AltStoreTestSupport.bindTo(vaultDir);
+        localStore = AccountStoreTestSupport.openIn(vaultDir);
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext(
                 "/mcprofile",
@@ -62,6 +64,7 @@ class UsernameCorrectionTest {
 
     @AfterEach
     void tearDown() {
+        localStore.close();
         if (server != null) {
             server.stop(0);
         }
@@ -75,14 +78,15 @@ class UsernameCorrectionTest {
     }
 
     private AltAccountServiceImpl service() {
-        return new AltAccountServiceImpl(config, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
+        return new AltAccountServiceImpl(
+                localStore.store(), config, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
     }
 
     @Test
     void aRenamedAccountHasItsStoredUsernameCorrected() throws Exception {
         AltAccount stored = AltAccount.of(UUID, "OldName", "stored-access", AccountType.MICROSOFT)
                 .withTokens("stored-access", "stored-refresh", NOW + 3_600_000L);
-        AltStoreTestSupport.seed(stored);
+        localStore.seed(stored);
 
         AccountStatus status = service().check(stored).get();
 
@@ -90,7 +94,7 @@ class UsernameCorrectionTest {
         assertEquals("NewName", status.account().username(), "the caller gets the current name back");
         assertEquals(
                 "NewName",
-                AltStoreTestSupport.reloadFromDiskAndFind(UUID).username(),
+                localStore.reloadFromDiskAndFind(UUID).username(),
                 "and the correction reaches disk, not just the returned copy");
     }
 
@@ -99,7 +103,7 @@ class UsernameCorrectionTest {
         currentName = "SameName";
         AltAccount stored = AltAccount.of(UUID, "SameName", "stored-access", AccountType.MICROSOFT)
                 .withTokens("stored-access", "stored-refresh", NOW + 3_600_000L);
-        AltStoreTestSupport.seed(stored);
+        localStore.seed(stored);
 
         AccountStatus status = service().check(stored).get();
 

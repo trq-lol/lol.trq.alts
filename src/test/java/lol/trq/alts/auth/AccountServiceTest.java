@@ -24,8 +24,6 @@ import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.BanInfo;
 import lol.trq.alts.model.LoginMode;
-import lol.trq.alts.store.AltStore;
-import lol.trq.alts.store.SecretStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,6 +43,8 @@ class AccountServiceTest {
     @TempDir
     Path vaultDir;
 
+    private AccountStoreTestSupport localStore;
+
     private HttpServer server;
     private MicrosoftAuthConfig config;
     private final AtomicInteger tokenCalls = new AtomicInteger();
@@ -55,7 +55,7 @@ class AccountServiceTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        AltStoreTestSupport.bindTo(vaultDir);
+        localStore = AccountStoreTestSupport.openIn(vaultDir);
 
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/token", exchange -> {
@@ -96,15 +96,10 @@ class AccountServiceTest {
 
     @AfterEach
     void tearDown() {
+        localStore.close();
         if (server != null) {
             server.stop(0);
         }
-        // Building a runtime leaves the stores on their coalesced write delay, pointed at this test's
-        // directory. Settle and undo that, or the next class inherits a pending write to a deleted folder.
-        AltStore.flush();
-        AltStore.writeDelay(null);
-        SecretStore.flush();
-        SecretStore.writeDelay(null);
     }
 
     private static void respond(HttpExchange exchange, int status, String body) throws IOException {
@@ -115,7 +110,8 @@ class AccountServiceTest {
     }
 
     private AltAccountServiceImpl service() {
-        return new AltAccountServiceImpl(config, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
+        return new AltAccountServiceImpl(
+                localStore.store(), config, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
     }
 
     private static AltAccount renewable(long expiresAt) {
@@ -146,14 +142,14 @@ class AccountServiceTest {
     void checkNeverSpendsARotation() throws Exception {
         profileStatus = 401;
         AltAccount account = renewable(NOW - 1);
-        AltStoreTestSupport.seed(account);
+        localStore.seed(account);
 
         AccountStatus status = service().check(account).get();
 
         assertEquals(State.EXPIRED, status.state(), "a refused token on a renewable account is recoverable");
         assertEquals(FailureReason.INVALID_TOKEN, status.reason());
         assertEquals(0, tokenCalls.get(), "check must never redeem the refresh token");
-        assertEquals("stored-refresh", AltStoreTestSupport.find(UUID).refreshToken(), "check changes nothing at rest");
+        assertEquals("stored-refresh", localStore.find(UUID).refreshToken(), "check changes nothing at rest");
     }
 
     @Test
@@ -175,7 +171,7 @@ class AccountServiceTest {
     void anAccountWithNoMinecraftProfileIsNotEntitled() throws Exception {
         profileStatus = 404;
         AltAccount account = renewable(NOW + 3_600_000L);
-        AltStoreTestSupport.seed(account);
+        localStore.seed(account);
 
         AccountStatus status = service().refresh(account).get();
 
@@ -184,14 +180,14 @@ class AccountServiceTest {
         assertEquals(0, tokenCalls.get(), "no amount of renewal produces a profile that does not exist");
         assertEquals(
                 "stored-refresh",
-                AltStoreTestSupport.find(UUID).refreshToken(),
+                localStore.find(UUID).refreshToken(),
                 "a missing profile says nothing about the credential");
     }
 
     @Test
     void refreshRenewsAnExpiredAccountAndPersistsTheRotation() throws Exception {
         AltAccount account = renewable(NOW - 1).withBan("serverone", BanInfo.observed("self", "x"));
-        AltStoreTestSupport.seed(account);
+        localStore.seed(account);
 
         AccountStatus status = service().refresh(account).get();
 
@@ -202,7 +198,7 @@ class AccountServiceTest {
         assertEquals("mc-access", status.account().accessToken());
         assertTrue(status.account().banned("serverone"), "renewal preserves what the store knew");
 
-        AltAccount persisted = AltStoreTestSupport.reloadFromDiskAndFind(UUID);
+        AltAccount persisted = localStore.reloadFromDiskAndFind(UUID);
         assertEquals("rotated", persisted.refreshToken(), "the rotation must survive a restart");
     }
 
@@ -227,7 +223,7 @@ class AccountServiceTest {
     @Test
     void anUnreachableServiceIsRetryableAndCostsNothing() throws Exception {
         AltAccount account = renewable(NOW + 3_600_000L);
-        AltStoreTestSupport.seed(account);
+        localStore.seed(account);
         server.stop(0);
         server = null;
 
@@ -237,7 +233,7 @@ class AccountServiceTest {
         assertEquals(FailureReason.NETWORK, status.reason());
         assertEquals(
                 "stored-refresh",
-                AltStoreTestSupport.find(UUID).refreshToken(),
+                localStore.find(UUID).refreshToken(),
                 "an outage must not cost the user their credential");
     }
 
@@ -249,7 +245,7 @@ class AccountServiceTest {
     void aRateLimitedCheckSaysSoWithOrWithoutAStatedWait() throws Exception {
         profileStatus = 429;
         AltAccount account = renewable(NOW + 3_600_000L);
-        AltStoreTestSupport.seed(account);
+        localStore.seed(account);
 
         AccountStatus bare = service().check(account).get();
 
@@ -272,7 +268,7 @@ class AccountServiceTest {
     void aRateLimitedValidationDuringRefreshIsNotAnsweredWithARenewal() throws Exception {
         profileStatus = 429;
         AltAccount account = renewable(NOW + 3_600_000L);
-        AltStoreTestSupport.seed(account);
+        localStore.seed(account);
 
         AccountStatus status = service().refresh(account).get();
 
@@ -290,7 +286,7 @@ class AccountServiceTest {
             respond(exchange, 429, "{}");
         });
         AltAccount account = renewable(NOW - 1);
-        AltStoreTestSupport.seed(account);
+        localStore.seed(account);
 
         AccountStatus status = service().refresh(account).get();
 
@@ -301,7 +297,7 @@ class AccountServiceTest {
         assertEquals(1, tokenCalls.get());
         assertEquals(
                 "stored-refresh",
-                AltStoreTestSupport.find(UUID).refreshToken(),
+                localStore.find(UUID).refreshToken(),
                 "a throttle must not cost the user their credential");
     }
 
@@ -310,7 +306,7 @@ class AccountServiceTest {
     void aRateLimitedRefreshTokenImportIsClassifiedAsOne() throws Exception {
         server.removeContext("/token");
         server.createContext("/token", exchange -> respond(exchange, 429, "{}"));
-        AltLoginServiceImpl logins = new AltLoginServiceImpl(session -> {}, config);
+        AltLoginServiceImpl logins = new AltLoginServiceImpl(localStore.store(), session -> {}, config);
 
         AltLoginCallback.LoginResult throttled =
                 logins.loginRefreshToken("M.C123_imported", LoginMode.DIRECT).get();
@@ -337,13 +333,13 @@ class AccountServiceTest {
         server.removeContext("/xbl");
         server.createContext("/xbl", exchange -> respond(exchange, 429, "{}"));
         AltAccount account = renewable(NOW - 1);
-        AltStoreTestSupport.seed(account);
+        localStore.seed(account);
 
         AccountStatus status = service().refresh(account).get();
 
         assertEquals(FailureReason.RATE_LIMITED, status.reason());
         assertTrue(status.rateLimited());
-        assertEquals("stored-refresh", AltStoreTestSupport.find(UUID).refreshToken());
+        assertEquals("stored-refresh", localStore.find(UUID).refreshToken());
     }
 
     /** Xbox Live turning the account away is not an outage, and retrying it only spends rotations. */
@@ -352,7 +348,7 @@ class AccountServiceTest {
         server.removeContext("/xsts");
         server.createContext("/xsts", exchange -> respond(exchange, 401, "{\"XErr\":2148916233}"));
         AltAccount account = renewable(NOW - 1);
-        AltStoreTestSupport.seed(account);
+        localStore.seed(account);
 
         AccountStatus status = service().refresh(account).get();
 
@@ -361,7 +357,7 @@ class AccountServiceTest {
         assertFalse(status.rateLimited());
         assertEquals(
                 "stored-refresh",
-                AltStoreTestSupport.find(UUID).refreshToken(),
+                localStore.find(UUID).refreshToken(),
                 "the refresh token was accepted, so it is not the thing that is spent");
     }
 
@@ -394,14 +390,14 @@ class AccountServiceTest {
             respond(exchange, 400, "{\"error\":\"invalid_grant\"}");
         });
         AltAccount account = renewable(NOW - 1);
-        AltStoreTestSupport.seed(account);
+        localStore.seed(account);
 
         AccountStatus status = service().refresh(account).get();
 
         assertEquals(State.REAUTH_REQUIRED, status.state());
         assertEquals(FailureReason.REAUTH_REQUIRED, status.reason());
         assertNull(status.account().refreshToken(), "the status must not hand back a token that is gone");
-        assertNull(AltStoreTestSupport.find(UUID).refreshToken(), "a spent credential must not stay at rest");
+        assertNull(localStore.find(UUID).refreshToken(), "a spent credential must not stay at rest");
     }
 
     /**
@@ -410,23 +406,27 @@ class AccountServiceTest {
      */
     @Test
     void neitherCheckNorRefreshTouchesTheLiveSession() throws Exception {
-        AltsRuntime<Object> alts = new AltsRuntime.Builder<Object>()
+        // The runtime owns its own store, so it gets a directory of its own beside the test's store.
+        try (AltsRuntime<Object> alts = new AltsRuntime.Builder<Object>()
                 .sessionInjector(session -> {
                     throw new AssertionError("operating on an account must never install a session");
                 })
-                .vaultDirectory(() -> vaultDir)
+                .vaultDirectory(() -> vaultDir.resolve("runtime"))
                 .mainThread(Runnable::run)
                 .toastSink((level, title, description, durationMs) -> {})
                 .microsoftAuth(config)
-                .build();
+                .build()) {
 
-        AltAccount expired = renewable(NOW - 1);
-        AltStoreTestSupport.seed(expired);
+            AltAccount expired = renewable(NOW - 1);
+            alts.store().addAccount(expired);
 
-        assertTrue(alts.accountService().check(expired).get() != null);
-        assertTrue(alts.accountService().refresh(expired).get().usable());
-        assertFalse(
-                AltStoreTestSupport.find(UUID).accessToken().isBlank(),
-                "the account was still refreshed, it just was not logged into");
+            assertTrue(alts.accountService().check(expired).get() != null);
+            assertTrue(alts.accountService().refresh(expired).get().usable());
+            AltAccount stored = alts.store().accounts().stream()
+                    .filter(account -> UUID.equals(account.uuid()))
+                    .findFirst()
+                    .orElseThrow();
+            assertFalse(stored.accessToken().isBlank(), "the account was still refreshed, it just was not logged into");
+        }
     }
 }

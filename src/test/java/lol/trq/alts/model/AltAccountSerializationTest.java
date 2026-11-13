@@ -38,7 +38,7 @@ class AltAccountSerializationTest {
     /**
      * A payload carrying a per-server {@code bans} map but no provenance must still load: the missing
      * {@code sourceClient}/{@code sourceUser} read as null, and the bans deserialize. (Migrating the
-     * older single {@code ban} object is the store's job; see AltStoreBanMigrationTest.)
+     * older single {@code ban} object is the store's job; see AccountStoreBanMigrationTest.)
      */
     @Test
     void parsesBansWithoutProvenance() {

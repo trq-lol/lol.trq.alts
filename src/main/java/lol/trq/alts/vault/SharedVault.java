@@ -43,7 +43,7 @@ import lol.trq.alts.vault.transport.VaultManifest;
  * <p>The payload carries {@link AltAccount}s — the credential plus shareable account state
  * (last-used activity and observed-ban status, so members coordinate and avoid handing each other a
  * banned alt). What stays local and never enters a repo is the per-member current-account pointer and
- * the user's own secrets (kept in {@link lol.trq.alts.store.SecretStore}).
+ * the user's own secrets (kept in {@link lol.trq.alts.store.HostSecrets}).
  *
  * @author trq
  * @since 0.2.0

@@ -38,6 +38,8 @@ class RefreshLoginRouteTest {
     @TempDir
     Path vaultDir;
 
+    private AccountStoreTestSupport localStore;
+
     private HttpServer server;
     private MicrosoftAuthConfig config;
     private final AtomicReference<SessionData> injected = new AtomicReference<>();
@@ -52,7 +54,7 @@ class RefreshLoginRouteTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        AltStoreTestSupport.bindTo(vaultDir);
+        localStore = AccountStoreTestSupport.openIn(vaultDir);
 
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/token", exchange -> {
@@ -95,6 +97,7 @@ class RefreshLoginRouteTest {
 
     @AfterEach
     void tearDown() {
+        localStore.close();
         if (server != null) {
             server.stop(0);
         }
@@ -108,7 +111,8 @@ class RefreshLoginRouteTest {
     }
 
     private AltLoginServiceImpl service() {
-        return new AltLoginServiceImpl(injected::set, config, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
+        return new AltLoginServiceImpl(
+                localStore.store(), injected::set, config, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
     }
 
     @Test
@@ -124,7 +128,7 @@ class RefreshLoginRouteTest {
 
         // LoginMode.ADD is a promise to save. Asserting only on the returned record would hold even if
         // the route never wrote anything, which is the whole difference between ADD and DIRECT.
-        AltAccount persisted = AltStoreTestSupport.reloadFromDiskAndFind(UUID);
+        AltAccount persisted = localStore.reloadFromDiskAndFind(UUID);
         assertEquals("rotated", persisted.refreshToken(), "ADD must write the imported credential to the store");
         assertEquals("mc-access", persisted.accessToken());
         assertEquals(AccountType.MICROSOFT, persisted.type());
@@ -172,7 +176,7 @@ class RefreshLoginRouteTest {
                 .withTokens("old-access", "old-refresh", NOW - 1)
                 .withBan("serverone", BanInfo.observed("self", "x"))
                 .withSource("democlient", "user1");
-        AltStoreTestSupport.seed(stored);
+        localStore.seed(stored);
 
         LoginResult result =
                 service().loginRefreshToken("original", LoginMode.ADD).get();
@@ -182,7 +186,7 @@ class RefreshLoginRouteTest {
         assertTrue(result.account().banned("serverone"), "the installed record must keep what the store knew");
         assertEquals("democlient", result.account().sourceClient(), "the installed record must keep its provenance");
 
-        AltAccount persisted = AltStoreTestSupport.reloadFromDiskAndFind(UUID);
+        AltAccount persisted = localStore.reloadFromDiskAndFind(UUID);
         assertEquals("rotated", persisted.refreshToken(), "the imported credential must land");
         assertEquals("mc-access", persisted.accessToken());
         assertTrue(persisted.banned("serverone"), "re-importing an alt must not wipe observed bans");
@@ -192,8 +196,8 @@ class RefreshLoginRouteTest {
 
     @Test
     void refreshRouteRequiresConfiguration() throws Exception {
-        AltLoginServiceImpl unconfigured =
-                new AltLoginServiceImpl(injected::set, null, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
+        AltLoginServiceImpl unconfigured = new AltLoginServiceImpl(
+                localStore.store(), injected::set, null, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
 
         LoginResult result =
                 unconfigured.loginRefreshToken("original", LoginMode.ADD).get();
@@ -208,7 +212,7 @@ class RefreshLoginRouteTest {
                 .withTokens("stale", "stored-refresh", NOW - 1)
                 .withBan("serverone", BanInfo.observed("self", "x"))
                 .withSource("democlient", "user1");
-        AltStoreTestSupport.seed(stored);
+        localStore.seed(stored);
 
         LoginResult result = service().loginAccount(stored).get();
 
@@ -220,7 +224,7 @@ class RefreshLoginRouteTest {
         assertEquals("mc-access", result.account().accessToken());
         assertEquals("rotated", result.account().refreshToken(), "the rotated token replaces the stored one");
 
-        AltAccount persisted = AltStoreTestSupport.find(UUID);
+        AltAccount persisted = localStore.find(UUID);
         assertEquals("rotated", persisted.refreshToken(), "the rotated token must reach disk, not just memory");
         assertEquals(AccountType.MICROSOFT, persisted.type(), "renewal must not change the account type");
         assertTrue(persisted.banned("serverone"), "renewal must preserve shared ban records");
@@ -239,7 +243,7 @@ class RefreshLoginRouteTest {
 
         // Installing the session only mutates the in-memory list, so the disk round-trip is what proves
         // the rotated token survives a restart rather than dying on the second renewal.
-        AltAccount reloaded = AltStoreTestSupport.reloadFromDiskAndFind(UUID);
+        AltAccount reloaded = localStore.reloadFromDiskAndFind(UUID);
         assertEquals(
                 "rotated",
                 reloaded.refreshToken(),
@@ -251,9 +255,10 @@ class RefreshLoginRouteTest {
     void aFailingHostInjectorDoesNotSpendARefreshTokenRotation() throws Exception {
         AltAccount stored = AltAccount.of(UUID, "Alex", "opaque-live", AccountType.MICROSOFT)
                 .withTokens("opaque-live", "stored-refresh", NOW + 3_600_000L);
-        AltStoreTestSupport.seed(stored);
+        localStore.seed(stored);
 
         AltLoginServiceImpl broken = new AltLoginServiceImpl(
+                localStore.store(),
                 session -> {
                     throw new IllegalStateException("host injector broke");
                 },
@@ -267,7 +272,7 @@ class RefreshLoginRouteTest {
         assertEquals(0, tokenCalls.get(), "only a refused token may trigger a renewal");
         assertEquals(
                 "stored-refresh",
-                AltStoreTestSupport.find(UUID).refreshToken(),
+                localStore.find(UUID).refreshToken(),
                 "a host-side failure must not spend the user's one rotation");
     }
 
@@ -276,7 +281,7 @@ class RefreshLoginRouteTest {
         AltAccount stored = AltAccount.of(UUID, "Alex", "opaque-live", AccountType.MICROSOFT)
                 .withTokens("opaque-live", "stored-refresh", NOW + 3_600_000L)
                 .withBan("serverone", BanInfo.observed("self", "x"));
-        AltStoreTestSupport.seed(stored);
+        localStore.seed(stored);
 
         LoginResult result = service().loginAccount(stored).get();
 
@@ -287,16 +292,16 @@ class RefreshLoginRouteTest {
         // AccountType.SESSION with a null refresh token, permanently disabling renewal.
         assertEquals("stored-refresh", result.account().refreshToken(), "a live login must not drop the credential");
         assertEquals(AccountType.MICROSOFT, result.account().type(), "a live login must not retype the account");
-        assertEquals("stored-refresh", AltStoreTestSupport.find(UUID).refreshToken());
-        assertEquals(AccountType.MICROSOFT, AltStoreTestSupport.find(UUID).type());
-        assertTrue(AltStoreTestSupport.find(UUID).banned("serverone"), "a live login must preserve bans");
+        assertEquals("stored-refresh", localStore.find(UUID).refreshToken());
+        assertEquals(AccountType.MICROSOFT, localStore.find(UUID).type());
+        assertTrue(localStore.find(UUID).banned("serverone"), "a live login must preserve bans");
     }
 
     @Test
     void connectionFailureIsTransientAndKeepsTheStoredToken() throws Exception {
         AltAccount stored =
                 AltAccount.of(UUID, "Alex", "stale", AccountType.MICROSOFT).withTokens("stale", "still-good", NOW - 1);
-        AltStoreTestSupport.seed(stored);
+        localStore.seed(stored);
 
         // Point the token endpoint at a port nothing is listening on.
         server.stop(0);
@@ -308,7 +313,7 @@ class RefreshLoginRouteTest {
         assertEquals(FailureReason.NETWORK, result.reason());
         assertEquals(
                 "still-good",
-                AltStoreTestSupport.find(UUID).refreshToken(),
+                localStore.find(UUID).refreshToken(),
                 "an unreachable service must not cost the user their credential");
     }
 
@@ -320,13 +325,13 @@ class RefreshLoginRouteTest {
         refuseProfileOnce.set(true);
         AltAccount stored = AltAccount.of(UUID, "Alex", "opaque-live", AccountType.MICROSOFT)
                 .withTokens("opaque-live", "stored-refresh", NOW + 3_600_000L);
-        AltStoreTestSupport.seed(stored);
+        localStore.seed(stored);
 
         LoginResult result = service().loginAccount(stored).get();
 
         assertTrue(result.success(), result.message());
         assertEquals(1, tokenCalls.get(), "renewal is attempted exactly once, never in a loop");
-        assertEquals("rotated", AltStoreTestSupport.find(UUID).refreshToken());
+        assertEquals("rotated", localStore.find(UUID).refreshToken());
     }
 
     @Test
@@ -334,7 +339,7 @@ class RefreshLoginRouteTest {
         profileStatus = 401;
         AltAccount stored = AltAccount.of(UUID, "Alex", "opaque-live", AccountType.MICROSOFT)
                 .withTokens("opaque-live", "stored-refresh", NOW + 3_600_000L);
-        AltStoreTestSupport.seed(stored);
+        localStore.seed(stored);
 
         LoginResult result = service().loginAccount(stored).get();
 
@@ -348,15 +353,13 @@ class RefreshLoginRouteTest {
         tokenBody = "{\"error\":\"invalid_grant\"}";
         AltAccount stored = AltAccount.of(UUID, "Alex", "stale", AccountType.MICROSOFT)
                 .withTokens("stale", "revoked-refresh", NOW - 1);
-        AltStoreTestSupport.seed(stored);
+        localStore.seed(stored);
 
         LoginResult result = service().loginAccount(stored).get();
 
         assertFalse(result.success());
         assertEquals(FailureReason.REAUTH_REQUIRED, result.reason());
-        assertNull(
-                AltStoreTestSupport.find(stored.uuid()).refreshToken(),
-                "a permanently rejected token must not stay on disk");
+        assertNull(localStore.find(stored.uuid()).refreshToken(), "a permanently rejected token must not stay on disk");
     }
 
     @Test
@@ -365,7 +368,7 @@ class RefreshLoginRouteTest {
         tokenBody = "unavailable";
         AltAccount stored =
                 AltAccount.of(UUID, "Alex", "stale", AccountType.MICROSOFT).withTokens("stale", "still-good", NOW - 1);
-        AltStoreTestSupport.seed(stored);
+        localStore.seed(stored);
 
         LoginResult result = service().loginAccount(stored).get();
 
@@ -373,7 +376,7 @@ class RefreshLoginRouteTest {
         assertEquals(FailureReason.NETWORK, result.reason());
         assertEquals(
                 "still-good",
-                AltStoreTestSupport.find(stored.uuid()).refreshToken(),
+                localStore.find(stored.uuid()).refreshToken(),
                 "an outage must not cost the user their credential");
     }
 }

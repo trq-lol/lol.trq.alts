@@ -40,24 +40,27 @@ class InteractiveLoginTest {
     @TempDir
     Path vaultDir;
 
+    private AccountStoreTestSupport localStore;
+
     private AuthChainServer chain;
     private final AtomicReference<SessionData> injected = new AtomicReference<>();
     private final AtomicReference<String> authorizationUrl = new AtomicReference<>();
 
     @BeforeEach
     void setUp() throws IOException {
-        AltStoreTestSupport.bindTo(vaultDir);
+        localStore = AccountStoreTestSupport.openIn(vaultDir);
         chain = new AuthChainServer();
     }
 
     @AfterEach
     void tearDown() {
+        localStore.close();
         chain.close();
     }
 
     /** A service whose "browser" completes the sign-in the moment it is opened. */
     private AltLoginServiceImpl service() {
-        AltLoginServiceImpl service = new AltLoginServiceImpl(injected::set, chain.config());
+        AltLoginServiceImpl service = new AltLoginServiceImpl(localStore.store(), injected::set, chain.config());
         service.browser = url -> {
             authorizationUrl.set(url);
             AuthChainServer.completeInBrowser(url);
@@ -75,7 +78,7 @@ class InteractiveLoginTest {
 
         assertTrue(result.success(), result.message());
         assertEquals("Alex", injected.get().username());
-        AltAccount persisted = AltStoreTestSupport.reloadFromDiskAndFind(AuthChainServer.UUID);
+        AltAccount persisted = localStore.reloadFromDiskAndFind(AuthChainServer.UUID);
         assertEquals("ms-refresh", persisted.refreshToken());
     }
 
@@ -114,7 +117,7 @@ class InteractiveLoginTest {
 
     @Test
     void cancellingTheLoginReleasesTheCallbackPort() throws Exception {
-        AltLoginServiceImpl service = new AltLoginServiceImpl(injected::set, chain.config());
+        AltLoginServiceImpl service = new AltLoginServiceImpl(localStore.store(), injected::set, chain.config());
         service.browser = authorizationUrl::set;
 
         CompletableFuture<LoginResult> login = service.loginMicrosoft(LoginMode.DIRECT);
@@ -173,7 +176,9 @@ class InteractiveLoginTest {
         }
         String dead = "http://" + InetAddress.getLoopbackAddress().getHostAddress() + ":" + deadPort;
         AltLoginServiceImpl service = new AltLoginServiceImpl(
-                injected::set, chain.config().withEndpoints(null, dead + "/token", null, null, null, null));
+                localStore.store(),
+                injected::set,
+                chain.config().withEndpoints(null, dead + "/token", null, null, null, null));
         service.browser = AuthChainServer::completeInBrowser;
 
         LoginResult result = service.loginMicrosoft(LoginMode.DIRECT).get(30, TimeUnit.SECONDS);

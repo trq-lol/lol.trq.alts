@@ -77,12 +77,12 @@ If your credential was minted by a **legacy MSA** application and not an Azure O
 
 Other builder options, all optional: `proxyProvider`, `avatarSource`, `executor` (see [Threads and shutdown](#threads-and-shutdown)), `storeKeyProvider` and `migrateFromMachineKey` (see [Protecting the stored file](#protecting-the-stored-file)), `vaultTransportResolver`, `secretsFileName` and `secretsKeyBinding`.
 
-`build()` also reads whatever store is already on disk, so `AltStore.accounts()` is populated by the time it returns. You do not call `AltStore.load()` yourself.
+`build()` also reads whatever store is already on disk, so `alts.store().accounts()` is populated by the time it returns. You do not call `alts.store().load()` yourself.
 
 A file that exists but cannot be read is a third state, and worth handling. With the default key, a renamed OS user or a moved home directory turns a good file unreadable; with a host key, so does a key that is unavailable. The library refuses to overwrite such a file and tells you why, but only you can tell the user:
 
 ```java
-AltStore.loadError()
+alts.store().loadError()
         .ifPresent(reason -> alts.toasts()
                 .toast(
                         ToastSink.Level.ERROR,
@@ -93,7 +93,7 @@ AltStore.loadError()
 
 Showing an empty list reads as "my accounts are gone". The reason is the file name and a fixed phrase, never a path. Compiled as `GettingStartedExample.warnIfTheStoreDidNotLoad`.
 
-Two related accessors: `AltStore.loadWarning()` notes entries a successful load had to skip (no UUID, or a duplicate), and `AltStore.saveError()` says why the most recent write did not reach the disk.
+Two related accessors: `alts.store().loadWarning()` notes entries a successful load had to skip (no UUID, or a duplicate), and `alts.store().saveError()` says why the most recent write did not reach the disk.
 
 ## 4. Use it
 
@@ -107,7 +107,7 @@ alts.loginService().loginMicrosoft(LoginMode.ADD).thenAccept(result -> {
 });
 
 // Stored accounts.
-List<AltAccount> saved = AltStore.accounts();
+List<AltAccount> saved = alts.store().accounts();
 
 for (AltAccount account : saved) {
     // Lazy, cached avatar. Keyed by UUID, so a renamed account keeps its head; null until the
@@ -201,7 +201,7 @@ Logging into an account installs it as the live session. That is right for one a
 `alts.accountService()` is the same machinery without that last step:
 
 ```java
-for (AltAccount account : AltStore.accounts()) {
+for (AltAccount account : alts.store().accounts()) {
     alts.accountService().refresh(account).thenAccept(status -> {
         switch (status.state()) {
             // Nothing to do; the account is good, and RENEWED already persisted its new token.
@@ -241,7 +241,7 @@ Reach for `check` when you are only looking. The token endpoint issues a new ref
 A loop over fifty accounts needs pacing, because the service rate-limits by address; retries that know which failures are worth retrying; a way to stop; and a report that says which account failed. `alts.bulk()` provides those.
 
 ```java
-BulkHandle handle = alts.bulk().refreshAll(AltStore.accounts(), BulkOptions.defaults(), new BulkProgress() {
+BulkHandle handle = alts.bulk().refreshAll(alts.store().accounts(), BulkOptions.defaults(), new BulkProgress() {
     @Override
     public void started(int index, int total, String label) {
         render("checking " + label + " (" + (index + 1) + "/" + total + ")");
@@ -487,7 +487,7 @@ Compiled as `GettingStartedExample.importRefreshToken`.
 The token endpoint usually **rotates** the refresh token, issuing a new one and invalidating the old. The rotated value is always on `result.account().refreshToken()`, and who persists it depends on where the account came from:
 
 - **Accounts in the local store** (added with `LoginMode.ADD`, or loaded from disk) are updated and written for you.
-- **Every other account** (one handed to `loginAccount` straight from a shared repository, one logged in with `LoginMode.DIRECT`, or any record the store has never seen) is **not** persisted. `AltStore.updateCredentials` deliberately does nothing for a UUID it does not already hold. For those, read `result.account().refreshToken()` after every login and persist it yourself, or the next renewal redeems a token the service has already invalidated.
+- **Every other account** (one handed to `loginAccount` straight from a shared repository, one logged in with `LoginMode.DIRECT`, or any record the store has never seen) is **not** persisted. `alts.store().updateCredentials` deliberately does nothing for a UUID it does not already hold. For those, read `result.account().refreshToken()` after every login and persist it yourself, or the next renewal redeems a token the service has already invalidated.
 
 ### Branching on the failure reason
 
@@ -673,14 +673,14 @@ return new AltsRuntime.Builder<MyHandle>()
 
 The rules:
 
-- **With a provider, a file opens under your key or not at all.** A store written before you installed the provider does not load, and is reported on `AltStore.loadError()`, unless `migrateFromMachineKey(true)` is set for that launch.
+- **With a provider, a file opens under your key or not at all.** A store written before you installed the provider does not load, and is reported on `alts.store().loadError()`, unless `migrateFromMachineKey(true)` is set for that launch.
 - **Migration is a one-launch opt-in.** Decide `upgradeLaunch` yourself, for example from a flag you persist once the migration has run. That launch loads the old store, rewrites it under your key, and reseals or removes the backup and every unreadable copy. Leave it off afterwards: while it is on, anyone who can write the directory can plant a file sealed under the guessable key.
-- **A provider that fails holds every write back.** If it throws, or returns `null` or fewer than 16 bytes, the stores are unreadable and nothing is written, even after the provider recovers, until `AltStore.load()` and `SecretStore.load()` have been called again and succeeded. `AltStore.saveError()` says so in the meantime.
+- **A provider that fails holds every write back.** If it throws, or returns `null` or fewer than 16 bytes, the stores are unreadable and nothing is written, even after the provider recovers, until `alts.store().load()` and `alts.secrets().load()` have been called again and succeeded. `alts.store().saveError()` says so in the meantime.
 - **The provider is process-wide and is never removed.** A second runtime built without one keeps using it.
 
 ## Threads and shutdown
 
 - **Executor.** The library runs its blocking work on one virtual thread per task. Pass `.executor(yourExecutor)` to the builder to bound concurrency or propagate your own context. Callbacks you chain with `thenAccept` run on that executor, not on your main thread; marshal yourself when you touch UI state.
-- **Store writes.** A runtime built through the builder gathers store mutations for 100 ms and writes them once on a background thread. `AltStore.save()` and `AltStore.flush()` write at once and return when the data is on disk. A shutdown hook flushes on a normal exit; call `AltStore.flush()` and `SecretStore.flush()` yourself before exiting by a route that skips shutdown hooks.
+- **Store writes.** A runtime built through the builder gathers store mutations for 100 ms and writes them once on a background thread. `alts.store().save()` and `alts.store().flush()` write at once and return when the data is on disk. A shutdown hook flushes on a normal exit; call `alts.store().flush()` and `alts.secrets().flush()` yourself before exiting by a route that skips shutdown hooks.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the internals and [SECURITY.md](../SECURITY.md) for the threat model.

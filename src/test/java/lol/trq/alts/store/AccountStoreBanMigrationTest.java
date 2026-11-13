@@ -10,10 +10,10 @@ import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 
 /** Load-time migration of the legacy single {@code ban} field to the per-server {@code bans} map. */
-class AltStoreBanMigrationTest {
+class AccountStoreBanMigrationTest {
 
     private static JsonObject firstAccount(String json) {
-        return AltStore.normalizeLegacyBans(JsonParser.parseString(json))
+        return AccountStore.normalizeLegacyBans(JsonParser.parseString(json))
                 .getAsJsonObject()
                 .getAsJsonArray("accounts")
                 .get(0)
@@ -48,6 +48,6 @@ class AltStoreBanMigrationTest {
     @Test
     void noAccountsArrayIsNoOp() {
         JsonElement root = JsonParser.parseString("{}");
-        assertSame(root, AltStore.normalizeLegacyBans(root));
+        assertSame(root, AccountStore.normalizeLegacyBans(root));
     }
 }

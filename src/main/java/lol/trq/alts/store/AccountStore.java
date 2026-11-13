@@ -6,6 +6,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.annotations.SerializedName;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -18,18 +19,19 @@ import java.util.function.UnaryOperator;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.BanInfo;
 import lol.trq.alts.spi.StoreKeyProvider;
-import lol.trq.alts.spi.VaultDirectoryProvider;
 
 /**
- * Persists and manages the lifecycle of Minecraft accounts on local disk. Data is stored encrypted.
- * The default key is derived from values that are not secret (the OS user, OS name and home
- * directory), so it deters casual copying and nothing more; a host that needs real protection
- * supplies its own key through a {@link StoreKeyProvider}.
+ * One runtime's saved Minecraft accounts, persisted encrypted in one file on local disk. A host reaches
+ * it through {@code AltsRuntime#store()}; every runtime has its own, so two runtimes in one process never
+ * see each other's accounts.
  *
- * <p>The directory is supplied by the host through a {@link VaultDirectoryProvider} bound at runtime
- * startup; the store keeps no Minecraft or platform types. This store holds <em>accounts</em> only —
- * accounts may be shared into a multi-member repository, so a user's own secrets (API keys and the like)
- * live separately in {@link SecretStore} and never travel with the accounts.
+ * <p>The default key is derived from values that are not secret (the OS user, OS name and home
+ * directory), so it deters casual copying and nothing more; a host that needs real protection supplies
+ * its own key through a {@link StoreKeyProvider}.
+ *
+ * <p>This store holds <em>accounts</em> only. Accounts may be shared into a multi-member repository, so a
+ * user's own secrets (API keys and the like) live separately in {@link HostSecrets} and never travel with
+ * the accounts.
  *
  * <p>One carve-out: an account's OAuth {@code refreshToken} is a credential and it <em>does</em> sit on
  * the {@link AltAccount} record, because renewal has to work for a shared alt too — otherwise every
@@ -43,137 +45,114 @@ import lol.trq.alts.spi.VaultDirectoryProvider;
  * file in one step, so neither a concurrent login nor a crash can leave a half-written store. A write
  * that fails is reported on {@link #saveError()}; nothing here throws at a caller for an I/O failure.
  *
+ * <p>The store holds an exclusive lock on a sidecar {@code <file>.lock} in its directory from the moment
+ * it is opened until {@link #close()}, so a second owner of the same file, in this process or another,
+ * is refused when it opens rather than discovered later as a corrupt file. After {@code close()} the
+ * mutators still change the list in memory but write nothing: each records "the store is closed" on
+ * {@link #saveError()} instead.
+ *
  * @author trq
- * @since 0.1.0
+ * @since 1.0.0
  */
-public final class AltStore {
+public final class AccountStore implements AutoCloseable {
 
     /**
-     * How long a burst of mutations is gathered for before one write covers them, once
-     * {@code AltsRuntime.Builder#build()} has turned coalescing on. See {@link #writeDelay(Duration)}.
+     * How long a burst of mutations is gathered for before one write covers them, in a store a runtime
+     * built: a mutator returns as soon as memory is updated, and a background daemon thread writes the
+     * file this long after.
      *
-     * @since 0.12.0
+     * @since 1.0.0
      */
     public static final Duration DEFAULT_WRITE_DELAY = StoreFile.DEFAULT_WRITE_DELAY;
+
+    /** The neutral default filename. */
+    static final String DEFAULT_FILE_NAME = "accounts.dat";
+
+    /** The neutral default key-binding constant. */
+    static final String DEFAULT_KEY_BINDING = "lol.trq.alts";
 
     /** Gson keyed purely on {@link SerializedName}, the house serialization convention. */
     private static final Gson GSON = new GsonBuilder().create();
 
-    /** The encrypted file, with the neutral default name and key binding a host may override. */
-    private static final StoreFile FILE = new StoreFile("accounts.dat", "lol.trq.alts");
+    /** The encrypted file, owned and locked by this store. */
+    private final StoreFile file;
 
-    /** Guards every compound mutation, and the hand-off of its snapshot to {@link #FILE}. */
-    private static final Object LOCK = new Object();
+    /** Guards every compound mutation, and the hand-off of its snapshot to {@link #file}. */
+    private final Object lock = new Object();
 
     // Copy-on-write because logins resolve on the library executor while the host reads accounts() from its
     // render thread; a plain ArrayList lets one thread's write blow up the other's iteration.
-    private static final List<AltAccount> ACCOUNTS = new CopyOnWriteArrayList<>();
+    private final List<AltAccount> accounts = new CopyOnWriteArrayList<>();
 
-    private static volatile AltAccount currentAccount = null;
-    private static volatile String loadWarning;
+    private volatile AltAccount currentAccount;
+    private volatile String loadWarning;
 
-    private AltStore() {}
-
-    /**
-     * Binds the host directory provider. Called once by {@code AltsRuntime.Builder#build()} before any
-     * load or save.
-     *
-     * <p>Binding returns writes to synchronous until {@link #writeDelay(Duration)} is called after it,
-     * which the runtime builder does. Code that binds the store directly — a test, mostly — therefore
-     * gets a file that is on disk the moment a mutator returns. A key provider installed earlier stays
-     * installed: binding never returns the store to the machine-derived key.
-     *
-     * @param provider the host-supplied vault directory provider
-     */
-    public static void bind(VaultDirectoryProvider provider) {
-        FILE.bind(provider, null, false);
+    private AccountStore(StoreFile file) {
+        this.file = file;
     }
 
     /**
-     * Binds the host directory provider and installs the host's key provider in one step, so nothing
-     * can be written to the directory under the machine-derived key in between. This is what
-     * {@code AltsRuntime.Builder#build()} calls.
+     * Opens the account store in {@code directory} with the neutral defaults: the default filename and
+     * key binding, the machine-derived key, and synchronous writes, so a file is on disk the moment a
+     * mutator returns. Nothing is read until {@link #load()}. A host normally gets its store from the
+     * runtime instead.
      *
-     * <p>The key provider is process-wide and is never removed by a later binding: passing null keeps
-     * the one already installed, so a second runtime built without a provider reads and writes the store
-     * under the first one's key rather than rewriting it under the weaker default.
-     *
-     * <p>{@code migrateFromMachineKey} is the explicit, one-time opt-in for a host adopting a key
-     * provider over a store written before it had one. While it is on, a file that does not open under
-     * the host's key is tried under the machine-derived key and, when that works, loaded and rewritten
-     * under the host's key, together with every kept copy of it — the rolling backup included — so no
-     * file is left that opens under the machine key. Pass true for the upgrade launch only. Left on, it
-     * lets anyone who can write the directory, without knowing the host's secret, plant a store sealed
-     * under the guessable machine key and have it load. While it is off, which is the default, a file
-     * that does not open under the host's key is reported on {@link #loadError()} and left as it is.
-     *
-     * @param provider the host-supplied vault directory provider
-     * @param keyProvider the host key provider, or null to keep the one in place (the machine-derived
-     *     default when none was ever installed)
-     * @param migrateFromMachineKey whether to accept and reseal a file from before the key provider
-     * @since 0.12.0
+     * @param directory the directory the store file lives in; created when missing
+     * @return the open store, which the caller closes
+     * @throws IllegalStateException when the store file is in use by another owner or cannot be locked;
+     *     the message names the file, never its path
+     * @since 1.0.0
      */
-    public static void bind(
-            VaultDirectoryProvider provider, StoreKeyProvider keyProvider, boolean migrateFromMachineKey) {
-        FILE.bind(provider, keyProvider, migrateFromMachineKey);
+    public static AccountStore open(Path directory) {
+        return open(directory, null, null, null, false, Duration.ZERO);
     }
 
     /**
-     * Overrides the store filename and key-binding constant. Hosts with pre-existing encrypted files
-     * pass the legacy values here so those files keep loading; fresh hosts can ignore this and take the
-     * neutral defaults. Null or blank arguments leave the current value unchanged.
+     * Opens the account store in {@code directory} and takes the exclusive lock on its sidecar lock file.
+     * Nothing is read until {@link #load()}.
      *
-     * @param storeFileName the on-disk filename, or null/blank to keep the default
-     * @param storeKeyBinding the key-binding constant, or null/blank to keep the default
+     * <p>{@code migrateFromMachineKey} is the explicit, one-time opt-in for a host adopting a key provider
+     * over a store written before it had one. While it is on, a file that does not open under the host's
+     * key is tried under the machine-derived key and, when that works, loaded and rewritten under the
+     * host's key, together with every kept copy of it — the rolling backup included — so no file is left
+     * that opens under the machine key. Pass true for the upgrade launch only. Left on, it lets anyone who
+     * can write the directory, without knowing the host's secret, plant a store sealed under the guessable
+     * machine key and have it load. While it is off a file that does not open under the host's key is
+     * reported on {@link #loadError()} and left as it is.
+     *
+     * @param directory the directory the store file lives in; created when missing
+     * @param fileName the on-disk filename, or null/blank for the default; a host with an existing file
+     *     passes its name so the file keeps loading
+     * @param keyBinding the constant mixed into the encryption key, or null/blank for the default; changing
+     *     it for an existing store renders the file undecryptable
+     * @param keyProvider the host key provider, or null for the machine-derived key
+     * @param migrateFromMachineKey whether to accept and reseal a file from before the key provider; has no
+     *     effect without one
+     * @param writeDelay how long mutations are gathered for before one write covers them; null, zero, or
+     *     negative writes synchronously inside the mutator
+     * @return the open store, which the caller closes
+     * @throws IllegalStateException when the store file is in use by another owner or cannot be locked;
+     *     the message names the file, never its path
+     * @since 1.0.0
      */
-    public static void configure(String storeFileName, String storeKeyBinding) {
-        FILE.configure(storeFileName, storeKeyBinding);
+    public static AccountStore open(
+            Path directory,
+            String fileName,
+            String keyBinding,
+            StoreKeyProvider keyProvider,
+            boolean migrateFromMachineKey,
+            Duration writeDelay) {
+        return new AccountStore(StoreFile.open(
+                directory,
+                orDefault(fileName, DEFAULT_FILE_NAME),
+                orDefault(keyBinding, DEFAULT_KEY_BINDING),
+                keyProvider,
+                migrateFromMachineKey,
+                writeDelay));
     }
 
-    /**
-     * Installs a host key provider, so the file is sealed under the host's secret instead of the
-     * machine-derived default. Call before {@link #load()}; the runtime builder installs it together
-     * with the directory through {@link #bind(VaultDirectoryProvider, StoreKeyProvider, boolean)}. A
-     * file written under a host key does not open without it, and a file written before the provider
-     * was installed does not open under it unless the host opted into the migration on that bind.
-     *
-     * <p>A null argument is ignored. An installed provider is replaced only by another provider and is
-     * never removed, because removing it would send the next write out under the machine-derived key.
-     *
-     * @param provider the host key provider, or null to keep the one in place
-     * @since 0.12.0
-     */
-    public static void keyProvider(StoreKeyProvider provider) {
-        FILE.keyProvider(provider);
-    }
-
-    /**
-     * Returns the store to the state of a process that never bound a key provider or loaded a file: no
-     * accounts, no current account, no host key, and no recorded failure. For tests, which share this
-     * static state; deliberately not reachable from outside the package.
-     */
-    static void resetForTests() {
-        synchronized (LOCK) {
-            FILE.resetForTests();
-            ACCOUNTS.clear();
-            currentAccount = null;
-            loadWarning = null;
-        }
-    }
-
-    /**
-     * Sets how long mutations are gathered for before one write covers them all. With a delay, a
-     * mutator returns as soon as memory is updated and a single background daemon thread writes the
-     * file shortly after, so a burst — a bulk refresh, an import — costs one write instead of one each,
-     * and none of them on the caller's thread. Pending state is written by {@link #flush()}, by
-     * {@link #load()}, and at JVM shutdown, so a host that never flushes still loses nothing on a
-     * normal exit.
-     *
-     * @param delay the coalescing window; null, zero, or negative writes synchronously inside the mutator
-     * @since 0.12.0
-     */
-    public static void writeDelay(Duration delay) {
-        FILE.writeDelay(delay);
+    static String orDefault(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
     }
 
     /**
@@ -185,9 +164,10 @@ public final class AltStore {
      * @param serverId the server the ban was observed on (a host-supplied id; use a fallback such as
      *     {@code "unknown"} when the server cannot be identified)
      * @param ban the observed ban record
+     * @since 1.0.0
      */
-    public static void markBanned(String uuid, String serverId, BanInfo ban) {
-        synchronized (LOCK) {
+    public void markBanned(String uuid, String serverId, BanInfo ban) {
+        synchronized (lock) {
             replace(uuid, a -> a.withBan(serverId, ban));
             AltAccount current = currentAccount;
             if (matches(current, uuid)) {
@@ -203,17 +183,18 @@ public final class AltStore {
      * the iteration sees a snapshot rather than failing.
      *
      * @return the live list of accounts
+     * @since 1.0.0
      */
-    public static List<AltAccount> accounts() {
-        return ACCOUNTS;
+    public List<AltAccount> accounts() {
+        return accounts;
     }
 
     /**
      * Returns why the last {@link #load()} could not read an existing store file, if it could not.
      *
-     * <p>A store that fails to decrypt is not an empty store, and the two must not be confused: the key
-     * is derived from machine properties, so a renamed OS user or a moved home directory turns a
-     * perfectly good file into an unreadable one. While this is set, a host should tell the user their
+     * <p>A store that fails to decrypt is not an empty store, and the two must not be confused: the
+     * default key is derived from machine properties, so a renamed OS user or a moved home directory turns
+     * a perfectly good file into an unreadable one. While this is set, a host should tell the user their
      * accounts did not load instead of showing an empty list.
      *
      * <p>What a write does next depends on why the load failed. When the store key was unavailable — a
@@ -229,10 +210,10 @@ public final class AltStore {
      *
      * @return the failure description, or empty when the last load succeeded or found no file, or the
      *     store has been written successfully since
-     * @since 0.7.0
+     * @since 1.0.0
      */
-    public static Optional<String> loadError() {
-        return Optional.ofNullable(FILE.loadError());
+    public Optional<String> loadError() {
+        return Optional.ofNullable(file.loadError());
     }
 
     /**
@@ -243,9 +224,9 @@ public final class AltStore {
      * {@link #accounts()}.
      *
      * @return the note, or empty when the last load skipped nothing
-     * @since 0.12.0
+     * @since 1.0.0
      */
-    public static Optional<String> loadWarning() {
+    public Optional<String> loadWarning() {
         return Optional.ofNullable(loadWarning);
     }
 
@@ -256,23 +237,24 @@ public final class AltStore {
      * {@link #flush()}, and a success clears this. Like {@link #loadError()}, the description carries no
      * filesystem path.
      *
-     * <p>One failure is not retried by writing: while the last {@link #load()} failed because the store
+     * <p>Two failures are not retried by writing: while the last {@link #load()} failed because the store
      * key was unavailable, writes are refused on purpose, and only a {@code load()} that succeeds lifts
-     * that. See {@link #loadError()}.
+     * that (see {@link #loadError()}); and after {@link #close()} nothing is written at all.
      *
      * @return the failure description, or empty when the last write succeeded
-     * @since 0.12.0
+     * @since 1.0.0
      */
-    public static Optional<String> saveError() {
-        return Optional.ofNullable(FILE.saveError());
+    public Optional<String> saveError() {
+        return Optional.ofNullable(file.saveError());
     }
 
     /**
      * Returns the currently active account, if any.
      *
      * @return an optional holding the active account, or empty if none is set
+     * @since 1.0.0
      */
-    public static Optional<AltAccount> currentAccount() {
+    public Optional<AltAccount> currentAccount() {
         return Optional.ofNullable(currentAccount);
     }
 
@@ -286,9 +268,10 @@ public final class AltStore {
      * store through {@link #addAccount} and {@link #updateCredentials} only.
      *
      * @param account the account to make current, or null to clear
+     * @since 1.0.0
      */
-    public static void useAccount(AltAccount account) {
-        synchronized (LOCK) {
+    public void useAccount(AltAccount account) {
+        synchronized (lock) {
             if (account == null) {
                 currentAccount = null;
                 return;
@@ -315,10 +298,10 @@ public final class AltStore {
      * hold it is the host's job to put it wherever that account actually lives.
      *
      * @param account the account carrying freshly issued credentials
-     * @since 0.6.0
+     * @since 1.0.0
      */
-    public static void updateCredentials(AltAccount account) {
-        synchronized (LOCK) {
+    public void updateCredentials(AltAccount account) {
+        synchronized (lock) {
             replace(account.uuid(), a -> account);
             if (matches(currentAccount, account.uuid())) {
                 currentAccount = account;
@@ -333,10 +316,10 @@ public final class AltStore {
      * left at rest. A no-op if the UUID is unknown.
      *
      * @param uuid the dashed UUID of the account whose refresh token is spent
-     * @since 0.6.0
+     * @since 1.0.0
      */
-    public static void clearRefreshToken(String uuid) {
-        synchronized (LOCK) {
+    public void clearRefreshToken(String uuid) {
+        synchronized (lock) {
             replace(uuid, a -> a.withTokens(a.accessToken(), null, 0L));
             AltAccount current = currentAccount;
             if (matches(current, uuid)) {
@@ -357,12 +340,13 @@ public final class AltStore {
      * account at once leave one entry rather than two.
      *
      * @param account the account to add or update
+     * @since 1.0.0
      */
-    public static void addAccount(AltAccount account) {
+    public void addAccount(AltAccount account) {
         Objects.requireNonNull(account.uuid(), "uuid");
-        synchronized (LOCK) {
+        synchronized (lock) {
             if (!replace(account.uuid(), account::mergedOnto)) {
-                ACCOUNTS.add(account);
+                accounts.add(account);
             }
             scheduleSave();
         }
@@ -374,10 +358,11 @@ public final class AltStore {
      * still removes the right entry.
      *
      * @param account the account to remove
+     * @since 1.0.0
      */
-    public static void removeAccount(AltAccount account) {
-        synchronized (LOCK) {
-            ACCOUNTS.removeIf(a -> matches(a, account.uuid()));
+    public void removeAccount(AltAccount account) {
+        synchronized (lock) {
+            accounts.removeIf(a -> matches(a, account.uuid()));
             if (matches(currentAccount, account.uuid())) {
                 currentAccount = null;
             }
@@ -386,9 +371,9 @@ public final class AltStore {
     }
 
     /**
-     * Encrypts the current accounts and writes them to disk before returning, whatever
-     * {@link #writeDelay(Duration)} is set to. The mutators here persist on their own; this is for a
-     * host that edited {@link #accounts()} directly.
+     * Encrypts the current accounts and writes them to disk before returning, whatever write delay the
+     * store was opened with. The mutators here persist on their own; this is for a host that edited
+     * {@link #accounts()} directly.
      *
      * <p>The file is replaced in one step, so it is always either the previous state or this one. A
      * failure is reported on {@link #saveError()} rather than thrown.
@@ -397,45 +382,50 @@ public final class AltStore {
      * copied aside, and does not write at all while the store key was unavailable to that load — see
      * {@link #loadError()}. Persisting there would write an empty store over accounts that are merely
      * unreadable, which is worse than not persisting at all.
+     *
+     * @since 1.0.0
      */
-    public static void save() {
-        synchronized (LOCK) {
+    public void save() {
+        synchronized (lock) {
             scheduleSave();
         }
-        FILE.flush();
+        file.flush();
     }
 
     /**
-     * Writes any state still waiting on {@link #writeDelay(Duration)} and returns once it is on disk. A
-     * no-op when nothing is waiting. Worth calling before a host exits by a route that skips shutdown
-     * hooks; a normal exit flushes on its own.
+     * Writes any state still waiting on the write delay and returns once it is on disk. A no-op when
+     * nothing is waiting. Worth calling before a host exits by a route that skips shutdown hooks; a normal
+     * exit flushes on its own, and {@link #close()} flushes too.
      *
-     * @since 0.12.0
+     * @since 1.0.0
      */
-    public static void flush() {
-        FILE.flush();
+    public void flush() {
+        file.flush();
     }
 
     /**
      * Loads and decrypts accounts from disk into memory, clearing existing entries first. A file that
      * exists but cannot be read leaves the in-memory list alone and records the reason on
      * {@link #loadError()}. Entries that cannot be used are skipped and noted on {@link #loadWarning()}.
+     * After {@link #close()} nothing is read, and {@link #loadError()} says so.
+     *
+     * @since 1.0.0
      */
-    public static void load() {
-        synchronized (LOCK) {
+    public void load() {
+        synchronized (lock) {
             int[] skipped = {0};
-            StoreFile.LoadOutcome outcome = FILE.load(json -> {
+            StoreFile.LoadOutcome outcome = file.load(json -> {
                 JsonElement root = normalizeLegacyBans(JsonParser.parseString(json));
                 StorageData loaded = GSON.fromJson(root, StorageData.class);
                 if (loaded == null) {
                     return;
                 }
                 List<AltAccount> valid = usable(loaded.accounts(), skipped);
-                ACCOUNTS.clear();
-                ACCOUNTS.addAll(valid);
+                accounts.clear();
+                accounts.addAll(valid);
             });
             if (skipped[0] > 0 && outcome != StoreFile.LoadOutcome.FAILED) {
-                loadWarning = FILE.fileName() + ": skipped " + skipped[0] + " invalid or duplicate "
+                loadWarning = file.fileName() + ": skipped " + skipped[0] + " invalid or duplicate "
                         + (skipped[0] == 1 ? "entry" : "entries");
             } else {
                 loadWarning = null;
@@ -443,6 +433,25 @@ public final class AltStore {
             if (outcome == StoreFile.LoadOutcome.MIGRATED) {
                 scheduleSave();
             }
+        }
+    }
+
+    /**
+     * Writes what is still waiting, releases the store's lock and stops its background writer. The
+     * runtime that opened the store calls this from {@code AltsRuntime#close()}; a host closes the
+     * runtime, not the store. Idempotent.
+     *
+     * <p>After this the store writes nothing. The list stays readable, and the mutators still change it
+     * in memory, but each records "the store is closed" on {@link #saveError()} instead of writing, as
+     * does {@link #save()}; {@link #flush()} does nothing, and {@link #load()} reads nothing. Another owner
+     * may open the file as soon as this returns.
+     *
+     * @since 1.0.0
+     */
+    @Override
+    public void close() {
+        synchronized (lock) {
+            file.close();
         }
     }
 
@@ -477,9 +486,9 @@ public final class AltStore {
      * @param change produces the replacement for a matching entry
      * @return true when an entry matched
      */
-    private static boolean replace(String uuid, UnaryOperator<AltAccount> change) {
+    private boolean replace(String uuid, UnaryOperator<AltAccount> change) {
         boolean[] found = {false};
-        ACCOUNTS.replaceAll(a -> {
+        accounts.replaceAll(a -> {
             if (!matches(a, uuid)) {
                 return a;
             }
@@ -502,12 +511,12 @@ public final class AltStore {
     }
 
     /**
-     * Hands a snapshot of the accounts to the file. Must be called with {@link #LOCK} held, so snapshots
+     * Hands a snapshot of the accounts to the file. Must be called with {@link #lock} held, so snapshots
      * reach the file in the order the mutations happened.
      */
-    private static void scheduleSave() {
-        List<AltAccount> snapshot = new ArrayList<>(ACCOUNTS);
-        FILE.submit(() -> GSON.toJson(new StorageData(snapshot)));
+    private void scheduleSave() {
+        List<AltAccount> snapshot = new ArrayList<>(accounts);
+        file.submit(() -> GSON.toJson(new StorageData(snapshot)));
     }
 
     /**

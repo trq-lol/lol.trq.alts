@@ -3,6 +3,8 @@ package lol.trq.alts.store;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -19,14 +21,12 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import lol.trq.alts.spi.StoreKeyProvider;
-import lol.trq.alts.spi.VaultDirectoryProvider;
 
 /**
  * The one encrypted file behind a store: where it lives, what key seals it, and how a snapshot of the
@@ -40,10 +40,15 @@ import lol.trq.alts.spi.VaultDirectoryProvider;
  * <p>Three rules keep a store from being lost or weakened. A file that could not be read is copied aside
  * under a name of its own before anything replaces it. While the last load failed because the host's key
  * was unavailable, nothing is written at all, since the file on disk is intact and merely unread. And a
- * host key, once installed, is never dropped: a file that does not open under it is unreadable, except
- * on the one launch a host asks for files from before the key to be migrated.
+ * file opened with a host key is sealed under that key for its whole life: a file that does not open
+ * under it is unreadable, except on the one launch a host asks for files from before the key to be
+ * migrated.
  *
- * <p>Nothing here throws at a caller. A failed read is reported on {@link #loadError()} and a failed
+ * <p>Each instance owns its directory, name, key and writer, and holds an exclusive lock on a sidecar
+ * {@code <name>.lock} from {@link #open} to {@link #close()}, so no two owners, in one process or two,
+ * write the same file.
+ *
+ * <p>Once open, nothing here throws at a caller. A failed read is reported on {@link #loadError()} and a failed
  * write on {@link #saveError()}, and both are built from the file's name and a fixed phrase — the JDK's
  * own I/O messages are the absolute path, and these strings travel into a host's UI and its log.
  *
@@ -70,8 +75,8 @@ final class StoreFile {
     /** How many unreadable copies are kept; the oldest go once there are more. */
     static final int MAX_UNREADABLE_KEPT = 5;
 
-    /** Every store file in the process, for the shutdown flush. */
-    private static final List<StoreFile> ALL = new CopyOnWriteArrayList<>();
+    /** Suffix of the sidecar file whose exclusive lock marks the store as owned for its lifetime. */
+    static final String LOCK_SUFFIX = ".lock";
 
     /** Serializes every read and write of the file, and guards the key cache. */
     private final Object ioLock = new Object();
@@ -79,19 +84,25 @@ final class StoreFile {
     /** Guards the pending snapshot and its bookkeeping; never held across I/O. */
     private final Object pendingLock = new Object();
 
-    private volatile String fileName;
-    private volatile String keyBinding;
-    private volatile VaultDirectoryProvider directoryProvider;
-    private volatile StoreKeyProvider keyProvider;
-    private volatile boolean migrateFromMachineKey;
-    private volatile long writeDelayMillis;
+    private final Path directory;
+    private final String fileName;
+    private final String keyBinding;
+    private final StoreKeyProvider keyProvider;
+    private final boolean migrateFromMachineKey;
+    private final long writeDelayMillis;
+    private final FileChannel lockChannel;
+    private final FileLock lock;
+
     private volatile String loadError;
     private volatile String saveError;
+    private volatile boolean closed;
 
     private Pending pending;
     private ScheduledFuture<?> timer;
     private long timerDueNanos;
     private long submitted;
+    private ScheduledThreadPoolExecutor writer;
+    private Thread shutdownFlush;
 
     private long written;
     private boolean knownGood;
@@ -102,117 +113,133 @@ final class StoreFile {
     private String sealedUnder;
     private EncryptionUtil.DerivedKey sealingKey;
 
-    /**
-     * Creates the file with its neutral defaults; a host overrides them through {@link #configure}.
-     *
-     * @param defaultFileName the on-disk filename
-     * @param defaultKeyBinding the constant mixed into the encryption key
-     */
-    StoreFile(String defaultFileName, String defaultKeyBinding) {
-        this.fileName = defaultFileName;
-        this.keyBinding = defaultKeyBinding;
-        ALL.add(this);
+    private StoreFile(
+            Path directory,
+            String fileName,
+            String keyBinding,
+            StoreKeyProvider keyProvider,
+            boolean migrateFromMachineKey,
+            Duration writeDelay,
+            FileChannel lockChannel,
+            FileLock lock) {
+        this.directory = directory;
+        this.fileName = fileName;
+        this.keyBinding = keyBinding;
+        this.keyProvider = keyProvider;
+        this.migrateFromMachineKey = migrateFromMachineKey;
+        this.writeDelayMillis = writeDelay == null || writeDelay.isNegative() ? 0L : writeDelay.toMillis();
+        this.lockChannel = lockChannel;
+        this.lock = lock;
     }
 
     /**
-     * Points the file at a host directory and installs the host's key in the same step, so there is no
-     * moment at which the new directory is bound and a write could still be sealed under the machine
-     * key. Writes go back to synchronous until {@link #writeDelay} says otherwise. A snapshot still
-     * waiting to be written goes to the previous directory first.
+     * Opens the file in {@code directory}, creating the directory when it is missing, and takes an
+     * exclusive lock on the sidecar {@code <fileName>.lock} beside it, held until {@link #close()}. The
+     * lock is what keeps two owners, in one process or in two, from writing the same store over each
+     * other. Nothing is read here; {@link #load} does that. The lock file is left in place on close:
+     * deleting it could race another owner that has just opened it.
      *
-     * <p>A null {@code key} leaves an installed provider in place: the provider is process-wide, and a
-     * second binding that names none must not downgrade the store to the machine-derived key.
-     *
-     * @param provider the host-supplied vault directory provider
-     * @param key the host key provider, or null to keep the one in place
-     * @param migrate whether a file that opens only under the machine-derived key may be loaded and
-     *     resealed under the host's; applies only while a key provider is installed
+     * @param directory the directory the store lives in
+     * @param fileName the on-disk filename
+     * @param keyBinding the constant mixed into the encryption key
+     * @param keyProvider the host key provider, or null for the machine-derived key
+     * @param migrateFromMachineKey whether a file that opens only under the machine-derived key may be
+     *     loaded and resealed under the host's; applies only while a key provider is installed
+     * @param writeDelay the coalescing window; null, zero, or negative writes synchronously
+     * @return the open, locked file
+     * @throws IllegalStateException when another owner holds the lock, or the lock could not be taken;
+     *     the message names the file, never its path
      */
-    void bind(VaultDirectoryProvider provider, StoreKeyProvider key, boolean migrate) {
-        Objects.requireNonNull(provider, "VaultDirectoryProvider");
-        if (directoryProvider != null) {
-            flush();
+    static StoreFile open(
+            Path directory,
+            String fileName,
+            String keyBinding,
+            StoreKeyProvider keyProvider,
+            boolean migrateFromMachineKey,
+            Duration writeDelay) {
+        Objects.requireNonNull(directory, "directory");
+        Objects.requireNonNull(fileName, "fileName");
+        Objects.requireNonNull(keyBinding, "keyBinding");
+        FileChannel channel;
+        try {
+            Files.createDirectories(directory);
+            channel = FileChannel.open(
+                    directory.resolve(fileName + LOCK_SUFFIX), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+        } catch (IOException | RuntimeException failure) {
+            // The cause's message is the absolute path; this one names the file only.
+            throw new IllegalStateException("store file " + fileName + " could not be locked", failure);
         }
+        FileLock taken;
+        try {
+            taken = channel.tryLock();
+        } catch (OverlappingFileLockException heldInThisProcess) {
+            taken = null;
+        } catch (IOException | RuntimeException failure) {
+            closeQuietly(channel);
+            throw new IllegalStateException("store file " + fileName + " could not be locked", failure);
+        }
+        if (taken == null) {
+            closeQuietly(channel);
+            throw new IllegalStateException("store file " + fileName + " is in use by another runtime");
+        }
+        return new StoreFile(
+                directory, fileName, keyBinding, keyProvider, migrateFromMachineKey, writeDelay, channel, taken);
+    }
+
+    /**
+     * Writes what is waiting, then releases the lock, stops the background writer and removes the
+     * shutdown flush. Idempotent. From here on nothing is written: a later submission is dropped and
+     * reported on {@link #saveError()}, and a later load reads nothing and is reported on
+     * {@link #loadError()}.
+     */
+    void close() {
         synchronized (ioLock) {
-            directoryProvider = provider;
-            if (key != null && key != keyProvider) {
-                keyProvider = key;
-                forgetKeys();
+            if (closed) {
+                return;
             }
-            migrateFromMachineKey = migrate;
-            writeDelayMillis = 0L;
-            knownGood = false;
-        }
-    }
-
-    /**
-     * Overrides the filename and key-binding constant. Null or blank arguments leave the current value
-     * unchanged.
-     *
-     * @param storeFileName the on-disk filename, or null/blank to keep the current one
-     * @param storeKeyBinding the key-binding constant, or null/blank to keep the current one
-     */
-    void configure(String storeFileName, String storeKeyBinding) {
-        if (storeFileName != null && !storeFileName.isBlank()) {
-            fileName = storeFileName;
-        }
-        if (storeKeyBinding != null && !storeKeyBinding.isBlank()) {
-            keyBinding = storeKeyBinding;
-        }
-    }
-
-    /**
-     * Installs the host's key provider. A null argument is ignored: an installed provider is never
-     * removed this way, because removing it would send the next write out under the machine-derived key.
-     *
-     * @param provider the host key provider, or null to keep the one in place
-     */
-    void keyProvider(StoreKeyProvider provider) {
-        if (provider == null) {
-            return;
-        }
-        synchronized (ioLock) {
-            keyProvider = provider;
-            forgetKeys();
-        }
-    }
-
-    /**
-     * Returns the file to the state of a process that never installed a key provider and never loaded:
-     * no host key, no migration, no recorded failure, and nothing waiting to be written. For tests only:
-     * it is not reachable from outside this package, and is refused unless the JVM was started for tests
-     * (the build's test task sets the {@code lol.trq.alts.testSeams} system property), because removing
-     * the host key is what sends the next write out under the machine-derived one.
-     *
-     * @throws IllegalStateException outside the test suite
-     */
-    void resetForTests() {
-        if (!Boolean.getBoolean("lol.trq.alts.testSeams")) {
-            throw new IllegalStateException("test seams are disabled outside the test suite");
-        }
-        synchronized (ioLock) {
+            flush();
+            closed = true;
             synchronized (pendingLock) {
                 pending = null;
             }
-            keyProvider = null;
-            migrateFromMachineKey = false;
-            forgetKeys();
-            knownGood = false;
-            unreadableOnDisk = false;
-            awaitingKey = false;
-            resealing = false;
-            loadError = null;
-            saveError = null;
+            try {
+                lock.release();
+            } catch (IOException | RuntimeException alreadyGone) {
+                // Closing the channel below releases it as well.
+            }
+            closeQuietly(lockChannel);
+        }
+        ScheduledThreadPoolExecutor stopped;
+        Thread hook;
+        synchronized (pendingLock) {
+            if (timer != null) {
+                timer.cancel(false);
+                timer = null;
+            }
+            stopped = writer;
+            hook = shutdownFlush;
+            writer = null;
+            shutdownFlush = null;
+        }
+        if (stopped != null) {
+            stopped.shutdown();
+        }
+        if (hook != null && Thread.currentThread() != hook) {
+            try {
+                Runtime.getRuntime().removeShutdownHook(hook);
+            } catch (IllegalStateException shuttingDown) {
+                // The hook is running or about to; it finds the file closed and does nothing.
+            }
         }
     }
 
     /**
-     * Sets how long mutations are gathered for before one write covers them all.
+     * Returns whether {@link #close()} has run.
      *
-     * @param delay the coalescing window; null, zero, or negative writes synchronously
+     * @return true once closed
      */
-    void writeDelay(Duration delay) {
-        writeDelayMillis = delay == null || delay.isNegative() ? 0L : delay.toMillis();
+    boolean closed() {
+        return closed;
     }
 
     /**
@@ -253,6 +280,10 @@ final class StoreFile {
      *     thread when coalescing, so it must close over an immutable copy
      */
     void submit(Supplier<String> plaintext) {
+        if (closed) {
+            saveError = fileName + ": not written, because the store is closed";
+            return;
+        }
         long delay = writeDelayMillis;
         boolean inline = delay <= 0;
         synchronized (pendingLock) {
@@ -272,6 +303,9 @@ final class StoreFile {
      */
     void flush() {
         synchronized (ioLock) {
+            if (closed) {
+                return;
+            }
             Pending next;
             synchronized (pendingLock) {
                 next = pending;
@@ -320,12 +354,12 @@ final class StoreFile {
         flush();
         synchronized (ioLock) {
             String name = fileName;
-            Path file;
-            try {
-                file = directory().resolve(name);
-            } catch (RuntimeException unavailable) {
-                return unreadable(name, "store directory unavailable");
+            if (closed) {
+                // Not unreadable: the file was never looked at, and the next owner may read it.
+                loadError = name + ": not read, because the store is closed";
+                return LoadOutcome.FAILED;
             }
+            Path file = directory.resolve(name);
             if (!Files.exists(file)) {
                 loadError = null;
                 knownGood = false;
@@ -391,10 +425,11 @@ final class StoreFile {
         }
     }
 
-    /** Flushes every store file in the process; run at JVM shutdown. */
-    private static void flushAll() {
-        for (StoreFile file : ALL) {
-            file.flush();
+    private static void closeQuietly(FileChannel channel) {
+        try {
+            channel.close();
+        } catch (IOException ignored) {
+            // Nothing is left to release on a channel that will not close.
         }
     }
 
@@ -524,15 +559,50 @@ final class StoreFile {
         }
         try {
             ScheduledFuture<?> replaced = timer;
-            timer = Writer.EXECUTOR.schedule(this::flushScheduled, delayMillis, TimeUnit.MILLISECONDS);
+            timer = writer().schedule(this::flushScheduled, delayMillis, TimeUnit.MILLISECONDS);
             timerDueNanos = due;
             if (replaced != null) {
                 replaced.cancel(false);
             }
             return true;
-        } catch (RejectedExecutionException unavailable) {
+        } catch (RejectedExecutionException | IllegalStateException unavailable) {
             return false;
         }
+    }
+
+    /**
+     * Returns this file's background writer, creating it and its shutdown flush on first use. The writer
+     * is a daemon, so without the hook a snapshot gathered in the last instant before exit would die
+     * with it; a host that never closes the store still loses nothing on a normal exit. Called with the
+     * pending lock held.
+     *
+     * @return the writer
+     * @throws IllegalStateException when the file is closed
+     */
+    private ScheduledThreadPoolExecutor writer() {
+        if (closed) {
+            throw new IllegalStateException("closed");
+        }
+        if (writer == null) {
+            ScheduledThreadPoolExecutor created = new ScheduledThreadPoolExecutor(1, task -> {
+                Thread thread = new Thread(task, "alts-store-writer");
+                thread.setDaemon(true);
+                return thread;
+            });
+            created.setKeepAliveTime(30, TimeUnit.SECONDS);
+            created.allowCoreThreadTimeOut(true);
+            created.setRemoveOnCancelPolicy(true);
+            created.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+            Thread hook = new Thread(this::flush, "alts-store-flush");
+            try {
+                Runtime.getRuntime().addShutdownHook(hook);
+                shutdownFlush = hook;
+            } catch (IllegalStateException alreadyShuttingDown) {
+                // Too late to register; the caller's own flush or close is all that is left.
+            }
+            writer = created;
+        }
+        return writer;
     }
 
     private void flushScheduled() {
@@ -550,12 +620,6 @@ final class StoreFile {
      */
     private void write(String plaintext) throws WriteFailure {
         String name = fileName;
-        Path directory;
-        try {
-            directory = directory();
-        } catch (RuntimeException unavailable) {
-            throw new WriteFailure("store directory unavailable");
-        }
         Path target = directory.resolve(name);
         Path temp = directory.resolve(name + TEMP_SUFFIX);
 
@@ -763,20 +827,6 @@ final class StoreFile {
         return "host-key:" + hostSecret + ":" + keyBinding;
     }
 
-    private void forgetKeys() {
-        hostSecret = null;
-        sealedUnder = null;
-        sealingKey = null;
-    }
-
-    private Path directory() {
-        VaultDirectoryProvider provider = directoryProvider;
-        if (provider == null) {
-            throw new IllegalStateException("store not bound");
-        }
-        return Objects.requireNonNull(provider.vaultDirectory(), "vaultDirectory");
-    }
-
     /**
      * Describes an I/O failure without naming a path.
      *
@@ -834,33 +884,6 @@ final class StoreFile {
 
         WriteFailure(String reason) {
             super(reason);
-        }
-    }
-
-    /** The background writer, created on the first coalesced write together with its shutdown flush. */
-    private static final class Writer {
-
-        static final ScheduledThreadPoolExecutor EXECUTOR = create();
-
-        private Writer() {}
-
-        private static ScheduledThreadPoolExecutor create() {
-            ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(1, task -> {
-                Thread thread = new Thread(task, "alts-store-writer");
-                thread.setDaemon(true);
-                return thread;
-            });
-            executor.setKeepAliveTime(30, TimeUnit.SECONDS);
-            executor.allowCoreThreadTimeOut(true);
-            executor.setRemoveOnCancelPolicy(true);
-            try {
-                // The writer is a daemon, so without this a snapshot gathered in the last instant before
-                // exit would die with it. A host that never calls flush() still loses nothing.
-                Runtime.getRuntime().addShutdownHook(new Thread(StoreFile::flushAll, "alts-store-flush"));
-            } catch (IllegalStateException alreadyShuttingDown) {
-                // Too late to register; the caller's own flush is all that is left.
-            }
-            return executor;
         }
     }
 }

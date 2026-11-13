@@ -26,7 +26,7 @@ import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.net.Backoff;
 import lol.trq.alts.net.FailureText;
 import lol.trq.alts.net.IoExecutor;
-import lol.trq.alts.store.AltStore;
+import lol.trq.alts.store.AccountStore;
 
 /**
  * Concrete {@link BulkOperations}.
@@ -47,6 +47,7 @@ public final class BulkOperationsImpl implements BulkOperations {
      */
     private static final Duration UNSTATED_RATE_LIMIT_WAIT = Duration.ofSeconds(1);
 
+    private final AccountStore store;
     private final AltLoginService importService;
     private final AltAccountService accountService;
     private final Function<AltAccount, EntitlementService> entitlementServices;
@@ -54,13 +55,15 @@ public final class BulkOperationsImpl implements BulkOperations {
     /**
      * Creates the bulk surface, reading entitlements from the public Minecraft services.
      *
+     * @param store the runtime's account store, whose current account an import puts back when it ends
      * @param importService a login service whose session injector does nothing, so importing resolves
      *     and stores without moving the live session
      * @param accountService the account service the refresh and check runs are built on
-     * @since 0.9.0
+     * @since 1.0.0
      */
-    public BulkOperationsImpl(AltLoginService importService, AltAccountService accountService) {
+    public BulkOperationsImpl(AccountStore store, AltLoginService importService, AltAccountService accountService) {
         this(
+                store,
                 importService,
                 accountService,
                 account -> AccountServices.of(account.accessToken(), account.uuid())
@@ -71,16 +74,19 @@ public final class BulkOperationsImpl implements BulkOperations {
      * Creates the bulk surface with a given source of per-account entitlement services — for a host
      * whose account services go to an overridden endpoint base, so the sweep reaches the same origin.
      *
+     * @param store the runtime's account store, whose current account an import puts back when it ends
      * @param importService a login service whose session injector does nothing, so importing resolves
      *     and stores without moving the live session
      * @param accountService the account service the refresh and check runs are built on
      * @param entitlementServices builds the entitlement service for one account, over its access token
-     * @since 0.12.0
+     * @since 1.0.0
      */
     public BulkOperationsImpl(
+            AccountStore store,
             AltLoginService importService,
             AltAccountService accountService,
             Function<AltAccount, EntitlementService> entitlementServices) {
+        this.store = Objects.requireNonNull(store, "store");
         this.importService = Objects.requireNonNull(importService, "importService");
         this.accountService = Objects.requireNonNull(accountService, "accountService");
         this.entitlementServices = Objects.requireNonNull(entitlementServices, "entitlementServices");
@@ -94,7 +100,7 @@ public final class BulkOperationsImpl implements BulkOperations {
         // Resolving an account stamps it as the store's current one, which a host may well be rendering
         // as "the account you are on". Importing fifty must not leave the fiftieth sitting there, so the
         // pointer is put back where the run found it.
-        Optional<AltAccount> before = AltStore.currentAccount();
+        Optional<AltAccount> before = store.currentAccount();
 
         Run run = new Run(
                 items.size(),
@@ -102,7 +108,7 @@ public final class BulkOperationsImpl implements BulkOperations {
                 progress,
                 index -> BulkEntryResult.positionalLabel(index),
                 index -> importOne(items.get(index), mode));
-        run.report.whenComplete((report, failure) -> AltStore.useAccount(before.orElse(null)));
+        run.report.whenComplete((report, failure) -> store.useAccount(before.orElse(null)));
         return start(run);
     }
 

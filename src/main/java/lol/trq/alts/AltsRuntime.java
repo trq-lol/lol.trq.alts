@@ -1,9 +1,11 @@
 package lol.trq.alts;
 
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 import lol.trq.alts.account.AccountEndpoints;
 import lol.trq.alts.account.AccountServices;
 import lol.trq.alts.account.ProfileLookupService;
@@ -29,23 +31,28 @@ import lol.trq.alts.spi.TextureUploader;
 import lol.trq.alts.spi.ToastSink;
 import lol.trq.alts.spi.VaultDirectoryProvider;
 import lol.trq.alts.spi.VaultTransportResolver;
-import lol.trq.alts.store.AltStore;
-import lol.trq.alts.store.SecretStore;
+import lol.trq.alts.store.AccountStore;
+import lol.trq.alts.store.HostSecrets;
 
 /**
  * Central wiring object for the consumer-agnostic account library. The host supplies its platform
- * seams through {@link Builder}; the library exposes an {@link AltLoginService} and a generic
- * {@link SkinAvatarCache}, and binds the static {@link AltStore} and {@link AltsToasts} helpers to the
- * host's seams.
+ * seams through {@link Builder}; the library exposes an {@link AltLoginService}, a generic
+ * {@link SkinAvatarCache}, and the runtime's own {@link AccountStore} and {@link HostSecrets}.
  *
- * <p>Construct exactly one per application. Build it during host initialization, before any alt screen
- * opens or {@link AltStore} is touched.
+ * <p>Build it during host initialization, before any alt screen opens. Each runtime owns its stores:
+ * two runtimes in one process, on two directories, never see each other's accounts or secrets. Two
+ * runtimes cannot share a store file; the second one's {@link Builder#build()} fails.
+ *
+ * <p>A runtime holds a lock on each store file for as long as it is open, so a host closes it when done
+ * with it, ideally with try-with-resources. {@link #close()} writes what is still waiting and releases
+ * the files. A host that never closes it loses nothing on a normal exit: a shutdown hook flushes the
+ * stores.
  *
  * @param <H> the host's opaque texture-handle type (for example a NanoVG image handle)
  * @author trq
  * @since 0.1.0
  */
-public final class AltsRuntime<H> {
+public final class AltsRuntime<H> implements AutoCloseable {
 
     /** How long a fetched game-stats snapshot stays fresh before a background refresh. */
     private static final long STATS_TTL_MILLIS = 5 * 60 * 1000L;
@@ -59,6 +66,9 @@ public final class AltsRuntime<H> {
     private final AsyncCache<String, GameStats> emptyStatsCache;
     private final ToastSink toasts;
     private final VaultTransportResolver vaultResolver;
+    private final AccountStore store;
+    private final HostSecrets secrets;
+    private final AtomicBoolean closed = new AtomicBoolean();
 
     private AltsRuntime(Builder<H> builder) {
         Objects.requireNonNull(builder.sessionInjector, "SessionInjector required");
@@ -70,63 +80,83 @@ public final class AltsRuntime<H> {
         HttpUtil.bind(builder.proxyProvider);
         IoExecutor.bind(builder.executor);
 
-        // The host key goes in with the directory, in one step: bound separately, a write landing in
-        // between would be sealed under the machine-derived key. A null provider keeps the one an
-        // earlier runtime installed, so this runtime cannot rewrite that store under the weaker key.
-        AltStore.bind(builder.vaultDirectory, builder.storeKeyProvider, builder.migrateFromMachineKey);
-        AltStore.configure(builder.storeFileName, builder.storeKeyBinding);
-        SecretStore.bind(builder.vaultDirectory, builder.storeKeyProvider, builder.migrateFromMachineKey);
-        SecretStore.configure(builder.secretsFileName, builder.secretsKeyBinding);
-
-        // After the bind, which returns both to synchronous writes: coalescing keeps a burst of logins
-        // from writing the file once each.
-        AltStore.writeDelay(AltStore.DEFAULT_WRITE_DELAY);
-        SecretStore.writeDelay(AltStore.DEFAULT_WRITE_DELAY);
         AltsToasts.bind(builder.toastSink);
 
-        // Read what is already on disk here, so a host never has to know that binding and loading are two
-        // steps. Both are safe to repeat: each clears its in-memory state before refilling it.
-        AltStore.load();
-        SecretStore.load();
-
-        this.toasts = builder.toastSink;
-        this.vaultResolver = builder.vaultTransportResolver;
-        this.loginService = new AltLoginServiceImpl(builder.sessionInjector, builder.microsoftAuth);
-
-        // The account services talk to the same host the auth chain validates against, so a host that
-        // fronts Minecraft services with a proxy — overriding the profile URL — reaches them through the
-        // same origin rather than needing a second override.
-        this.accountEndpoints = accountEndpointsFrom(builder.microsoftAuth);
-        this.profileLookup = ProfileLookupService.create(accountEndpoints);
-
-        // The import runs resolve and store through a login service whose injector does nothing, which
-        // is what keeps importing fifty credentials from switching session fifty times.
-        this.bulk = new BulkOperationsImpl(
-                new AltLoginServiceImpl(session -> {}, builder.microsoftAuth),
-                loginService.accountService(),
-                account -> accountServices(account).entitlements());
-        this.skinCache = new SkinAvatarCache<>(builder.avatarSource, builder.textureUploader, builder.mainThread);
-
-        // Game stats are optional and per-server: one cache per registered source. A request for a
-        // server with no source returns the shared empty cache, whose loader always yields null, so
-        // callers degrade gracefully.
-        Map<String, AsyncCache<String, GameStats>> caches = new LinkedHashMap<>();
-        for (Map.Entry<String, GameStatsSource> entry : builder.gameStatsSources.entrySet()) {
-            GameStatsSource source = entry.getValue();
-            caches.put(
-                    entry.getKey(),
-                    new AsyncCache<>(
-                            uuid -> {
-                                try {
-                                    return source.fetch(uuid);
-                                } catch (Exception e) {
-                                    return null;
-                                }
-                            },
-                            STATS_TTL_MILLIS));
+        // Each store is opened with its key, its directory and its lock in one step, so nothing can be
+        // written under another key, and a second runtime on the same files fails here rather than
+        // corrupting them later. When the second lock is refused, the first is released again: a build
+        // that fails holds nothing. Coalescing keeps a burst of logins from writing the file once each.
+        Path directory = Objects.requireNonNull(builder.vaultDirectory.vaultDirectory(), "vaultDirectory");
+        this.store = AccountStore.open(
+                directory,
+                builder.storeFileName,
+                builder.storeKeyBinding,
+                builder.storeKeyProvider,
+                builder.migrateFromMachineKey,
+                AccountStore.DEFAULT_WRITE_DELAY);
+        try {
+            this.secrets = HostSecrets.open(
+                    directory,
+                    builder.secretsFileName,
+                    builder.secretsKeyBinding,
+                    builder.storeKeyProvider,
+                    builder.migrateFromMachineKey,
+                    AccountStore.DEFAULT_WRITE_DELAY);
+        } catch (RuntimeException | Error refused) {
+            store.close();
+            throw refused;
         }
-        this.gameStatsCaches = Map.copyOf(caches);
-        this.emptyStatsCache = new AsyncCache<>(uuid -> null, STATS_TTL_MILLIS);
+
+        try {
+            // Read what is already on disk here, so a host never has to know that opening and loading
+            // are two steps. Both are safe to repeat: each clears its in-memory state before refilling it.
+            store.load();
+            secrets.load();
+
+            this.toasts = builder.toastSink;
+            this.vaultResolver = builder.vaultTransportResolver;
+            this.loginService = new AltLoginServiceImpl(store, builder.sessionInjector, builder.microsoftAuth);
+
+            // The account services talk to the same host the auth chain validates against, so a host that
+            // fronts Minecraft services with a proxy — overriding the profile URL — reaches them through the
+            // same origin rather than needing a second override.
+            this.accountEndpoints = accountEndpointsFrom(builder.microsoftAuth);
+            this.profileLookup = ProfileLookupService.create(accountEndpoints);
+
+            // The import runs resolve and store through a login service whose injector does nothing, which
+            // is what keeps importing fifty credentials from switching session fifty times.
+            this.bulk = new BulkOperationsImpl(
+                    store,
+                    new AltLoginServiceImpl(store, session -> {}, builder.microsoftAuth),
+                    loginService.accountService(),
+                    account -> accountServices(account).entitlements());
+            this.skinCache = new SkinAvatarCache<>(builder.avatarSource, builder.textureUploader, builder.mainThread);
+
+            // Game stats are optional and per-server: one cache per registered source. A request for a
+            // server with no source returns the shared empty cache, whose loader always yields null, so
+            // callers degrade gracefully.
+            Map<String, AsyncCache<String, GameStats>> caches = new LinkedHashMap<>();
+            for (Map.Entry<String, GameStatsSource> entry : builder.gameStatsSources.entrySet()) {
+                GameStatsSource source = entry.getValue();
+                caches.put(
+                        entry.getKey(),
+                        new AsyncCache<>(
+                                uuid -> {
+                                    try {
+                                        return source.fetch(uuid);
+                                    } catch (Exception e) {
+                                        return null;
+                                    }
+                                },
+                                STATS_TTL_MILLIS));
+            }
+            this.gameStatsCaches = Map.copyOf(caches);
+            this.emptyStatsCache = new AsyncCache<>(uuid -> null, STATS_TTL_MILLIS);
+        } catch (RuntimeException | Error failed) {
+            secrets.close();
+            store.close();
+            throw failed;
+        }
     }
 
     /**
@@ -145,6 +175,53 @@ public final class AltsRuntime<H> {
                 ? profileUrl.substring(0, profileUrl.length() - suffix.length())
                 : profileUrl;
         return new AccountEndpoints(base);
+    }
+
+    /**
+     * Returns this runtime's account store: the saved accounts, the current account, and the encrypted
+     * file behind them. It was loaded from disk by {@link Builder#build()}.
+     *
+     * @return the account store
+     * @since 1.0.0
+     */
+    public AccountStore store() {
+        return store;
+    }
+
+    /**
+     * Returns this runtime's host secrets: the per-user key/value secrets kept apart from the accounts.
+     * They were loaded from disk by {@link Builder#build()}.
+     *
+     * @return the host secrets
+     * @since 1.0.0
+     */
+    public HostSecrets secrets() {
+        return secrets;
+    }
+
+    /**
+     * Closes the runtime: writes both stores' pending changes, releases their file locks, and stops
+     * their background writers and the shutdown hooks that would otherwise flush them at exit.
+     * Idempotent; a second call does nothing. Once this returns, another runtime may open the same
+     * directory.
+     *
+     * <p>Afterwards the stores write nothing. Their contents stay readable; a mutator still changes the
+     * store in memory but records "the store is closed" on {@code saveError()} instead of writing, and
+     * {@code load()} reads nothing. A sign-in still in flight when the runtime closes therefore resolves
+     * normally, but what it would have saved is not saved.
+     *
+     * @since 1.0.0
+     */
+    @Override
+    public void close() {
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            store.close();
+        } finally {
+            secrets.close();
+        }
     }
 
     /**
@@ -304,7 +381,8 @@ public final class AltsRuntime<H> {
         }
 
         /**
-         * Sets the vault directory provider (required).
+         * Sets the vault directory provider (required). It is asked once, by {@link #build()}, and the
+         * runtime's two store files live in that directory for the runtime's lifetime.
          *
          * @param value the host vault directory provider
          * @return this builder
@@ -502,10 +580,10 @@ public final class AltsRuntime<H> {
          * {@link #migrateFromMachineKey(boolean)} is on for that launch.
          *
          * <p>Note that resolution fails closed once a provider is installed: see {@link StoreKeyProvider}.
-         * The provider is process-wide, and leaving this unset never removes one: a second runtime built
-         * without a provider keeps sealing the stores under the one an earlier runtime installed.
+         * The provider belongs to this runtime's stores alone and is fixed for their lifetime; another
+         * runtime's provider never reaches them.
          *
-         * @param value the host store key provider, or null to leave the current one in place
+         * @param value the host store key provider, or null for the machine-derived key
          * @return this builder
          * @since 0.12.0
          */
@@ -526,7 +604,7 @@ public final class AltsRuntime<H> {
          * still accepted, so anyone able to write the store directory can plant a store sealed under
          * that guessable key, or restore a copy from before the migration, and have it load. While it
          * is off, a file that does not open under the host's key is reported on
-         * {@link AltStore#loadError()} and left as it is. Has no effect without a key provider.
+         * {@link AccountStore#loadError()} and left as it is. Has no effect without a key provider.
          *
          * @param value true to accept and reseal stores sealed under the machine-derived key
          * @return this builder
@@ -538,15 +616,21 @@ public final class AltsRuntime<H> {
         }
 
         /**
-         * Validates the required seams, constructs the runtime, binds the static helpers, and loads any
-         * store already on disk — so {@link AltStore#accounts()} is populated as soon as this returns.
-         * A file that exists but cannot be read leaves the list alone and is reported on
-         * {@link AltStore#loadError()}. When that is because the {@link #storeKeyProvider} could not
-         * supply its key, nothing is written to the store until {@link AltStore#load()} (and
-         * {@link SecretStore#load()}) is called again and succeeds.
+         * Validates the required seams, constructs the runtime, opens and locks its two store files in
+         * the directory the {@link #vaultDirectory} provider names (asked once, here), and loads them —
+         * so {@link AltsRuntime#store()} is populated as soon as this returns. A file that exists but
+         * cannot be read leaves the list alone and is reported on {@link AccountStore#loadError()}. When
+         * that is because the {@link #storeKeyProvider} could not supply its key, nothing is written to
+         * the store until {@link AccountStore#load()} (and {@link HostSecrets#load()}) is called again
+         * and succeeds.
          *
-         * @return the constructed runtime
+         * <p>Each store file is locked for the runtime's lifetime. When another runtime, in this process
+         * or another, holds either file, this fails with an {@link IllegalStateException} saying the
+         * store file is in use (the message names the file, not its path) and holds no lock afterwards.
+         *
+         * @return the constructed runtime, which the host closes when done with it
          * @throws NullPointerException if a required seam is missing
+         * @throws IllegalStateException if a store file is in use by another runtime or cannot be locked
          */
         public AltsRuntime<H> build() {
             return new AltsRuntime<>(this);

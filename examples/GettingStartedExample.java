@@ -31,7 +31,7 @@ import lol.trq.alts.spi.DeviceCodePrompt;
 import lol.trq.alts.spi.ProxyProvider;
 import lol.trq.alts.spi.StoreKeyProvider;
 import lol.trq.alts.spi.ToastSink;
-import lol.trq.alts.store.AltStore;
+import lol.trq.alts.store.AccountStore;
 import lol.trq.alts.vault.RepoContext;
 import lol.trq.alts.vault.RepoPin;
 import lol.trq.alts.vault.SharedVault;
@@ -103,7 +103,7 @@ public final class GettingStartedExample {
         });
 
         // Stored accounts.
-        List<AltAccount> saved = AltStore.accounts();
+        List<AltAccount> saved = alts.store().accounts();
 
         for (AltAccount account : saved) {
             // Lazy, cached avatar. Keyed by UUID, so a renamed account keeps its head; null until the
@@ -125,7 +125,8 @@ public final class GettingStartedExample {
      * @param alts the runtime built by {@link #buildRuntime}
      */
     public static void warnIfTheStoreDidNotLoad(AltsRuntime<MyHandle> alts) {
-        AltStore.loadError()
+        alts.store()
+                .loadError()
                 .ifPresent(reason -> alts.toasts()
                         .toast(
                                 ToastSink.Level.ERROR,
@@ -161,7 +162,7 @@ public final class GettingStartedExample {
      * @param alts the runtime built by {@link #buildRuntime}
      */
     public static void sweepStoredAccounts(AltsRuntime<MyHandle> alts) {
-        for (AltAccount account : AltStore.accounts()) {
+        for (AltAccount account : alts.store().accounts()) {
             alts.accountService().refresh(account).thenAccept(status -> {
                 switch (status.state()) {
                     // Nothing to do; the account is good, and RENEWED already persisted its new token.
@@ -194,7 +195,7 @@ public final class GettingStartedExample {
      * @return the handle, so the caller can cancel it
      */
     public static BulkHandle refreshEverything(AltsRuntime<MyHandle> alts) {
-        BulkHandle handle = alts.bulk().refreshAll(AltStore.accounts(), BulkOptions.defaults(), new BulkProgress() {
+        BulkHandle handle = alts.bulk().refreshAll(alts.store().accounts(), BulkOptions.defaults(), new BulkProgress() {
             @Override
             public void started(int index, int total, String label) {
                 render("checking " + label + " (" + (index + 1) + "/" + total + ")");
@@ -324,7 +325,7 @@ public final class GettingStartedExample {
      * the caller drives nothing.
      *
      * @param alts the runtime built by {@link #buildRuntime}
-     * @param account a stored account, for example one out of {@link AltStore#accounts()}
+     * @param account a stored account, for example one out of {@link AccountStore#accounts()}
      */
     public static void logInStoredAccount(AltsRuntime<MyHandle> alts, AltAccount account) {
         // Reuses the stored session if it is still live; otherwise renews from the refresh token,

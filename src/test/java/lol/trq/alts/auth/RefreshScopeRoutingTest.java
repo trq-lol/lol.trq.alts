@@ -38,12 +38,14 @@ class RefreshScopeRoutingTest {
     @TempDir
     Path vaultDir;
 
+    private AccountStoreTestSupport localStore;
+
     private AuthChainServer chain;
     private final List<NetworkScope> scopes = Collections.synchronizedList(new ArrayList<>());
 
     @BeforeEach
     void setUp() throws IOException {
-        AltStoreTestSupport.bindTo(vaultDir);
+        localStore = AccountStoreTestSupport.openIn(vaultDir);
         chain = new AuthChainServer();
         HttpUtil.bind(scope -> {
             scopes.add(scope);
@@ -53,6 +55,7 @@ class RefreshScopeRoutingTest {
 
     @AfterEach
     void tearDown() {
+        localStore.close();
         // Static, so leaving it installed would route every later test through this recorder.
         NetTestHooks.resetHttp();
         chain.close();
@@ -70,9 +73,9 @@ class RefreshScopeRoutingTest {
     @Test
     void everyHopOfAnAccountRenewalCarriesTheAccount() throws Exception {
         AltAccount account = expiredRenewableAccount();
-        AltStoreTestSupport.seed(account);
+        localStore.seed(account);
 
-        AccountStatus status = new AltAccountServiceImpl(chain.config(), clock())
+        AccountStatus status = new AltAccountServiceImpl(localStore.store(), chain.config(), clock())
                 .refresh(account)
                 .get(10, TimeUnit.SECONDS);
 
@@ -95,9 +98,9 @@ class RefreshScopeRoutingTest {
     @Test
     void loggingIntoAStoredAccountRenewsItUnderThatAccountsScope() throws Exception {
         AltAccount account = expiredRenewableAccount();
-        AltStoreTestSupport.seed(account);
+        localStore.seed(account);
 
-        LoginResult result = new AltLoginServiceImpl(session -> {}, chain.config(), clock())
+        LoginResult result = new AltLoginServiceImpl(localStore.store(), session -> {}, chain.config(), clock())
                 .loginAccount(account)
                 .get(10, TimeUnit.SECONDS);
 
@@ -114,7 +117,7 @@ class RefreshScopeRoutingTest {
         AltAccount first = expiredRenewableAccount();
         AltAccount second = AltAccount.of(otherUuid, "Steve", "stale-access", AccountType.MICROSOFT)
                 .withTokens("stale-access", "other-refresh", NOW - 3_600_000L);
-        AltAccountServiceImpl service = new AltAccountServiceImpl(chain.config(), clock());
+        AltAccountServiceImpl service = new AltAccountServiceImpl(localStore.store(), chain.config(), clock());
 
         service.refresh(first).get(10, TimeUnit.SECONDS);
         service.refresh(second).get(10, TimeUnit.SECONDS);
@@ -132,7 +135,7 @@ class RefreshScopeRoutingTest {
 
     @Test
     void importingABareRefreshTokenNamesNoAccount() throws Exception {
-        LoginResult result = new AltLoginServiceImpl(session -> {}, chain.config(), clock())
+        LoginResult result = new AltLoginServiceImpl(localStore.store(), session -> {}, chain.config(), clock())
                 .loginRefreshToken("pasted-refresh", LoginMode.DIRECT)
                 .get(10, TimeUnit.SECONDS);
 

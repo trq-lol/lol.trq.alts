@@ -41,6 +41,8 @@ class SessionLoginExpiryTest {
     @TempDir
     Path vaultDir;
 
+    private AccountStoreTestSupport localStore;
+
     private HttpServer server;
     private MicrosoftAuthConfig config;
     private final AtomicReference<SessionData> injected = new AtomicReference<>();
@@ -48,7 +50,7 @@ class SessionLoginExpiryTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        AltStoreTestSupport.bindTo(vaultDir);
+        localStore = AccountStoreTestSupport.openIn(vaultDir);
 
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/mcprofile", exchange -> {
@@ -71,6 +73,7 @@ class SessionLoginExpiryTest {
 
     @AfterEach
     void tearDown() {
+        localStore.close();
         if (server != null) {
             server.stop(0);
         }
@@ -92,7 +95,8 @@ class SessionLoginExpiryTest {
     }
 
     private AltLoginServiceImpl service() {
-        return new AltLoginServiceImpl(injected::set, config, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
+        return new AltLoginServiceImpl(
+                localStore.store(), injected::set, config, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
     }
 
     @Test

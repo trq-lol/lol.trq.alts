@@ -31,6 +31,8 @@ class LoginResultRetryAfterTest {
     @TempDir
     Path vaultDir;
 
+    private AccountStoreTestSupport localStore;
+
     private HttpServer server;
     private MicrosoftAuthConfig config;
     private final Map<String, Integer> statuses = new ConcurrentHashMap<>();
@@ -38,7 +40,7 @@ class LoginResultRetryAfterTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        AltStoreTestSupport.bindTo(vaultDir);
+        localStore = AccountStoreTestSupport.openIn(vaultDir);
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         Map<String, String> bodies = Map.of(
                 "/token", "{\"access_token\":\"ms-access\",\"refresh_token\":\"rotated\",\"expires_in\":3600}",
@@ -71,6 +73,7 @@ class LoginResultRetryAfterTest {
 
     @AfterEach
     void tearDown() {
+        localStore.close();
         server.stop(0);
     }
 
@@ -82,7 +85,7 @@ class LoginResultRetryAfterTest {
     }
 
     private LoginResult importRefreshToken() throws Exception {
-        return new AltLoginServiceImpl(session -> {}, config)
+        return new AltLoginServiceImpl(localStore.store(), session -> {}, config)
                 .loginRefreshToken("M.C123_imported", LoginMode.DIRECT)
                 .get();
     }
@@ -111,7 +114,7 @@ class LoginResultRetryAfterTest {
     void aThrottledSessionTokenImportCarriesTheStatedWait() throws Exception {
         throttle("/mcprofile", "30");
 
-        LoginResult result = new AltLoginServiceImpl(session -> {}, config)
+        LoginResult result = new AltLoginServiceImpl(localStore.store(), session -> {}, config)
                 .loginSession("not-a-jwt-so-the-profile-is-asked", LoginMode.DIRECT)
                 .get();
 

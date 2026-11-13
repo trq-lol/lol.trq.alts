@@ -39,6 +39,8 @@ class StoredAccountLoginTest {
     @TempDir
     Path vaultDir;
 
+    private AccountStoreTestSupport localStore;
+
     private HttpServer server;
     private MicrosoftAuthConfig config;
     private final AtomicReference<SessionData> injected = new AtomicReference<>();
@@ -46,7 +48,7 @@ class StoredAccountLoginTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        AltStoreTestSupport.bindTo(vaultDir);
+        localStore = AccountStoreTestSupport.openIn(vaultDir);
 
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/token", exchange -> {
@@ -75,6 +77,7 @@ class StoredAccountLoginTest {
 
     @AfterEach
     void tearDown() {
+        localStore.close();
         if (server != null) {
             server.stop(0);
         }
@@ -101,7 +104,7 @@ class StoredAccountLoginTest {
     }
 
     private AltLoginServiceImpl service() {
-        return new AltLoginServiceImpl(injected::set, config, at(NOW));
+        return new AltLoginServiceImpl(localStore.store(), injected::set, config, at(NOW));
     }
 
     @Test
@@ -111,17 +114,17 @@ class StoredAccountLoginTest {
                 .withTokens(jwt, "stored-refresh", NOW + 3_600_000L)
                 .withBan("serverone", BanInfo.observed("self", "x"))
                 .withSource("democlient", "user1");
-        AltStoreTestSupport.seed(stored);
+        localStore.seed(stored);
 
         // No Microsoft configuration: renewal is impossible, but the stored record is still the record.
-        AltLoginServiceImpl unconfigured = new AltLoginServiceImpl(injected::set, null, at(NOW));
+        AltLoginServiceImpl unconfigured = new AltLoginServiceImpl(localStore.store(), injected::set, null, at(NOW));
         LoginResult result = unconfigured.loginAccount(stored).get();
 
         assertTrue(result.success(), result.message());
         assertEquals(AccountType.MICROSOFT, result.account().type(), "an unrenewable login must not retype the record");
         assertEquals("stored-refresh", result.account().refreshToken(), "the credential must survive the login");
 
-        AltAccount persisted = AltStoreTestSupport.find(UUID);
+        AltAccount persisted = localStore.find(UUID);
         assertEquals("stored-refresh", persisted.refreshToken(), "the stored credential must not be replaced away");
         assertEquals(AccountType.MICROSOFT, persisted.type());
         assertTrue(persisted.banned("serverone"), "an unrenewable login must preserve observed bans");
@@ -135,14 +138,14 @@ class StoredAccountLoginTest {
                 .withTokens(jwt, null, NOW + 3_600_000L)
                 .withBan("serverone", BanInfo.observed("self", "x"))
                 .withSource("democlient", "user1");
-        AltStoreTestSupport.seed(stored);
+        localStore.seed(stored);
 
         LoginResult result = service().loginAccount(stored).get();
 
         assertTrue(result.success(), result.message());
         assertEquals(AccountType.COOKIE, result.account().type(), "a cookie account must not be retyped as a session");
 
-        AltAccount persisted = AltStoreTestSupport.find(UUID);
+        AltAccount persisted = localStore.find(UUID);
         assertEquals(AccountType.COOKIE, persisted.type());
         assertTrue(persisted.banned("serverone"), "a stored login must preserve observed bans");
         assertEquals("democlient", persisted.sourceClient(), "a stored login must preserve provenance");

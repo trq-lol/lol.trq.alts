@@ -23,7 +23,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import org.junit.jupiter.api.AfterEach;
@@ -35,7 +34,7 @@ import org.junit.jupiter.api.io.TempDir;
  * The store file is the only copy of every credential the user saved, so a write has to be all or
  * nothing, writers have to take turns, and a write that did not happen has to say so.
  */
-class AltStorePersistenceTest {
+class AccountStorePersistenceTest {
 
     private static final String FILE_NAME = "accounts.dat";
     private static final String UUID = "00000000-0000-4000-8000-0000000000a1";
@@ -43,18 +42,24 @@ class AltStorePersistenceTest {
     @TempDir
     Path storeDir;
 
+    private AccountStore store;
+
     @BeforeEach
-    void bindStore() {
-        AltStore.bind(() -> storeDir);
-        AltStore.accounts().clear();
-        AltStore.useAccount(null);
-        AltStore.load();
+    void openStore() {
+        store = AccountStore.open(storeDir);
+        store.load();
     }
 
     @AfterEach
-    void settle() {
-        AltStore.flush();
-        AltStore.writeDelay(null);
+    void closeStore() {
+        store.close();
+    }
+
+    /** Starts over on the same directory with the given write delay, as a runtime would open it. */
+    private void reopenWithWriteDelay(Duration delay) {
+        store.close();
+        store = AccountStore.open(storeDir, null, null, null, false, delay);
+        store.load();
     }
 
     private Path storeFile() {
@@ -69,9 +74,9 @@ class AltStorePersistenceTest {
         return AltAccount.of(uuid(n), "Player" + n, "access-" + n, AccountType.MICROSOFT);
     }
 
-    private static void reload() {
-        AltStore.accounts().clear();
-        AltStore.load();
+    private void reload() {
+        store.accounts().clear();
+        store.load();
     }
 
     /** Runs {@code work} on {@code threads} threads released together, and rethrows what any of them threw. */
@@ -110,18 +115,18 @@ class AltStorePersistenceTest {
         concurrently(threads, thread -> {
             for (int i = 0; i < perThread; i++) {
                 AltAccount added = account(thread * perThread + i);
-                AltStore.addAccount(added);
-                AltStore.updateCredentials(added.withTokens("rotated", "refresh-" + added.uuid(), 9_000L));
-                AltStore.save();
+                store.addAccount(added);
+                store.updateCredentials(added.withTokens("rotated", "refresh-" + added.uuid(), 9_000L));
+                store.save();
             }
         });
         reload();
 
-        assertTrue(AltStore.loadError().isEmpty(), "the file must still decrypt after overlapping saves");
-        assertTrue(AltStore.saveError().isEmpty());
-        assertEquals(threads * perThread, AltStore.accounts().size(), "no account may be lost to a race");
+        assertTrue(store.loadError().isEmpty(), "the file must still decrypt after overlapping saves");
+        assertTrue(store.saveError().isEmpty());
+        assertEquals(threads * perThread, store.accounts().size(), "no account may be lost to a race");
         Set<String> uuids = new HashSet<>();
-        for (AltAccount stored : AltStore.accounts()) {
+        for (AltAccount stored : store.accounts()) {
             uuids.add(stored.uuid());
             assertEquals("refresh-" + stored.uuid(), stored.refreshToken(), "the last write must be the newest state");
         }
@@ -131,73 +136,73 @@ class AltStorePersistenceTest {
 
     @Test
     void concurrentMutationsUnderCoalescedWritesAllReachTheFile() throws Exception {
-        AltStore.writeDelay(Duration.ofMillis(5));
+        reopenWithWriteDelay(Duration.ofMillis(5));
         int threads = 4;
         int perThread = 50;
 
         concurrently(threads, thread -> {
             for (int i = 0; i < perThread; i++) {
-                AltStore.addAccount(account(thread * perThread + i));
+                store.addAccount(account(thread * perThread + i));
             }
         });
-        AltStore.flush();
+        store.flush();
         reload();
 
-        assertTrue(AltStore.loadError().isEmpty());
-        assertEquals(threads * perThread, AltStore.accounts().size());
+        assertTrue(store.loadError().isEmpty());
+        assertEquals(threads * perThread, store.accounts().size());
     }
 
     @Test
     void concurrentAddsOfOneAccountStoreItOnce() throws Exception {
         concurrently(8, thread -> {
             for (int i = 0; i < 20; i++) {
-                AltStore.addAccount(AltAccount.of(UUID, "Alex", "access-" + thread + "-" + i, AccountType.MICROSOFT));
+                store.addAccount(AltAccount.of(UUID, "Alex", "access-" + thread + "-" + i, AccountType.MICROSOFT));
             }
         });
 
-        assertEquals(1, AltStore.accounts().size(), "an add is a merge onto the stored entry, never a second one");
+        assertEquals(1, store.accounts().size(), "an add is a merge onto the stored entry, never a second one");
     }
 
     @Test
     void reAddingAnAccountKeepsItsPosition() {
-        AltStore.addAccount(account(1));
-        AltStore.addAccount(account(2));
+        store.addAccount(account(1));
+        store.addAccount(account(2));
 
-        AltStore.addAccount(AltAccount.of(uuid(1), "Player1", "fresh", AccountType.MICROSOFT));
+        store.addAccount(AltAccount.of(uuid(1), "Player1", "fresh", AccountType.MICROSOFT));
 
-        assertEquals(uuid(1), AltStore.accounts().get(0).uuid(), "the entry is replaced where it stands");
-        assertEquals("fresh", AltStore.accounts().get(0).accessToken());
+        assertEquals(uuid(1), store.accounts().get(0).uuid(), "the entry is replaced where it stands");
+        assertEquals("fresh", store.accounts().get(0).accessToken());
     }
 
     @Test
     void aFailedSaveIsReportedWithoutAPathAndClearedByTheNextSuccess() throws Exception {
-        // A regular file where the store directory should be: the directory cannot be created.
-        Path blocker = Files.writeString(storeDir.resolve("blocker"), "not a directory");
-        AtomicReference<Path> directory = new AtomicReference<>(blocker.resolve("store"));
-        AltStore.bind(directory::get);
+        // A non-empty directory where the staging file has to go: the write cannot be staged.
+        Path blocker = Files.createDirectory(storeDir.resolve(FILE_NAME + ".tmp"));
+        Path inside = Files.writeString(blocker.resolve("inside"), "in the way");
 
-        AltStore.addAccount(account(1));
+        store.addAccount(account(1));
 
-        String error = AltStore.saveError().orElseThrow(() -> new AssertionError("a failed save must be reported"));
+        String error = store.saveError().orElseThrow(() -> new AssertionError("a failed save must be reported"));
         assertTrue(error.startsWith(FILE_NAME + ":"), "the failure names the file: " + error);
         assertFalse(error.contains(storeDir.toString()), "the failure must not carry a filesystem path: " + error);
-        assertEquals(1, AltStore.accounts().size(), "a failed save must not undo the mutation in memory");
+        assertEquals(1, store.accounts().size(), "a failed save must not undo the mutation in memory");
 
-        directory.set(storeDir);
-        AltStore.flush();
+        Files.delete(inside);
+        Files.delete(blocker);
+        store.flush();
 
-        assertTrue(AltStore.saveError().isEmpty(), "a save that works must retract the earlier failure");
+        assertTrue(store.saveError().isEmpty(), "a save that works must retract the earlier failure");
         reload();
-        assertEquals(1, AltStore.accounts().size(), "the state that failed to save is what the retry wrote");
+        assertEquals(1, store.accounts().size(), "the state that failed to save is what the retry wrote");
     }
 
     @Test
     void anUnreadableFileIsReportedWithoutAPath() throws Exception {
         Files.writeString(storeFile(), "not an encrypted store");
 
-        AltStore.load();
+        store.load();
 
-        String error = AltStore.loadError().orElseThrow();
+        String error = store.loadError().orElseThrow();
         assertTrue(error.startsWith(FILE_NAME + ":"), "the failure names the file: " + error);
         assertFalse(error.contains(storeDir.toString()), "the failure must not carry a filesystem path: " + error);
     }
@@ -207,19 +212,19 @@ class AltStorePersistenceTest {
         // A directory where the file should be fails in the JDK with a message that is the absolute path.
         Files.createDirectory(storeFile());
 
-        AltStore.load();
+        store.load();
 
-        String error = AltStore.loadError().orElseThrow();
+        String error = store.loadError().orElseThrow();
         assertFalse(error.contains(storeDir.toString()), "the failure must not carry a filesystem path: " + error);
         assertFalse(error.contains(storeDir.getFileName().toString()), "nor any part of one: " + error);
     }
 
     @Test
     void aSaveKeepsTheFileItReplacedAsABackup() throws Exception {
-        AltStore.addAccount(account(1));
+        store.addAccount(account(1));
         byte[] first = Files.readAllBytes(storeFile());
 
-        AltStore.addAccount(account(2));
+        store.addAccount(account(2));
 
         assertArrayEquals(
                 first,
@@ -230,13 +235,13 @@ class AltStorePersistenceTest {
 
     @Test
     void anUnreadableFileIsNeverRotatedOverTheBackup() throws Exception {
-        AltStore.addAccount(account(1));
-        AltStore.addAccount(account(2));
+        store.addAccount(account(1));
+        store.addAccount(account(2));
         byte[] backup = Files.readAllBytes(storeDir.resolve(FILE_NAME + ".bak"));
 
         Files.writeString(storeFile(), "damaged");
-        AltStore.load();
-        AltStore.save();
+        store.load();
+        store.save();
 
         assertArrayEquals(
                 backup,
@@ -246,9 +251,9 @@ class AltStorePersistenceTest {
 
     @Test
     void repeatedSavesReuseOneDerivedKeyWithAFreshNonceEachTime() throws Exception {
-        AltStore.addAccount(account(1));
+        store.addAccount(account(1));
         byte[] first = Base64.getDecoder().decode(Files.readString(storeFile()));
-        AltStore.save();
+        store.save();
         byte[] second = Base64.getDecoder().decode(Files.readString(storeFile()));
 
         assertArrayEquals(
@@ -265,8 +270,8 @@ class AltStorePersistenceTest {
     void theStoreFileIsReadableByItsOwnerOnly() throws Exception {
         assumeTrue(storeDir.getFileSystem().supportedFileAttributeViews().contains("posix"));
 
-        AltStore.addAccount(account(1));
-        AltStore.addAccount(account(2));
+        store.addAccount(account(1));
+        store.addAccount(account(2));
 
         assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(storeFile())));
         assertEquals(
@@ -281,11 +286,11 @@ class AltStorePersistenceTest {
                 + "\"type\":\"MICROSOFT\",\"lastUsed\":1,\"refreshToken\":\"legacy-refresh\",\"expiresAt\":5}]}";
         Files.writeString(storeFile(), EncryptionUtil.encrypt(json, EncryptionUtil.getHardwareKey("lol.trq.alts")));
 
-        AltStore.load();
+        store.load();
 
-        assertTrue(AltStore.loadError().isEmpty(), "an existing file must keep loading");
-        assertEquals(1, AltStore.accounts().size());
-        assertEquals("legacy-refresh", AltStore.accounts().get(0).refreshToken());
+        assertTrue(store.loadError().isEmpty(), "an existing file must keep loading");
+        assertEquals(1, store.accounts().size());
+        assertEquals("legacy-refresh", store.accounts().get(0).refreshToken());
     }
 
     @Test
@@ -300,71 +305,71 @@ class AltStorePersistenceTest {
                 + "]}";
         Files.writeString(storeFile(), EncryptionUtil.encrypt(json, EncryptionUtil.getHardwareKey("lol.trq.alts")));
 
-        AltStore.load();
+        store.load();
 
-        assertTrue(AltStore.loadError().isEmpty(), "a store with some bad entries still loaded");
-        assertEquals(2, AltStore.accounts().size(), "the valid entries must survive the invalid ones");
-        assertEquals("new", AltStore.accounts().get(0).accessToken(), "of two entries for one UUID the later wins");
-        String warning = AltStore.loadWarning().orElseThrow(() -> new AssertionError("skipped entries must be noted"));
+        assertTrue(store.loadError().isEmpty(), "a store with some bad entries still loaded");
+        assertEquals(2, store.accounts().size(), "the valid entries must survive the invalid ones");
+        assertEquals("new", store.accounts().get(0).accessToken(), "of two entries for one UUID the later wins");
+        String warning = store.loadWarning().orElseThrow(() -> new AssertionError("skipped entries must be noted"));
         assertTrue(warning.contains("4"), "three unusable entries and one duplicate were skipped: " + warning);
 
         // Every mutator keys on the UUID; none may throw over what the file held.
-        AltStore.markBanned(uuid(2), "example.net", null);
-        AltStore.clearRefreshToken(uuid(2));
-        AltStore.removeAccount(account(2));
-        assertEquals(1, AltStore.accounts().size());
+        store.markBanned(uuid(2), "example.net", null);
+        store.clearRefreshToken(uuid(2));
+        store.removeAccount(account(2));
+        assertEquals(1, store.accounts().size());
 
-        AltStore.load();
-        assertTrue(AltStore.loadWarning().isEmpty(), "a clean load retracts the note");
+        store.load();
+        assertTrue(store.loadWarning().isEmpty(), "a clean load retracts the note");
     }
 
     @Test
     void usingAnAccountPersistsItsLastUsedTime() {
         AltAccount stored =
                 new AltAccount(UUID, "Alex", "access", AccountType.MICROSOFT, 1L, null, null, null, null, null, 0L);
-        AltStore.addAccount(stored);
+        store.addAccount(stored);
 
-        AltStore.useAccount(stored);
+        store.useAccount(stored);
         reload();
 
-        assertTrue(AltStore.accounts().get(0).lastUsed() > 1L, "the stamp must reach the disk, not just memory");
+        assertTrue(store.accounts().get(0).lastUsed() > 1L, "the stamp must reach the disk, not just memory");
     }
 
     @Test
     void usingAStaleCopyDoesNotWriteItsCredentialsBack() {
         AltAccount stale = AltAccount.of(UUID, "Alex", "old-access", AccountType.MICROSOFT)
                 .withTokens("old-access", "old-refresh", 1_000L);
-        AltStore.addAccount(stale);
-        AltStore.updateCredentials(stale.withTokens("new-access", "new-refresh", 2_000L));
+        store.addAccount(stale);
+        store.updateCredentials(stale.withTokens("new-access", "new-refresh", 2_000L));
 
-        AltStore.useAccount(stale);
+        store.useAccount(stale);
         reload();
 
         assertEquals(
                 "new-refresh",
-                AltStore.accounts().get(0).refreshToken(),
+                store.accounts().get(0).refreshToken(),
                 "a rotated refresh token must not be replaced by the spent one a caller still holds");
     }
 
     @Test
     void coalescedWritesWaitForTheFlush() {
-        AltStore.writeDelay(Duration.ofMinutes(10));
+        reopenWithWriteDelay(Duration.ofMinutes(10));
 
-        AltStore.addAccount(account(1));
-        AltStore.addAccount(account(2));
+        store.addAccount(account(1));
+        store.addAccount(account(2));
         assertFalse(Files.exists(storeFile()), "with a write delay a mutator returns before the file is written");
 
-        AltStore.flush();
+        store.flush();
         assertTrue(Files.exists(storeFile()), "flush writes what is waiting before it returns");
         reload();
-        assertEquals(2, AltStore.accounts().size());
+        assertEquals(2, store.accounts().size());
     }
 
     @Test
     void coalescedWritesReachTheDiskWithoutAFlush() throws Exception {
-        AltStore.writeDelay(Duration.ofMillis(10));
+        reopenWithWriteDelay(Duration.ofMillis(10));
 
-        AltStore.addAccount(account(1));
+        store.addAccount(account(1));
 
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
         while (!Files.exists(storeFile()) && System.nanoTime() < deadline) {
@@ -375,17 +380,17 @@ class AltStorePersistenceTest {
 
     @Test
     void aLoadSeesStateStillWaitingToBeWritten() {
-        AltStore.writeDelay(Duration.ofMinutes(10));
-        AltStore.addAccount(account(1));
+        reopenWithWriteDelay(Duration.ofMinutes(10));
+        store.addAccount(account(1));
 
         reload();
 
-        assertEquals(1, AltStore.accounts().size(), "a load must not read a file older than what memory held");
+        assertEquals(1, store.accounts().size(), "a load must not read a file older than what memory held");
     }
 
     @Test
     void theFileOnDiskIsNeverPlaintext() throws Exception {
-        AltStore.addAccount(account(1));
+        store.addAccount(account(1));
 
         String onDisk = new String(Files.readAllBytes(storeFile()), StandardCharsets.ISO_8859_1);
         assertFalse(onDisk.contains("access-1"));

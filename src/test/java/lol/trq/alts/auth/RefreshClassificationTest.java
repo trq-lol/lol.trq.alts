@@ -39,12 +39,14 @@ class RefreshClassificationTest {
     @TempDir
     Path vaultDir;
 
+    private AccountStoreTestSupport localStore;
+
     private HttpServer server;
     private MicrosoftAuthConfig config;
 
     @BeforeEach
     void setUp() throws IOException {
-        AltStoreTestSupport.bindTo(vaultDir);
+        localStore = AccountStoreTestSupport.openIn(vaultDir);
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         answer("/token", 200, "{\"access_token\":\"ms-access\",\"refresh_token\":\"rotated\",\"expires_in\":3600}");
         answer("/xbl", 200, "{\"Token\":\"xbl\"}");
@@ -67,6 +69,7 @@ class RefreshClassificationTest {
 
     @AfterEach
     void tearDown() {
+        localStore.close();
         server.stop(0);
     }
 
@@ -87,7 +90,7 @@ class RefreshClassificationTest {
     }
 
     private LoginResult imported() throws Exception {
-        return new AltLoginServiceImpl(session -> {}, config)
+        return new AltLoginServiceImpl(localStore.store(), session -> {}, config)
                 .loginRefreshToken("M.C123_imported", LoginMode.DIRECT)
                 .get();
     }
@@ -95,8 +98,9 @@ class RefreshClassificationTest {
     private AccountStatus renewed() throws Exception {
         AltAccount account = AltAccount.of(UUID, "Alex", "stored-access", AccountType.MICROSOFT)
                 .withTokens("stored-access", "stored-refresh", NOW - 1);
-        AltStoreTestSupport.seed(account);
-        return new AltAccountServiceImpl(config, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC))
+        localStore.seed(account);
+        return new AltAccountServiceImpl(
+                        localStore.store(), config, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC))
                 .refresh(account)
                 .get();
     }
@@ -111,7 +115,7 @@ class RefreshClassificationTest {
         assertEquals(expected, status.reason(), "the stored-account route");
         assertEquals(
                 "stored-refresh",
-                AltStoreTestSupport.find(UUID).refreshToken(),
+                localStore.find(UUID).refreshToken(),
                 "a failure after the token was accepted must not cost the stored credential");
     }
 
@@ -165,7 +169,7 @@ class RefreshClassificationTest {
         AccountStatus status = renewed();
         assertFalse(status.usable());
         assertNotEquals(FailureReason.NETWORK, status.reason());
-        assertEquals("stored-refresh", AltStoreTestSupport.find(UUID).refreshToken());
+        assertEquals("stored-refresh", localStore.find(UUID).refreshToken());
     }
 
     @Test
@@ -185,7 +189,7 @@ class RefreshClassificationTest {
         assertTrue(status.usable(), "the access token was issued, so the renewal worked");
         assertEquals(
                 "stored-refresh",
-                AltStoreTestSupport.find(UUID).refreshToken(),
+                localStore.find(UUID).refreshToken(),
                 "no new refresh token was issued, so the one just redeemed is still the credential");
     }
 }

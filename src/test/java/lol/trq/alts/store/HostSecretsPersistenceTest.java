@@ -11,36 +11,30 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** The secret store persists by the same rules as the account store. */
-class SecretStorePersistenceTest {
+/** The host secrets persist by the same rules as the account store. */
+class HostSecretsPersistenceTest {
 
     private static final String FILE_NAME = "secrets.dat";
 
     @TempDir
     Path storeDir;
 
+    private HostSecrets secrets;
+
     @BeforeEach
-    void bindStore() throws Exception {
-        SecretStore.bind(() -> storeDir);
-        // The map is not exposed, so the way to empty it is to load a store that holds nothing.
-        Files.writeString(
-                storeFile(),
-                EncryptionUtil.encrypt("{\"secrets\":{}}", EncryptionUtil.getHardwareKey("lol.trq.alts.secrets")));
-        SecretStore.load();
-        Files.delete(storeFile());
+    void openStore() {
+        secrets = HostSecrets.open(storeDir);
+        secrets.load();
     }
 
     @AfterEach
-    void settle() {
-        SecretStore.flush();
-        SecretStore.writeDelay(null);
-        StoreTestHooks.reset();
+    void closeStore() {
+        secrets.close();
     }
 
     private Path storeFile() {
@@ -49,12 +43,12 @@ class SecretStorePersistenceTest {
 
     @Test
     void aSecretSurvivesAReload() {
-        SecretStore.put("feature.api-key", "value");
+        secrets.put("feature.api-key", "value");
 
-        SecretStore.load();
+        secrets.load();
 
-        assertTrue(SecretStore.loadError().isEmpty());
-        assertEquals("value", SecretStore.get("feature.api-key"));
+        assertTrue(secrets.loadError().isEmpty());
+        assertEquals("value", secrets.get("feature.api-key"));
     }
 
     @Test
@@ -64,7 +58,7 @@ class SecretStorePersistenceTest {
             int thread = t;
             threads.add(new Thread(() -> {
                 for (int i = 0; i < 50; i++) {
-                    SecretStore.put("key-" + (thread * 50 + i), "value-" + (thread * 50 + i));
+                    secrets.put("key-" + (thread * 50 + i), "value-" + (thread * 50 + i));
                 }
             }));
         }
@@ -73,29 +67,30 @@ class SecretStorePersistenceTest {
             thread.join();
         }
 
-        SecretStore.load();
+        secrets.load();
 
-        assertTrue(SecretStore.loadError().isEmpty(), "the file must still decrypt after overlapping saves");
+        assertTrue(secrets.loadError().isEmpty(), "the file must still decrypt after overlapping saves");
         for (int i = 0; i < 200; i++) {
-            assertEquals("value-" + i, SecretStore.get("key-" + i));
+            assertEquals("value-" + i, secrets.get("key-" + i));
         }
     }
 
     @Test
     void aFailedSaveIsReportedWithoutAPathAndRetried() throws Exception {
-        Path blocker = Files.writeString(storeDir.resolve("blocker"), "not a directory");
-        AtomicReference<Path> directory = new AtomicReference<>(blocker.resolve("store"));
-        SecretStore.bind(directory::get);
+        // A non-empty directory where the staging file has to go: the write cannot be staged.
+        Path blocker = Files.createDirectory(storeDir.resolve(FILE_NAME + ".tmp"));
+        Path inside = Files.writeString(blocker.resolve("inside"), "in the way");
 
-        SecretStore.put("feature.api-key", "value");
+        secrets.put("feature.api-key", "value");
 
-        String error = SecretStore.saveError().orElseThrow(() -> new AssertionError("a failed save must be reported"));
+        String error = secrets.saveError().orElseThrow(() -> new AssertionError("a failed save must be reported"));
         assertFalse(error.contains(storeDir.toString()), "the failure must not carry a filesystem path: " + error);
 
-        directory.set(storeDir);
-        SecretStore.flush();
+        Files.delete(inside);
+        Files.delete(blocker);
+        secrets.flush();
 
-        assertTrue(SecretStore.saveError().isEmpty());
+        assertTrue(secrets.saveError().isEmpty());
         assertTrue(Files.exists(storeFile()));
     }
 
@@ -104,24 +99,25 @@ class SecretStorePersistenceTest {
         byte[] original = "not an encrypted store".getBytes();
         Files.write(storeFile(), original);
 
-        SecretStore.load();
+        secrets.load();
 
-        String error = SecretStore.loadError().orElseThrow();
+        String error = secrets.loadError().orElseThrow();
         assertFalse(error.contains(storeDir.toString()), "the failure must not carry a filesystem path: " + error);
 
-        SecretStore.put("feature.api-key", "value");
+        secrets.put("feature.api-key", "value");
         assertArrayEquals(
                 original, StoreTestHooks.unreadableCopies(storeDir, FILE_NAME).get(0));
     }
 
     @Test
     void coalescedWritesWaitForTheFlush() {
-        SecretStore.writeDelay(Duration.ofMinutes(10));
+        secrets.close();
+        secrets = HostSecrets.open(storeDir, null, null, null, false, Duration.ofMinutes(10));
 
-        SecretStore.put("feature.api-key", "value");
+        secrets.put("feature.api-key", "value");
         assertFalse(Files.exists(storeFile()));
 
-        SecretStore.flush();
+        secrets.flush();
         assertTrue(Files.exists(storeFile()));
     }
 
@@ -131,10 +127,10 @@ class SecretStorePersistenceTest {
         Files.writeString(
                 storeFile(), EncryptionUtil.encrypt(json, EncryptionUtil.getHardwareKey("lol.trq.alts.secrets")));
 
-        SecretStore.load();
+        secrets.load();
 
-        assertTrue(SecretStore.loadError().isEmpty());
-        assertEquals("value", SecretStore.get("feature.api-key"));
-        assertNull(SecretStore.get("key-1"));
+        assertTrue(secrets.loadError().isEmpty());
+        assertEquals("value", secrets.get("feature.api-key"));
+        assertNull(secrets.get("key-1"));
     }
 }

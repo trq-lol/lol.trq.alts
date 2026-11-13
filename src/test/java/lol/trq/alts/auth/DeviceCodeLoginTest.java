@@ -42,6 +42,8 @@ class DeviceCodeLoginTest {
     @TempDir
     Path vaultDir;
 
+    private AccountStoreTestSupport localStore;
+
     private AuthChainServer chain;
     private final AtomicReference<SessionData> injected = new AtomicReference<>();
     private final AtomicInteger prompts = new AtomicInteger();
@@ -58,17 +60,18 @@ class DeviceCodeLoginTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        AltStoreTestSupport.bindTo(vaultDir);
+        localStore = AccountStoreTestSupport.openIn(vaultDir);
         chain = new AuthChainServer();
     }
 
     @AfterEach
     void tearDown() {
+        localStore.close();
         chain.close();
     }
 
     private AltLoginServiceImpl service() {
-        AltLoginServiceImpl service = new AltLoginServiceImpl(injected::set, chain.config());
+        AltLoginServiceImpl service = new AltLoginServiceImpl(localStore.store(), injected::set, chain.config());
         service.deviceCodeTiming = new DeviceCodeTiming(SECOND_MILLIS, SLOW_DOWN_MILLIS);
         return service;
     }
@@ -88,7 +91,7 @@ class DeviceCodeLoginTest {
         assertEquals(AccountType.MICROSOFT, result.account().type());
         assertEquals("Alex", injected.get().username());
 
-        AltAccount persisted = AltStoreTestSupport.reloadFromDiskAndFind(AuthChainServer.UUID);
+        AltAccount persisted = localStore.reloadFromDiskAndFind(AuthChainServer.UUID);
         assertEquals("ms-refresh", persisted.refreshToken(), "the refresh token is what makes the account renewable");
         assertEquals("mc-access", persisted.accessToken());
     }
@@ -281,7 +284,7 @@ class DeviceCodeLoginTest {
 
     @Test
     void aMissingConfigurationOrPromptIsReportedRatherThanThrown() throws Exception {
-        LoginResult unconfigured = new AltLoginServiceImpl(injected::set, null)
+        LoginResult unconfigured = new AltLoginServiceImpl(localStore.store(), injected::set, null)
                 .loginDeviceCode(prompt, LoginMode.DIRECT)
                 .get();
         LoginResult noPrompt = service().loginDeviceCode(null, LoginMode.DIRECT).get();
