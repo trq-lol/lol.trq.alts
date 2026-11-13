@@ -97,11 +97,22 @@ class StoreKeyProviderTest {
         assertTrue(store.accounts().isEmpty());
         assertArrayEquals(sealed, Files.readAllBytes(storeFile()), "a failed load must leave the file as it was");
 
-        store.addAccount(steve());
-
         List<byte[]> kept = StoreTestHooks.unreadableCopies(storeDir, FILE_NAME);
-        assertEquals(1, kept.size(), "a later save must keep the sealed file rather than destroy it");
+        assertEquals(1, kept.size(), "the failed load copies the sealed file aside");
         assertArrayEquals(sealed, kept.get(0));
+
+        store.addAccount(steve());
+        store.save();
+        store.close();
+
+        assertArrayEquals(
+                sealed,
+                Files.readAllBytes(storeFile()),
+                "a store without the key must not write a machine-keyed store over the host-keyed one");
+        assertFalse(StoreTestHooks.opensUnderMachineKey(storeFile(), KEY_BINDING));
+
+        restart(HOST_KEY, false);
+        assertTrue(holds(UUID), "the host-keyed store is still there for the runtime that has the key");
     }
 
     @Test

@@ -192,13 +192,24 @@ public final class AccountStore {
      * a perfectly good file into an unreadable one. While this is set, a host should tell the user their
      * accounts did not load instead of showing an empty list.
      *
-     * <p>What a write does next depends on why the load failed. When the store key was unavailable — a
-     * {@link StoreKeyProvider} that threw or returned too little, such as a locked keychain — the file
-     * itself is intact, so every write is refused and reported on {@link #saveError()} until a later
-     * {@link #load()} succeeds; accounts added in between live in memory only and are replaced by that
-     * load. For any other unreadable file, a write goes ahead only after copying the file aside as
-     * {@code <name>.unreadable.<time>}: each incident gets a copy of its own, and the newest five are
-     * kept. That successful write also clears this, since the file on disk is then the one just written.
+     * <p>While this is set nothing is written: every mutation, {@link #save()} and {@link #flush()} is
+     * refused and reported on {@link #saveError()}, so the file on disk stays exactly as it was. Accounts
+     * added in the meantime live in memory only. Writes resume after one of three things:
+     *
+     * <ul>
+     *   <li>a later {@link #load()} succeeds, for example once a locked keychain behind a
+     *       {@link StoreKeyProvider} answers again; what was added in memory is replaced by what it read;
+     *   <li>the file is gone, so there is nothing left to protect;
+     *   <li>the host calls {@link #discardUnreadable()}, the route when the file will never open again: a
+     *       renamed OS user or a moved home directory under the machine-derived key, or a rotated host
+     *       key. The next write then starts a new store from what memory holds.
+     * </ul>
+     *
+     * <p>A file that failed to decrypt, held contents that are not a store, or could not be read is
+     * copied aside as {@code <name>.unreadable.<time>} when the load fails, one copy per distinct file,
+     * newest five kept. A file that failed only because the key was unavailable is intact and is not
+     * copied until it is discarded. A successful write after a discard clears this, since the file on
+     * disk is then the one just written.
      *
      * <p>The description is the file's name and a fixed phrase. It never carries a filesystem path, so
      * it is safe to show and to log.
@@ -232,9 +243,10 @@ public final class AccountStore {
      * {@link #flush()}, and a success clears this. Like {@link #loadError()}, the description carries no
      * filesystem path.
      *
-     * <p>Two failures are not retried by writing: while the last {@link #load()} failed because the store
-     * key was unavailable, writes are refused on purpose, and only a {@code load()} that succeeds lifts
-     * that (see {@link #loadError()}); and once the runtime is closed nothing is written at all.
+     * <p>Two failures are not retried by writing: while the last {@link #load()} failed on a file that
+     * exists, writes are refused on purpose until a {@code load()} succeeds or the host calls
+     * {@link #discardUnreadable()} (see {@link #loadError()}); and once the runtime is closed nothing is
+     * written at all.
      *
      * @return the failure description, or empty when the last write succeeded
      * @since 1.0.0
@@ -373,8 +385,7 @@ public final class AccountStore {
      * <p>The file is replaced in one step, so it is always either the previous state or this one. A
      * failure is reported on {@link #saveError()} rather than thrown.
      *
-     * <p>Does not overwrite a file the last {@link #load()} could not read unless that file was first
-     * copied aside, and does not write at all while the store key was unavailable to that load — see
+     * <p>Does not write at all while the last {@link #load()} failed on a file that exists — see
      * {@link #loadError()}. Persisting there would write an empty store over accounts that are merely
      * unreadable, which is worse than not persisting at all.
      *
@@ -385,6 +396,27 @@ public final class AccountStore {
             scheduleSave();
         }
         file.flush();
+    }
+
+    /**
+     * Gives up on a store file the last {@link #load()} could not read, so the store can be written
+     * again. This is the route when the file will never open: under the machine-derived key, after the
+     * OS user was renamed or the home directory moved; under a {@link StoreKeyProvider}, after the host
+     * key was rotated or lost. Only the host can know that, so nothing here does it on its own.
+     *
+     * <p>The file is first copied aside as {@code <name>.unreadable.<time>} (a copy of the same bytes
+     * that already exists is not made twice), the refusal is lifted, and what memory holds is written as
+     * a new store at once. A no-op when writes are not refused.
+     *
+     * @return true when writes were refused and are allowed again; false when there was nothing to
+     *     discard, the runtime is closed, or the file could not be copied aside, which
+     *     {@link #saveError()} then reports and which leaves the refusal in place
+     * @since 1.0.0
+     */
+    public boolean discardUnreadable() {
+        synchronized (lock) {
+            return file.discardUnreadable();
+        }
     }
 
     /**

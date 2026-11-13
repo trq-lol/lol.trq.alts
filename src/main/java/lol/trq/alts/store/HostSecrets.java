@@ -26,9 +26,9 @@ import lol.trq.alts.spi.StoreKeyProvider;
  * multi-member repository, but secrets stay local to one user.
  *
  * <p>Persistence follows the account store's rules: a write replaces the file in one step, writes are
- * serialized, a failure is reported on {@link #saveError()} rather than thrown, an unreadable file is
- * copied aside before anything replaces it, and nothing is written while the store key was unavailable
- * to the last load. The store holds an exclusive lock on a sidecar {@code <file>.lock} for the life of the
+ * serialized, a failure is reported on {@link #saveError()} rather than thrown, and a file that exists but
+ * could not be read is never written over: nothing is written until a load succeeds or the host calls
+ * {@link #discardUnreadable()}. The store holds an exclusive lock on a sidecar {@code <file>.lock} for the life of the
  * runtime that owns it; once the runtime is closed the mutators change memory only and record "the store
  * is closed" on {@link #saveError()}.
  *
@@ -167,10 +167,10 @@ public final class HostSecrets {
 
     /**
      * Returns why the last {@link #load()} could not read an existing secret file, if it could not. As
-     * with the account store, an unreadable file is not an empty one: a write copies it aside under a
-     * name of its own before replacing it, and while the store key was unavailable to the load, writes
-     * are refused until a later load succeeds — see {@link AccountStore#loadError()}. The description
-     * carries no filesystem path.
+     * with the account store, an unreadable file is not an empty one: it is copied aside when the load
+     * fails (unless it failed only for want of the key), and nothing is written over it until a later
+     * load succeeds or the host calls {@link #discardUnreadable()} — see
+     * {@link AccountStore#loadError()}. The description carries no filesystem path.
      *
      * @return the failure description, or empty when the last load succeeded or found no file, or the
      *     store has been written successfully since
@@ -183,7 +183,7 @@ public final class HostSecrets {
     /**
      * Returns why the most recent write did not reach the disk, if it did not. The write is retried by
      * the next mutation, {@link #save()}, or {@link #flush()}, and a success clears this; a write refused
-     * because the key was unavailable, or because the store is closed, is not retried. The description
+     * because the last load failed, or because the store is closed, is not retried. The description
      * carries no filesystem path.
      *
      * @return the failure description, or empty when the last write succeeded
@@ -195,8 +195,8 @@ public final class HostSecrets {
 
     /**
      * Encrypts the current secrets and writes them to disk before returning, replacing the file in one
-     * step. A failure is reported on {@link #saveError()}. Does not overwrite a file the last
-     * {@link #load()} could not read unless it was first copied aside — see {@link #loadError()}.
+     * step. A failure is reported on {@link #saveError()}. Does not write at all while the last
+     * {@link #load()} failed on a file that exists — see {@link #loadError()}.
      *
      * @since 1.0.0
      */
@@ -205,6 +205,22 @@ public final class HostSecrets {
             scheduleSave();
         }
         file.flush();
+    }
+
+    /**
+     * Gives up on a secret file the last {@link #load()} could not read, so the secrets can be written
+     * again; the route when the file will never open (a renamed OS user or moved home under the
+     * machine-derived key, a rotated host key). The file is copied aside first, and the next write starts
+     * a new file from what memory holds. See {@link AccountStore#discardUnreadable()}.
+     *
+     * @return true when writes were refused and are allowed again; false when there was nothing to
+     *     discard, the runtime is closed, or the file could not be copied aside
+     * @since 1.0.0
+     */
+    public boolean discardUnreadable() {
+        synchronized (lock) {
+            return file.discardUnreadable();
+        }
     }
 
     /**

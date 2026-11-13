@@ -1,9 +1,11 @@
 package lol.trq.alts;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import lol.trq.alts.model.AccountType;
@@ -22,6 +24,7 @@ import org.junit.jupiter.api.io.TempDir;
 class AltsRuntimeStoreKeyTest {
 
     private static final String UUID = "00000000-0000-4000-8000-0000000000d1";
+    private static final String OTHER_UUID = "00000000-0000-4000-8000-0000000000d2";
     private static final StoreKeyProvider HOST_KEY = () -> "0123456789abcdef0123456789abcdef".getBytes();
 
     @TempDir
@@ -61,6 +64,36 @@ class AltsRuntimeStoreKeyTest {
         try (AltsRuntime<Object> alts = builder().storeKeyProvider(HOST_KEY).build()) {
             assertTrue(alts.store().loadError().isEmpty());
             assertTrue(holds(alts, UUID));
+            assertEquals("value", alts.secrets().get("feature.api-key"));
+        }
+    }
+
+    @Test
+    void aLaterRuntimeWithoutTheKeyNeverRewritesTheStoresUnderTheMachineKey() throws Exception {
+        try (AltsRuntime<Object> alts = builder().storeKeyProvider(HOST_KEY).build()) {
+            alts.store().addAccount(AltAccount.of(UUID, "Alex", "access", AccountType.MICROSOFT));
+            alts.secrets().put("feature.api-key", "value");
+        }
+        byte[] accounts = Files.readAllBytes(dir.resolve("accounts.dat"));
+        byte[] secrets = Files.readAllBytes(dir.resolve("secrets.dat"));
+
+        try (AltsRuntime<Object> alts = builder().build()) {
+            assertTrue(alts.store().loadError().isPresent(), "without the key the stores do not open");
+            alts.store().addAccount(AltAccount.of(OTHER_UUID, "Steve", "b", AccountType.OFFLINE));
+            alts.secrets().put("feature.other-key", "other");
+            alts.store().flush();
+            alts.secrets().flush();
+            assertTrue(alts.store().saveError().isPresent(), "and nothing is written over them");
+            assertTrue(alts.secrets().saveError().isPresent());
+        }
+
+        assertArrayEquals(accounts, Files.readAllBytes(dir.resolve("accounts.dat")), "the account file is intact");
+        assertArrayEquals(secrets, Files.readAllBytes(dir.resolve("secrets.dat")), "the secret file is intact");
+        assertEquals(List.of(), StoreTestHooks.filesOpeningUnderMachineKey(dir, "lol.trq.alts"));
+        assertEquals(List.of(), StoreTestHooks.filesOpeningUnderMachineKey(dir, "lol.trq.alts.secrets"));
+
+        try (AltsRuntime<Object> alts = builder().storeKeyProvider(HOST_KEY).build()) {
+            assertTrue(holds(alts, UUID) && !holds(alts, OTHER_UUID), "the host-keyed store is as it was");
             assertEquals("value", alts.secrets().get("feature.api-key"));
         }
     }

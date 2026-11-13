@@ -37,9 +37,11 @@ import lol.trq.alts.spi.StoreKeyProvider;
  * Writes are serialized, and each carries the order its snapshot was taken in, so a late writer cannot
  * put an older state over a newer one. The file a write replaces is kept as a single rolling backup.
  *
- * <p>Three rules keep a store from being lost or weakened. A file that could not be read is copied aside
- * under a name of its own before anything replaces it. While the last load failed because the host's key
- * was unavailable, nothing is written at all, since the file on disk is intact and merely unread. And a
+ * <p>Three rules keep a store from being lost or weakened. A file that exists and could not be read, for
+ * any reason, is never written over: from that load on nothing is written at all until a later load
+ * succeeds, the file goes away, or the host explicitly discards it ({@link #discardUnreadable()}). Such a
+ * file is copied aside under a name of its own when the load fails (the newest five copies are kept),
+ * except when it failed only for want of the host's key, since it is then intact and merely unread. And a
  * file opened with a host key is sealed under that key for its whole life: a file that does not open
  * under it is unreadable, except on the one launch a host asks for files from before the key to be
  * migrated.
@@ -107,7 +109,10 @@ final class StoreFile {
     private long written;
     private boolean knownGood;
     private boolean unreadableOnDisk;
-    private boolean awaitingKey;
+    // Set by every failed load of a file that exists, and cleared only by a load that succeeds, a file
+    // that is gone, or discardUnreadable(). While it is set the file on disk is not written at all.
+    private boolean writesRefused;
+    private String refusal;
     private boolean resealing;
     private String hostSecret;
     private String sealedUnder;
@@ -276,6 +281,11 @@ final class StoreFile {
      * snapshot is on disk when this returns; with one, it is written by the background writer, by the
      * next {@link #flush()}, or at JVM shutdown, whichever comes first.
      *
+     * <p>{@link #closed} is read here without the I/O lock. That is sound only because every caller holds
+     * its store's own lock, which the store's {@code close()} takes too, so a submission and a close never
+     * interleave; a caller that did not hold it could slip a snapshot in after the close and have it
+     * silently dropped.
+     *
      * @param plaintext produces the serialized snapshot; it is called at most once, off the caller's
      *     thread when coalescing, so it must close over an immutable copy
      */
@@ -314,11 +324,10 @@ final class StoreFile {
             if (next == null || next.order() <= written) {
                 return;
             }
-            if (awaitingKey) {
-                // The file on disk is intact; it simply has not been read. Writing what is in memory
-                // now would replace every account in it with whatever was added since.
-                saveError = fileName + ": not written, because the store key was unavailable when the store"
-                        + " was loaded; load it again first";
+            if (writesRefused) {
+                // The file on disk was not read. Writing what is in memory now would replace everything
+                // in it with whatever was added since, under whatever key this store happens to hold.
+                saveError = refusal;
                 retain(next);
                 return;
             }
@@ -364,9 +373,9 @@ final class StoreFile {
                 loadError = null;
                 knownGood = false;
                 unreadableOnDisk = false;
-                if (awaitingKey) {
+                if (writesRefused) {
                     // There is no store left to protect, so what was held back can be written.
-                    awaitingKey = false;
+                    allowWrites();
                     flush();
                 }
                 return LoadOutcome.ABSENT;
@@ -378,18 +387,17 @@ final class StoreFile {
                 // there, as "not a store", rather than here as a charset error.
                 sealed = new String(Files.readAllBytes(file), StandardCharsets.ISO_8859_1).strip();
             } catch (IOException failure) {
-                return unreadable(name, reason(failure, "could not be read"));
+                return unreadable(name, reason(failure, "could not be read"), true);
             }
 
             String password;
             try {
                 password = password();
             } catch (WriteFailure keyUnavailable) {
-                awaitingKey = true;
-                return unreadable(name, keyUnavailable.getMessage());
+                // The file is intact and merely unread, so it is not copied aside: the next load under an
+                // available key reads it as it is.
+                return unreadable(name, keyUnavailable.getMessage(), false);
             }
-            boolean heldBack = awaitingKey;
-            awaitingKey = false;
 
             String plaintext;
             boolean migrated = false;
@@ -400,7 +408,7 @@ final class StoreFile {
                 // who can write the directory plant a file sealed under it, and have it load.
                 plaintext = keyProvider != null && migrateFromMachineKey ? openUnderMachineKey(sealed) : null;
                 if (plaintext == null) {
-                    return unreadable(name, "could not be decrypted (wrong key or damaged file)");
+                    return unreadable(name, "could not be decrypted (wrong key or damaged file)", true);
                 }
                 migrated = true;
             }
@@ -408,14 +416,15 @@ final class StoreFile {
             try {
                 installer.install(plaintext);
             } catch (Exception malformed) {
-                return unreadable(name, "contents are not a valid store");
+                return unreadable(name, "contents are not a valid store", true);
             }
-            if (heldBack) {
+            if (writesRefused) {
                 // What was held back is a snapshot of memory from before this load replaced it.
                 synchronized (pendingLock) {
                     pending = null;
                 }
                 saveError = null;
+                allowWrites();
             }
             loadError = null;
             knownGood = true;
@@ -517,17 +526,68 @@ final class StoreFile {
     }
 
     /**
-     * Records a failed load.
+     * Records a failed load of a file that exists, and refuses every write until a load succeeds or the
+     * host discards the file. Called with the I/O lock held.
      *
      * @param name the file's name
      * @param reason a fixed, path-free phrase
+     * @param copyAside whether to copy the file aside now; not when it is intact and merely unread for
+     *     want of the key
      * @return {@link LoadOutcome#FAILED}
      */
-    private LoadOutcome unreadable(String name, String reason) {
+    private LoadOutcome unreadable(String name, String reason, boolean copyAside) {
         loadError = name + ": " + reason;
         knownGood = false;
         unreadableOnDisk = true;
+        writesRefused = true;
+        refusal = copyAside
+                ? name + ": not written, because the existing file could not be read; load it again, or"
+                        + " discard it to start a new store"
+                : name + ": not written, because the store key was unavailable when the store was loaded;"
+                        + " load it again first";
+        if (copyAside) {
+            try {
+                preserveUnreadable(directory, directory.resolve(name), name);
+            } catch (WriteFailure notCopied) {
+                // Nothing is written over it either way; discardUnreadable() insists on the copy.
+            }
+        }
         return LoadOutcome.FAILED;
+    }
+
+    private void allowWrites() {
+        writesRefused = false;
+        refusal = null;
+    }
+
+    /**
+     * Gives up on a file the last load could not read, so the store can be written again: the file is
+     * copied aside first (a copy that already exists is not made twice), and the next write replaces it
+     * with what memory holds. A no-op unless writes are refused because of a failed load.
+     *
+     * @return true when writes were refused and are allowed again; false when there was nothing to
+     *     discard, the store is closed, or the copy could not be made (reported on {@link #saveError()})
+     */
+    boolean discardUnreadable() {
+        synchronized (ioLock) {
+            if (closed || !writesRefused) {
+                return false;
+            }
+            String name = fileName;
+            unreadableOnDisk = true;
+            try {
+                preserveUnreadable(directory, directory.resolve(name), name);
+            } catch (WriteFailure notCopied) {
+                saveError = name + ": " + notCopied.getMessage();
+                return false;
+            }
+            allowWrites();
+            saveError = null;
+            knownGood = false;
+            // What was held back is what memory holds now: the start of the new store.
+            flush();
+            return true;
+        }
     }
 
     /**
@@ -671,7 +731,7 @@ final class StoreFile {
      * @throws WriteFailure when the unreadable file could not be preserved, so the write must not happen
      */
     private void preserveUnreadable(Path directory, Path target, String name) throws WriteFailure {
-        if (!unreadableOnDisk || !Files.exists(target)) {
+        if (!unreadableOnDisk || !Files.isRegularFile(target)) {
             return;
         }
         List<Path> kept = unreadableCopies(directory, name);

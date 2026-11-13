@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
@@ -18,14 +19,16 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * A store file that cannot be read is not an empty store, and the two must never be conflated. The
- * encryption key is derived from machine properties, so a renamed OS user or a moved home directory
- * turns a perfectly good file unreadable — at which point saving anything at all would write an empty
- * list over every account the user had.
+ * default key is derived from machine properties, so a renamed OS user or a moved home directory turns
+ * a perfectly good file unreadable — at which point saving anything at all would write an empty list
+ * over every account the user had. So nothing is written over it until a load succeeds or the host
+ * explicitly discards it, and it is copied aside the moment the load fails.
  */
 class AccountStoreUnreadableFileTest {
 
     private static final String FILE_NAME = "accounts.dat";
     private static final String UUID = "00000000-0000-4000-8000-00000000000a";
+    private static final String OTHER_UUID = "00000000-0000-4000-8000-00000000000b";
 
     @TempDir
     Path storeDir;
@@ -51,11 +54,24 @@ class AccountStoreUnreadableFileTest {
     }
 
     private boolean kept(byte[] content) throws Exception {
-        return keptCopies().stream().anyMatch(copy -> java.util.Arrays.equals(copy, content));
+        return keptCopies().stream().anyMatch(copy -> Arrays.equals(copy, content));
     }
 
     private static AltAccount alex() {
         return AltAccount.of(UUID, "Alex", "access", AccountType.MICROSOFT);
+    }
+
+    private static AltAccount steve() {
+        return AltAccount.of(OTHER_UUID, "Steve", "b", AccountType.OFFLINE);
+    }
+
+    private boolean holds(String uuid) {
+        return store.accounts().stream().anyMatch(account -> uuid.equals(account.uuid()));
+    }
+
+    private void reload() {
+        store.accounts().clear();
+        store.load();
     }
 
     @Test
@@ -66,21 +82,8 @@ class AccountStoreUnreadableFileTest {
     }
 
     @Test
-    void aReadableFileClearsAnEarlierFailure() throws Exception {
-        Files.writeString(storeFile(), "not an encrypted store");
-        store.load();
-        assertTrue(store.loadError().isPresent());
-
-        store.accounts().clear();
-        store.addAccount(AltAccount.of(UUID, "Alex", "access", AccountType.MICROSOFT));
-        store.load();
-
-        assertTrue(store.loadError().isEmpty(), "a load that works must retract the earlier failure");
-    }
-
-    @Test
     void anUnreadableFileReportsTheFailureAndKeepsTheInMemoryList() throws Exception {
-        store.accounts().add(AltAccount.of(UUID, "Alex", "access", AccountType.MICROSOFT));
+        store.accounts().add(alex());
         Files.writeString(storeFile(), "not an encrypted store");
 
         store.load();
@@ -90,51 +93,106 @@ class AccountStoreUnreadableFileTest {
     }
 
     @Test
-    void savingOverAnUnreadableFileKeepsACopyOfIt() throws Exception {
+    void anUnreadableFileIsCopiedAsideByTheLoadAlone() throws Exception {
+        byte[] original = "not an encrypted store".getBytes(StandardCharsets.UTF_8);
+        Files.write(storeFile(), original);
+
+        store.load();
+
+        assertEquals(1, keptCopies().size(), "the copy is made when the load fails, before anything else");
+        assertArrayEquals(original, keptCopies().get(0), "and it is the original bytes");
+    }
+
+    @Test
+    void nothingIsWrittenOverAnUnreadableFile() throws Exception {
         byte[] original = "not an encrypted store".getBytes(StandardCharsets.UTF_8);
         Files.write(storeFile(), original);
         store.load();
 
         store.addAccount(alex());
+        assertTrue(store.saveError().isPresent(), "a refused write must say so");
+        store.save();
+        store.flush();
+        store.close();
 
-        assertEquals(1, keptCopies().size(), "the unreadable file must survive the save that replaced it");
-        assertArrayEquals(original, keptCopies().get(0), "the copy must be the original bytes");
-        assertTrue(Files.size(storeFile()) > 0, "the store itself is rewritten with the current list");
+        assertArrayEquals(original, Files.readAllBytes(storeFile()), "mutation, save and close all left it alone");
+        assertFalse(Files.exists(storeDir.resolve(FILE_NAME + ".bak")), "nor did any of them rotate it away");
+        assertTrue(holds(UUID), "the account lives in memory only");
     }
 
     @Test
-    void noUnreadableFileIsLostWhenItIsReplaced() throws Exception {
+    void writesResumeOnceALoadSucceeds() throws Exception {
+        Files.writeString(storeFile(), "not an encrypted store");
+        store.load();
+        store.addAccount(alex());
+        assertTrue(store.saveError().isPresent());
+
+        // The host puts a good file back (a restored copy, say), and loads again.
+        Files.writeString(
+                storeFile(),
+                EncryptionUtil.encrypt("{\"accounts\":[]}", EncryptionUtil.getHardwareKey("lol.trq.alts")));
+        store.load();
+
+        assertTrue(store.loadError().isEmpty(), "a load that works must retract the earlier failure");
+        assertTrue(store.saveError().isEmpty(), "and with it the refusal");
+        store.addAccount(steve());
+        assertTrue(store.saveError().isEmpty());
+        reload();
+        assertTrue(holds(OTHER_UUID), "writes land again");
+        assertFalse(holds(UUID), "what was added while refused was replaced by what the load read");
+    }
+
+    @Test
+    void writesResumeOnceTheFileIsGone() throws Exception {
+        Files.writeString(storeFile(), "not an encrypted store");
+        store.load();
+        store.addAccount(alex());
+        Files.delete(storeFile());
+
+        store.load();
+
+        assertTrue(store.saveError().isEmpty(), "with no file left to protect, what was held back is written");
+        reload();
+        assertTrue(holds(UUID));
+    }
+
+    @Test
+    void discardingTheUnreadableFileStartsANewStoreAndKeepsTheCopy() throws Exception {
+        byte[] original = "not an encrypted store".getBytes(StandardCharsets.UTF_8);
+        Files.write(storeFile(), original);
+        store.load();
+        store.addAccount(alex());
+
+        assertTrue(store.discardUnreadable());
+
+        assertTrue(store.saveError().isEmpty());
+        assertTrue(store.loadError().isEmpty(), "the file on disk is now the one just written");
+        assertTrue(kept(original), "the discarded file survives as its copy");
+        assertEquals(1, keptCopies().size(), "and only once");
+        reload();
+        assertTrue(holds(UUID), "what memory held is the new store");
+
+        store.addAccount(steve());
+        store.save();
+        assertEquals(1, keptCopies().size(), "a good file is never copied aside as though unreadable");
+        assertFalse(store.discardUnreadable(), "with nothing refused there is nothing to discard");
+    }
+
+    @Test
+    void noUnreadableFileIsLostAcrossIncidents() throws Exception {
         byte[] first = "the file that held the accounts".getBytes(StandardCharsets.UTF_8);
         Files.write(storeFile(), first);
         store.load();
         store.addAccount(alex());
+        store.discardUnreadable();
 
-        // A later run finds the store unreadable again, with different content, and saves again.
+        // A later run finds the store unreadable again, with different content.
         byte[] second = "another file that held accounts".getBytes(StandardCharsets.UTF_8);
         Files.write(storeFile(), second);
         store.load();
-        store.save();
 
         assertTrue(kept(first), "the copy from the first incident must still be there");
-        assertTrue(kept(second), "and the second unreadable file must have been kept too, not skipped");
-    }
-
-    @Test
-    void aFailureIsNoLongerReportedOnceTheStoreHasBeenRewritten() throws Exception {
-        Files.writeString(storeFile(), "not an encrypted store");
-        store.load();
-        assertTrue(store.loadError().isPresent());
-
-        store.addAccount(alex());
-
-        assertTrue(
-                store.loadError().isEmpty(),
-                "the file on disk is now a good one; reporting it unreadable for the rest of the run is wrong");
-
-        store.save();
-        store.save();
-
-        assertEquals(1, keptCopies().size(), "and the good file must not be copied aside as though unreadable");
+        assertTrue(kept(second), "and the second unreadable file must have been kept too");
     }
 
     @Test
@@ -143,7 +201,8 @@ class AccountStoreUnreadableFileTest {
         for (int incident = 0; incident < incidents; incident++) {
             Files.writeString(storeFile(), "unreadable store number " + incident);
             store.load();
-            store.save();
+            // Copies are named by the millisecond; a distinct stamp keeps the order the test relies on.
+            Thread.sleep(2);
         }
 
         assertEquals(StoreFile.MAX_UNREADABLE_KEPT, keptCopies().size(), "the copies must not pile up without bound");
@@ -151,5 +210,16 @@ class AccountStoreUnreadableFileTest {
         assertFalse(
                 kept("unreadable store number 0".getBytes(StandardCharsets.UTF_8)),
                 "it is the oldest copies that make room");
+    }
+
+    @Test
+    void reloadingTheSameUnreadableFileDoesNotPileUpCopies() throws Exception {
+        Files.writeString(storeFile(), "not an encrypted store");
+
+        store.load();
+        store.load();
+        store.load();
+
+        assertEquals(1, keptCopies().size(), "one copy per distinct file, however often it is read");
     }
 }

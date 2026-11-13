@@ -242,6 +242,8 @@ class AccountStorePersistenceTest {
         Files.writeString(storeFile(), "damaged");
         store.load();
         store.save();
+        // Discarding writes the new store at once; the damaged file it replaces is not rotated in.
+        store.discardUnreadable();
 
         assertArrayEquals(
                 backup,

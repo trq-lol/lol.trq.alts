@@ -26,6 +26,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `IllegalStateException` saying the store file is in use (the message names the file, never the path),
   and a build that fails holds no lock. `build()` also fails when the store directory cannot be created
   or locked, where it used to build and report the failure on `loadError()`.
+- **Breaking: a store file that could not be read is never written over.** Before, only a load that
+  failed for want of the store key refused writes; any other unreadable file (the wrong key, a damaged
+  file, a read error) was copied aside and replaced by the next write, so a runtime without the host's
+  key wrote a fresh machine-keyed store over a host-keyed one. Now every failed load of a file that
+  exists refuses every write, reported on `saveError()`, until a later `load()` succeeds, the file is
+  gone, or the host calls the new `discardUnreadable()` on `AccountStore` or `HostSecrets`. That is the
+  route for a renamed OS user, a moved home directory or a rotated key: the file is copied aside and the
+  next write starts a new store. The copy aside to `<name>.unreadable.<time>` is now made when the load
+  fails (newest five kept), not when a write replaces the file; a file unread only because the key was
+  unavailable is copied when it is discarded.
 - The `VaultDirectoryProvider` is asked once, in `build()`; the stores keep that directory for the
   runtime's lifetime. The store key provider applies to the runtime that was given it and nothing else.
 - `AltLoginServiceImpl`, `AltAccountServiceImpl` and `BulkOperationsImpl` take the `AccountStore` they

@@ -104,9 +104,21 @@ class HostSecretsPersistenceTest {
         String error = secrets.loadError().orElseThrow();
         assertFalse(error.contains(storeDir.toString()), "the failure must not carry a filesystem path: " + error);
 
-        secrets.put("feature.api-key", "value");
         assertArrayEquals(
-                original, StoreTestHooks.unreadableCopies(storeDir, FILE_NAME).get(0));
+                original,
+                StoreTestHooks.unreadableCopies(storeDir, FILE_NAME).get(0),
+                "the load alone copies the unreadable file aside");
+
+        secrets.put("feature.api-key", "value");
+        secrets.save();
+
+        assertTrue(secrets.saveError().isPresent(), "nothing is written over a file that could not be read");
+        assertArrayEquals(original, Files.readAllBytes(storeFile()));
+
+        assertTrue(secrets.discardUnreadable(), "until the host gives up on it");
+        assertTrue(secrets.saveError().isEmpty());
+        secrets.load();
+        assertEquals("value", secrets.get("feature.api-key"), "and the next write started a new file");
     }
 
     @Test

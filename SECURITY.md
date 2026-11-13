@@ -20,21 +20,21 @@ This library handles Minecraft account credentials. The on-disk stores are encry
 
 This section states what each layer does and does not protect against, so that nobody trusts it for more than it gives.
 
-### The local stores (`AltStore`, `SecretStore`)
+### The local stores (`AccountStore`, `HostSecrets`)
 
 **The default key.** With no `StoreKeyProvider`, the PBKDF2 password is derived from machine properties: the OS user name, the OS name, the home directory, and a constant that is public in this source. None of those is secret. The default key keeps credentials out of plaintext on disk and defeats casual copying: a file lifted from a backup or a synced folder does not open as it is on another machine. It is obfuscation, not protection, against anyone who knows or can guess those values, because they can derive the same key anywhere. It does not protect against an attacker who can already run code as the same user on the same machine.
 
 **A host-supplied key.** A host that needs the stores to resist a copied file installs a `StoreKeyProvider` that returns real key material, for example an entry in the operating system's credential store or a key derived from a passphrase the user types. With a provider installed:
 
 - A store file opens under the host's key or is reported unreadable. The machine-derived key is not accepted, so a file planted by someone who can write the store directory, sealed under that guessable key, does not load.
-- The provider is never removed once installed. A `null` passed later, or a second runtime built without a provider, leaves it in place, so the stores cannot be silently rewritten under the weaker key.
+- The provider belongs to the runtime it was given to, and is fixed for that runtime's life. A later runtime built without it, on the same directory, cannot open the host-keyed files, and does not write over them either: a file that exists and did not open is never overwritten (see below), so it cannot be silently rewritten under the weaker key.
 - Resolution fails closed. When the provider throws, or returns `null` or fewer than 16 bytes, the store is unreadable and nothing is written. Writes stay refused, even once the provider answers again, until the store has been loaded successfully: the file on disk is intact, and writing what is in memory would replace it.
 
 **Migration.** Files written before the provider was installed are sealed under the machine-derived key. They load under a provider only when the host sets `migrateFromMachineKey(true)`. That launch loads the old store, rewrites it under the host's key, and reseals or removes the rolling backup and every unreadable copy, so that no file left in the directory opens under the old key. The opt-in is meant for the one launch that adopts the provider. While it is on, the machine-derived key is still accepted, so anyone able to write the store directory can plant a store sealed under it, or put back a copy from before the migration, and have it load. Turn it off afterwards.
 
 **What a host key does not cover.** The strength of the stores is the strength of the key material and of wherever the host keeps it. The key and the decrypted accounts are held in process memory while the library runs. An attacker running code as the same user can usually reach whatever the provider reaches. A user who wants more should use full-disk or per-user encryption underneath.
 
-**Integrity of the files.** A write is staged, forced to disk, and moved into place in one step, and the file it replaces is kept as a rolling backup. A file that exists but cannot be read is never overwritten before it has been copied aside to `<name>.unreadable.<time>`; the newest five such copies are kept. On POSIX file systems the store file is created readable by its owner only.
+**Integrity of the files.** A write is staged, forced to disk, and moved into place in one step, and the file it replaces is kept as a rolling backup. Each store holds an exclusive lock on a sidecar `<name>.lock` for its runtime's lifetime, so two runtimes, in one process or two, never write the same file. A file that exists but cannot be read, whatever the reason (the wrong key, a damaged file, a read error), is not written over at all: every write is refused until a later load succeeds, the file is gone, or the host calls `discardUnreadable()`, which is the explicit route for a renamed OS user, a moved home directory or a rotated key. Such a file is copied aside to `<name>.unreadable.<time>` when the load fails (or, when it failed only because the key was unavailable, when it is discarded); the newest five copies are kept. On POSIX file systems the store file is created readable by its owner only.
 
 ### The transport and proxies
 
