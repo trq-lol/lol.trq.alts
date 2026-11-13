@@ -91,7 +91,7 @@ class ProfileLookupServiceTest {
             exchange.close();
         });
         server.start();
-        lookup = ProfileLookupService.create(new AccountEndpoints("http://"
+        lookup = new ProfileLookupServiceImpl(new AccountEndpoints("http://"
                 + InetAddress.getLoopbackAddress().getHostAddress() + ":"
                 + server.getAddress().getPort()));
     }

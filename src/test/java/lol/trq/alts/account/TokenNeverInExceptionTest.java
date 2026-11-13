@@ -22,7 +22,7 @@ class TokenNeverInExceptionTest {
     @BeforeEach
     void start() throws Exception {
         server = new LoopbackServices();
-        services = AccountServices.of(TOKEN, "11111111-2222-3333-4444-555555555555", server.endpoints());
+        services = AccountServices.create(TOKEN, "11111111-2222-3333-4444-555555555555", server.endpoints());
     }
 
     @AfterEach

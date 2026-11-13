@@ -1,4 +1,4 @@
-package lol.trq.alts.skin;
+package lol.trq.alts.internal.skin;
 
 import java.util.Objects;
 import lol.trq.alts.net.HttpUtil;
@@ -16,6 +16,8 @@ import lol.trq.alts.spi.AvatarSource;
  * <p>The template uses {@code {uuid}} and {@code {size}} placeholders, for example
  * {@code https://example.net/avatar/{uuid}/{size}.png}. The UUID is passed as given (dashed or not); a
  * host whose service wants one form normalises in the template it builds.
+ *
+ * <p>Internal: the runtime builds it from {@code AltsRuntime.Builder#avatarUrlTemplate(String)}.
  *
  * @author trq
  * @since 0.10.0

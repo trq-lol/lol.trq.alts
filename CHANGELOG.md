@@ -40,6 +40,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runtime's lifetime. The store key provider applies to the runtime that was given it and nothing else.
 - `AltLoginServiceImpl`, `AltAccountServiceImpl` and `BulkOperationsImpl` take the `AccountStore` they
   persist to as their first constructor argument.
+- **Breaking: the caches and the clock take the executor they run on.** `AsyncCache`'s public
+  constructors take a `java.util.concurrent.Executor` first (`new AsyncCache<>(executor, loader)`,
+  `(executor, loader, ttlMillis)`, `(executor, loader, ttlMillis, maxEntries)`), and so do
+  `NtpTimeSource`'s (`new NtpTimeSource(executor)`, `(executor, server, interval)`,
+  `(executor, server, port, interval)`). Nothing in the library reaches for a process-wide executor to
+  run a cache load or a clock measurement.
+- **Breaking: `SkinAvatarCache` has no public constructor.** `alts.skinCache()` is the only route; the
+  runtime builds it over its own avatar source and executor.
+- `BulkOperationsImpl` loses the three-argument constructor that read entitlements from the public
+  Minecraft services; the runtime passes its own account services.
 
 ### Removed
 
@@ -56,6 +66,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`INFO`, "Account Removed", 2500 ms).
 - The store test seam (`StoreTestHooks.reset()` and the package-private `resetForTests()` behind it);
   a test that owns its runtime or store needs no process-wide reset.
+- **Breaking:** `AccountServices.of(...)` and `ProfileLookupService.create(...)`. The routes are
+  `alts.accountServices(account)` (or `alts.accountServices(token, uuid)`) and `alts.profileLookup()`;
+  the new `Builder#accountEndpoints(AccountEndpoints)` points both at another base, which by default is
+  the origin of the configured Minecraft profile URL.
+- **Breaking:** `MojangAvatarSource` and `UrlTemplateAvatarSource` are no longer public. The runtime uses
+  the Mojang source when no `AvatarSource` is set; `.avatarSource(new UrlTemplateAvatarSource(t))`
+  becomes the new `Builder#avatarUrlTemplate(t)`. Setting both an avatar source and a template, or a
+  template without a `{uuid}` placeholder, fails `build()`. The `AvatarSource` seam stays.
 
 ## [0.12.0] - 2026-11-12
 

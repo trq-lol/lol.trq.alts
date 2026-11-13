@@ -7,17 +7,16 @@ import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Semaphore;
-import lol.trq.alts.net.IoExecutor;
 import lol.trq.alts.spi.AvatarSource;
 import lol.trq.alts.spi.MainThreadExecutor;
 import lol.trq.alts.spi.TextureUploader;
 
 /**
- * In-memory cache of player face avatars, keyed by UUID. The bytes come from a host-supplied
- * {@link AvatarSource} (default {@link MojangAvatarSource}); downloads happen on
- * {@link IoExecutor#executor()}, a few at a time, and
- * GPU uploads are marshalled onto the host's main/render thread via {@link MainThreadExecutor} and
+ * In-memory cache of player face avatars, keyed by UUID. The bytes come from the runtime's
+ * {@link AvatarSource} (by default one that crops the face from Mojang's own skin); downloads happen on
+ * the runtime's executor, a few at a time, and GPU uploads are marshalled onto the host's main/render thread via {@link MainThreadExecutor} and
  * produced by the host's {@link TextureUploader}.
  *
  * <p><strong>Keyed by UUID, not username.</strong> A username is a mutable display attribute — a rename
@@ -36,6 +35,8 @@ import lol.trq.alts.spi.TextureUploader;
  *   <li>a {@link Failed} &rarr; a fetch failed; retried after a growing backoff, not forever abandoned
  *   <li>a host handle &rarr; ready to draw
  * </ul>
+ *
+ * <p>There is no public constructor: {@code AltsRuntime#skinCache()} returns the runtime's one cache.
  *
  * @param <H> the host's opaque texture-handle type
  * @author trq
@@ -60,19 +61,26 @@ public final class SkinAvatarCache<H> {
     private final AvatarSource source;
     private final TextureUploader<H> uploader;
     private final MainThreadExecutor mainThread;
+    private final Executor executor;
     private final java.util.function.LongSupplier clock;
 
+    static {
+        SkinBridge.install();
+    }
+
     /**
-     * Creates a cache that sources faces from {@code source}, uploads via {@code uploader}, and marshals
-     * onto {@code mainThread}.
+     * Creates a cache that sources faces from {@code source}, uploads via {@code uploader}, marshals
+     * onto {@code mainThread}, and downloads on {@code executor}. Package-private: the runtime builds the
+     * one cache it hands out, through {@link SkinBridge}.
      *
-     * @param source the host avatar source, or null to use {@link MojangAvatarSource}
+     * @param source the avatar source
      * @param uploader the host texture uploader; if null the cache stays empty and always returns null
      * @param mainThread the host main-thread executor used to marshal uploads
-     * @since 0.10.0
+     * @param executor the executor the downloads run on
      */
-    public SkinAvatarCache(AvatarSource source, TextureUploader<H> uploader, MainThreadExecutor mainThread) {
-        this(source, uploader, mainThread, System::currentTimeMillis);
+    SkinAvatarCache(
+            AvatarSource source, TextureUploader<H> uploader, MainThreadExecutor mainThread, Executor executor) {
+        this(source, uploader, mainThread, executor, System::currentTimeMillis);
     }
 
     // Exists so the retry backoff can be exercised against a controllable clock in tests.
@@ -80,10 +88,12 @@ public final class SkinAvatarCache<H> {
             AvatarSource source,
             TextureUploader<H> uploader,
             MainThreadExecutor mainThread,
+            Executor executor,
             java.util.function.LongSupplier clock) {
-        this.source = source != null ? source : new MojangAvatarSource();
+        this.source = Objects.requireNonNull(source, "AvatarSource");
         this.uploader = uploader;
         this.mainThread = Objects.requireNonNull(mainThread, "MainThreadExecutor");
+        this.executor = Objects.requireNonNull(executor, "executor");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -200,7 +210,7 @@ public final class SkinAvatarCache<H> {
         }
         CompletableFuture<byte[]> download;
         try {
-            download = CompletableFuture.supplyAsync(() -> downloadBytes(key), IoExecutor.executor());
+            download = CompletableFuture.supplyAsync(() -> downloadBytes(key), executor);
         } catch (Throwable refused) {
             slots.release();
             markFailed(key, pending);

@@ -68,7 +68,7 @@ class AccountServicesTest {
     }
 
     private AccountServices services() {
-        return AccountServices.of("test-token", "uuid-1", new AccountEndpoints(base));
+        return AccountServices.create("test-token", "uuid-1", new AccountEndpoints(base));
     }
 
     private void canned(int status, String body) {

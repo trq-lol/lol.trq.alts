@@ -64,7 +64,7 @@ final class LoopbackServices implements AutoCloseable {
 
     /** Services for a test account over this server. */
     AccountServices services() {
-        return AccountServices.of("test-token", "11111111-2222-3333-4444-555555555555", endpoints());
+        return AccountServices.create("test-token", "11111111-2222-3333-4444-555555555555", endpoints());
     }
 
     /** Sets what every following request is answered with. */

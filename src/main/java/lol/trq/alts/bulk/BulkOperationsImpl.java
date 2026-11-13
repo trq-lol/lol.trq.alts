@@ -13,7 +13,6 @@ import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.function.Function;
 import java.util.function.IntFunction;
 import lol.trq.alts.account.AccountException;
-import lol.trq.alts.account.AccountServices;
 import lol.trq.alts.account.EntitlementService;
 import lol.trq.alts.account.Entitlements;
 import lol.trq.alts.auth.AccountStatus;
@@ -53,26 +52,8 @@ public final class BulkOperationsImpl implements BulkOperations {
     private final Function<AltAccount, EntitlementService> entitlementServices;
 
     /**
-     * Creates the bulk surface, reading entitlements from the public Minecraft services.
-     *
-     * @param store the runtime's account store, whose current account an import puts back when it ends
-     * @param importService a login service whose session injector does nothing, so importing resolves
-     *     and stores without moving the live session
-     * @param accountService the account service the refresh and check runs are built on
-     * @since 1.0.0
-     */
-    public BulkOperationsImpl(AccountStore store, AltLoginService importService, AltAccountService accountService) {
-        this(
-                store,
-                importService,
-                accountService,
-                account -> AccountServices.of(account.accessToken(), account.uuid())
-                        .entitlements());
-    }
-
-    /**
-     * Creates the bulk surface with a given source of per-account entitlement services — for a host
-     * whose account services go to an overridden endpoint base, so the sweep reaches the same origin.
+     * Creates the bulk surface with a given source of per-account entitlement services: the runtime's
+     * own account services, so the sweep reaches the same endpoints and transport as everything else.
      *
      * @param store the runtime's account store, whose current account an import puts back when it ends
      * @param importService a login service whose session injector does nothing, so importing resolves

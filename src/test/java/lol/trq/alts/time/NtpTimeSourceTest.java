@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -98,6 +99,7 @@ class NtpTimeSourceTest {
     /** A source pointed at the responder, with a short timeout and the given failure backoff. */
     private NtpTimeSource source(long retryBaseMillis) {
         return new NtpTimeSource(
+                Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory()),
                 InetAddress.getLoopbackAddress().getHostAddress(),
                 responder.getLocalPort(),
                 Duration.ofMinutes(15),

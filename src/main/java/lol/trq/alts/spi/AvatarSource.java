@@ -4,12 +4,12 @@ package lol.trq.alts.spi;
  * Fetches a player's face as PNG bytes, given a UUID.
  *
  * <p>Optional, and it has a default. Without one wired, the library resolves the skin from Mojang's own
- * session server and crops the face itself ({@code MojangAvatarSource}), which keeps every alt's
+ * session server and crops the face itself, which keeps every alt's
  * identity between the host and Mojang — the two parties already talking during login — rather than
  * disclosing it to a third-party head-render service on every cache miss.
  *
- * <p>A host that wants a head-render service back, for its 3D renders or its CDN, installs
- * {@code UrlTemplateAvatarSource} (or its own implementation). That is a deliberate choice a host makes,
+ * <p>A host that wants a head-render service back, for its 3D renders or its CDN, sets
+ * {@code AltsRuntime.Builder#avatarUrlTemplate(String)}, or implements this seam itself. That is a deliberate choice a host makes,
  * not the default it gets by doing nothing.
  *
  * @author trq

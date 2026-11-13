@@ -80,7 +80,9 @@ class BulkOperationsTest {
             }
         };
         // The import service is unused by these runs; a null-injecting login service would need a config.
-        return new BulkOperationsImpl(store, new UnusedLoginService(), service);
+        return new BulkOperationsImpl(store, new UnusedLoginService(), service, account -> {
+            throw new AssertionError("this run reads no entitlements");
+        });
     }
 
     /** One test here installs a proxy provider to watch the scopes; it must not outlive the test. */
@@ -400,7 +402,10 @@ class BulkOperationsTest {
                         return CompletableFuture.completedFuture(login.apply(sessionToken));
                     }
                 },
-                unused);
+                unused,
+                account -> {
+                    throw new AssertionError("an import reads no entitlements");
+                });
     }
 
     @Test
@@ -530,7 +535,8 @@ class BulkOperationsTest {
                     store,
                     new UnusedLoginService(),
                     unused,
-                    account -> lol.trq.alts.account.AccountServices.of(account.accessToken(), account.uuid(), endpoints)
+                    account -> lol.trq.alts.internal.account.AccountAccess.bridge()
+                            .services(account.accessToken(), account.uuid(), endpoints)
                             .entitlements());
         }
 

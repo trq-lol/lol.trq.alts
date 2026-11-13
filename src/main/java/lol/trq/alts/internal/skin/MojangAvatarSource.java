@@ -1,4 +1,4 @@
-package lol.trq.alts.skin;
+package lol.trq.alts.internal.skin;
 
 import com.google.gson.JsonObject;
 import java.awt.Graphics2D;
@@ -35,6 +35,8 @@ import lol.trq.alts.spi.AvatarSource;
  * fetched over HTTPS whatever scheme it was given with; the image's declared dimensions are read from
  * its header and checked against the size of a skin before a single pixel is decoded, because a
  * kilobyte of PNG can declare a canvas that takes gigabytes to allocate.
+ *
+ * <p>Internal: the runtime uses it when the host sets no {@link AvatarSource}.
  *
  * @author trq
  * @since 0.10.0

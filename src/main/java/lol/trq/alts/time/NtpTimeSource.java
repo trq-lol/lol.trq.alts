@@ -8,10 +8,11 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
-import lol.trq.alts.net.IoExecutor;
 
 /**
  * A {@link TimeSource} corrected against an NTP server.
@@ -26,7 +27,7 @@ import lol.trq.alts.net.IoExecutor;
  * offset — pure arithmetic — because it is read inside the final spin of a scheduled claim, where a DNS
  * lookup or a socket timeout turns a twenty-millisecond approach into seconds and misses the target.
  * Measurement happens off to the side: a {@code now()} that finds the offset due for a re-measure starts
- * one on the library executor and returns at once with what it already has. A failed measurement keeps the
+ * one on the executor it was given and returns at once with what it already has. A failed measurement keeps the
  * last good offset (or zero, if none was ever obtained) and is retried on a growing backoff rather than
  * on every call — a claim should fire on a slightly-off clock rather than not at all. A caller that
  * wants the correction in hand before it schedules anything calls {@link #sync()} first, which does
@@ -72,6 +73,7 @@ public final class NtpTimeSource implements TimeSource {
 
     private static final SecureRandom NONCES = new SecureRandom();
 
+    private final Executor executor;
     private final String server;
     private final int port;
     private final long resyncNanos;
@@ -96,38 +98,47 @@ public final class NtpTimeSource implements TimeSource {
     /**
      * Creates a source correcting against {@code pool.ntp.org}, re-syncing every 15 minutes.
      *
+     * @param executor the executor background measurements run on
      * @since 1.0.0
      */
-    public NtpTimeSource() {
-        this("pool.ntp.org", DEFAULT_RESYNC);
+    public NtpTimeSource(Executor executor) {
+        this(executor, "pool.ntp.org", DEFAULT_RESYNC);
     }
 
     /**
      * Creates a source correcting against a given server on a given interval.
      *
+     * @param executor the executor background measurements run on
      * @param server the NTP server hostname
      * @param resyncInterval how often to re-measure the offset; null or non-positive means 15 minutes
      * @since 1.0.0
      */
-    public NtpTimeSource(String server, Duration resyncInterval) {
-        this(server, NTP_PORT, resyncInterval);
+    public NtpTimeSource(Executor executor, String server, Duration resyncInterval) {
+        this(executor, server, NTP_PORT, resyncInterval);
     }
 
     /**
      * Creates a source correcting against a server on a given port — for a host running its own time
      * server somewhere other than the standard port.
      *
+     * @param executor the executor background measurements run on
      * @param server the NTP server hostname
      * @param port the UDP port the server answers on
      * @param resyncInterval how often to re-measure the offset; null or non-positive means 15 minutes
-     * @since 0.12.0
+     * @since 1.0.0
      */
-    public NtpTimeSource(String server, int port, Duration resyncInterval) {
-        this(server, port, resyncInterval, TIMEOUT_MILLIS, RETRY_BASE_MILLIS);
+    public NtpTimeSource(Executor executor, String server, int port, Duration resyncInterval) {
+        this(executor, server, port, resyncInterval, TIMEOUT_MILLIS, RETRY_BASE_MILLIS);
     }
 
     // Exists so the timeout and the failure backoff can be exercised without waiting out the real ones.
-    NtpTimeSource(String server, int port, Duration resyncInterval, int timeoutMillis, long retryBaseMillis) {
+    NtpTimeSource(
+            Executor executor,
+            String server,
+            int port,
+            Duration resyncInterval,
+            int timeoutMillis,
+            long retryBaseMillis) {
         if (server == null || server.isBlank()) {
             throw new IllegalArgumentException("server must not be blank");
         }
@@ -137,6 +148,7 @@ public final class NtpTimeSource implements TimeSource {
         Duration interval = resyncInterval == null || resyncInterval.isNegative() || resyncInterval.isZero()
                 ? DEFAULT_RESYNC
                 : resyncInterval;
+        this.executor = Objects.requireNonNull(executor, "executor");
         this.server = server;
         this.port = port;
         this.resyncNanos = interval.toNanos();
@@ -201,7 +213,7 @@ public final class NtpTimeSource implements TimeSource {
         return Duration.ofMillis(offsetMillis);
     }
 
-    /** Starts a measurement on the library executor unless one is already queued, running, or held by {@link #sync()}. */
+    /** Starts a measurement on this source's executor unless one is already queued, running, or held by {@link #sync()}. */
     private void syncInBackground() {
         if (!backgroundQueued.compareAndSet(false, true)) {
             return;
@@ -224,7 +236,7 @@ public final class NtpTimeSource implements TimeSource {
                             backgroundQueued.set(false);
                         }
                     },
-                    IoExecutor.executor());
+                    executor);
         } catch (RuntimeException rejected) {
             backgroundQueued.set(false);
         }

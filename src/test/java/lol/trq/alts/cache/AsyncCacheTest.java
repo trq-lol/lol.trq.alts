@@ -3,6 +3,8 @@ package lol.trq.alts.cache;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -10,9 +12,12 @@ import org.junit.jupiter.api.Test;
 
 class AsyncCacheTest {
 
+    private static final Executor IO =
+            Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory());
+
     @Test
     void missReturnsNullThenFills() throws Exception {
-        AsyncCache<String, String> cache = new AsyncCache<>(key -> "value:" + key);
+        AsyncCache<String, String> cache = new AsyncCache<>(IO, key -> "value:" + key);
 
         assertNull(cache.get("a"), "first get is a miss and must not block");
         assertEquals("value:a", awaitValue(cache, "a"));
@@ -20,7 +25,7 @@ class AsyncCacheTest {
 
     @Test
     void nullLoaderMarksKeyFailed() throws Exception {
-        AsyncCache<String, String> cache = new AsyncCache<>(key -> null);
+        AsyncCache<String, String> cache = new AsyncCache<>(IO, key -> null);
 
         assertNull(cache.get("a"));
         Thread.sleep(100);
@@ -30,7 +35,7 @@ class AsyncCacheTest {
     @Test
     void concurrentGetsTriggerOneFetchPerKey() throws Exception {
         AtomicInteger calls = new AtomicInteger();
-        AsyncCache<String, String> cache = new AsyncCache<>(key -> {
+        AsyncCache<String, String> cache = new AsyncCache<>(IO, key -> {
             calls.incrementAndGet();
             sleepQuietly(50);
             return "v";
@@ -47,7 +52,7 @@ class AsyncCacheTest {
     @Test
     void invalidateForcesRefetch() throws Exception {
         AtomicInteger calls = new AtomicInteger();
-        AsyncCache<String, String> cache = new AsyncCache<>(key -> "v" + calls.incrementAndGet());
+        AsyncCache<String, String> cache = new AsyncCache<>(IO, key -> "v" + calls.incrementAndGet());
 
         assertEquals("v1", awaitValue(cache, "a"));
         cache.invalidate("a");
@@ -60,7 +65,7 @@ class AsyncCacheTest {
         AtomicLong clock = new AtomicLong(1_000_000L);
         AtomicInteger calls = new AtomicInteger();
         AsyncCache<String, String> cache =
-                new AsyncCache<>(key -> calls.incrementAndGet() == 1 ? null : "recovered", 0L, 16, clock::get);
+                new AsyncCache<>(IO, key -> calls.incrementAndGet() == 1 ? null : "recovered", 0L, 16, clock::get);
 
         assertNull(cache.get("a"));
         awaitCalls(calls, 1);
@@ -81,6 +86,7 @@ class AsyncCacheTest {
         AtomicInteger calls = new AtomicInteger();
         AtomicBoolean healthy = new AtomicBoolean(true);
         AsyncCache<String, String> cache = new AsyncCache<>(
+                IO,
                 key -> {
                     int call = calls.incrementAndGet();
                     if (!healthy.get()) {
@@ -118,6 +124,7 @@ class AsyncCacheTest {
         AtomicLong clock = new AtomicLong(1_000_000L);
         AtomicInteger calls = new AtomicInteger();
         AsyncCache<String, String> cache = new AsyncCache<>(
+                IO,
                 key -> {
                     calls.incrementAndGet();
                     return "value:" + key;

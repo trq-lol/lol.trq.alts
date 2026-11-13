@@ -63,7 +63,8 @@ class ScheduledClaimTest {
     }
 
     private NameService name() {
-        return AccountServices.of("token", "uuid", new AccountEndpoints(base)).name();
+        return AccountServices.create("token", "uuid", new AccountEndpoints(base))
+                .name();
     }
 
     @Test

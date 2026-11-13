@@ -640,7 +640,7 @@ By default the library resolves the skin from Mojang's own session server and cr
 If you want a head-render service, opt in:
 
 ```java
-.avatarSource(new UrlTemplateAvatarSource("https://example.net/avatar/{uuid}/{size}.png"))
+.avatarUrlTemplate("https://example.net/avatar/{uuid}/{size}.png")
 ```
 
 That discloses each UUID to the service you name. At most six downloads run at once; the rest queue. A failed fetch is retried after a growing backoff. When you know a skin changed, `skinCache().invalidate(uuid)` drops the entry and returns the old handle so you can free the texture.

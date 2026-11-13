@@ -16,6 +16,10 @@ import lol.trq.alts.auth.MicrosoftAuthConfig;
 import lol.trq.alts.bulk.BulkOperations;
 import lol.trq.alts.bulk.BulkOperationsImpl;
 import lol.trq.alts.cache.AsyncCache;
+import lol.trq.alts.internal.account.AccountAccess;
+import lol.trq.alts.internal.skin.MojangAvatarSource;
+import lol.trq.alts.internal.skin.SkinAccess;
+import lol.trq.alts.internal.skin.UrlTemplateAvatarSource;
 import lol.trq.alts.internal.store.StoreAccess;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.GameStats;
@@ -61,6 +65,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
     private final AltLoginServiceImpl loginService;
     private final BulkOperations bulk;
     private final AccountEndpoints accountEndpoints;
+    private final AccountAccess.Bridge accountAccess;
     private final ProfileLookupService profileLookup;
     private final SkinAvatarCache<H> skinCache;
     private final Map<String, AsyncCache<String, GameStats>> gameStatsCaches;
@@ -122,8 +127,11 @@ public final class AltsRuntime<H> implements AutoCloseable {
             // The account services talk to the same host the auth chain validates against, so a host that
             // fronts Minecraft services with a proxy — overriding the profile URL — reaches them through the
             // same origin rather than needing a second override.
-            this.accountEndpoints = accountEndpointsFrom(builder.microsoftAuth);
-            this.profileLookup = ProfileLookupService.create(accountEndpoints);
+            this.accountEndpoints = builder.accountEndpoints != null
+                    ? builder.accountEndpoints
+                    : accountEndpointsFrom(builder.microsoftAuth);
+            this.accountAccess = AccountAccess.bridge();
+            this.profileLookup = accountAccess.profileLookup(accountEndpoints);
 
             // The import runs resolve and store through a login service whose injector does nothing, which
             // is what keeps importing fifty credentials from switching session fifty times.
@@ -132,7 +140,12 @@ public final class AltsRuntime<H> implements AutoCloseable {
                     new AltLoginServiceImpl(store, session -> {}, builder.microsoftAuth),
                     loginService.accountService(),
                     account -> accountServices(account).entitlements());
-            this.skinCache = new SkinAvatarCache<>(builder.avatarSource, builder.textureUploader, builder.mainThread);
+            this.skinCache = SkinAccess.bridge()
+                    .cache(
+                            avatarSourceFrom(builder),
+                            builder.textureUploader,
+                            builder.mainThread,
+                            IoExecutor.executor());
 
             // Game stats are optional and per-server: one cache per registered source. A request for a
             // server with no source returns the shared empty cache, whose loader always yields null, so
@@ -143,6 +156,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
                 caches.put(
                         entry.getKey(),
                         new AsyncCache<>(
+                                IoExecutor.executor(),
                                 uuid -> {
                                     try {
                                         return source.fetch(uuid);
@@ -153,7 +167,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
                                 STATS_TTL_MILLIS));
             }
             this.gameStatsCaches = Map.copyOf(caches);
-            this.emptyStatsCache = new AsyncCache<>(uuid -> null, STATS_TTL_MILLIS);
+            this.emptyStatsCache = new AsyncCache<>(IoExecutor.executor(), uuid -> null, STATS_TTL_MILLIS);
 
             // Bound last, once nothing above can throw. Nothing built above reaches the network or the
             // executor while it is being built; each reads these when it first does work.
@@ -164,6 +178,28 @@ public final class AltsRuntime<H> implements AutoCloseable {
             stores.close(store);
             throw failed;
         }
+    }
+
+    /**
+     * Chooses the avatar source: the host's own, else the URL template the host opted into, else the
+     * default that crops the face from Mojang's skin.
+     *
+     * @param builder the builder
+     * @return the avatar source
+     * @throws IllegalStateException if both a source and a template were set
+     * @throws IllegalArgumentException if the template has no {@code {uuid}} placeholder
+     */
+    private static AvatarSource avatarSourceFrom(Builder<?> builder) {
+        if (builder.avatarSource != null && builder.avatarUrlTemplate != null) {
+            throw new IllegalStateException("set an avatar source or an avatar URL template, not both");
+        }
+        if (builder.avatarSource != null) {
+            return builder.avatarSource;
+        }
+        if (builder.avatarUrlTemplate != null) {
+            return new UrlTemplateAvatarSource(builder.avatarUrlTemplate);
+        }
+        return new MojangAvatarSource();
     }
 
     /**
@@ -262,7 +298,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
      * @since 1.0.0
      */
     public AccountServices accountServices(AltAccount account) {
-        return AccountServices.of(account.accessToken(), account.uuid(), accountEndpoints);
+        return accountAccess.services(account.accessToken(), account.uuid(), accountEndpoints);
     }
 
     /**
@@ -275,7 +311,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
      * @since 1.0.0
      */
     public AccountServices accountServices(String accessToken, String accountUuid) {
-        return AccountServices.of(accessToken, accountUuid, accountEndpoints);
+        return accountAccess.services(accessToken, accountUuid, accountEndpoints);
     }
 
     /**
@@ -366,6 +402,8 @@ public final class AltsRuntime<H> implements AutoCloseable {
         private VaultTransportResolver vaultTransportResolver;
         private ProxyProvider proxyProvider;
         private AvatarSource avatarSource;
+        private String avatarUrlTemplate;
+        private AccountEndpoints accountEndpoints;
         private Executor executor;
         private String storeFileName;
         private String storeKeyBinding;
@@ -494,11 +532,10 @@ public final class AltsRuntime<H> implements AutoCloseable {
         }
 
         /**
-         * Sets the avatar source (optional; defaults to {@link lol.trq.alts.skin.MojangAvatarSource},
-         * which resolves the face from Mojang's session server and crops it locally). Install
-         * {@link lol.trq.alts.skin.UrlTemplateAvatarSource} to fetch from a head-render service instead —
-         * a deliberate trade, since that discloses each account's UUID to a third party the host was not
-         * otherwise talking to.
+         * Sets the avatar source (optional; defaults to one that resolves the face from Mojang's session
+         * server and crops it locally). A host that wants a head-render service instead can set
+         * {@link #avatarUrlTemplate(String)} rather than implement this. Setting both fails
+         * {@link #build()}.
          *
          * @param value the host avatar source
          * @return this builder
@@ -506,6 +543,40 @@ public final class AltsRuntime<H> implements AutoCloseable {
          */
         public Builder<H> avatarSource(AvatarSource value) {
             this.avatarSource = value;
+            return this;
+        }
+
+        /**
+         * Fetches avatars from a head-render service by filling a URL template (optional; off by
+         * default). The template holds a {@code {uuid}} placeholder and optionally {@code {size}}, for
+         * example {@code https://example.net/avatar/{uuid}/{size}.png}; the UUID is passed as the caller
+         * gave it. This is a deliberate trade: it discloses each account's UUID to that service on every
+         * cache miss, which the default source exists to avoid. The fetch goes through the runtime's
+         * transport, so the proxy provider sees it with purpose {@code AVATAR}. {@link #build()} fails
+         * when the template has no {@code {uuid}} placeholder, or when an {@link #avatarSource} is also
+         * set.
+         *
+         * @param value the URL template, or null for none
+         * @return this builder
+         * @since 1.0.0
+         */
+        public Builder<H> avatarUrlTemplate(String value) {
+            this.avatarUrlTemplate = value;
+            return this;
+        }
+
+        /**
+         * Points the account services and the profile lookup at another base (optional; by default they
+         * reach the origin of the configured {@link MicrosoftAuthConfig#minecraftProfileUrl()}, or the
+         * public Minecraft services when Microsoft login is not configured). For a host that fronts the
+         * Minecraft services with its own gateway, or a test pointing them at a loopback server.
+         *
+         * @param value the endpoints, or null for the default
+         * @return this builder
+         * @since 1.0.0
+         */
+        public Builder<H> accountEndpoints(AccountEndpoints value) {
+            this.accountEndpoints = value;
             return this;
         }
 

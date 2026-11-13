@@ -21,6 +21,7 @@ import lol.trq.alts.bulk.BulkOptions;
 import lol.trq.alts.bulk.BulkProgress;
 import lol.trq.alts.bulk.BulkReport;
 import lol.trq.alts.cache.AsyncCache;
+import lol.trq.alts.internal.skin.SkinAccess;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
@@ -79,7 +80,7 @@ class HostExecutorAdoptionTest {
 
     @Test
     void aCacheLoaderRunsOnTheHostExecutor() throws Exception {
-        AsyncCache<String, String> cache = new AsyncCache<>(key -> {
+        AsyncCache<String, String> cache = new AsyncCache<>(host, key -> {
             onHostThread();
             return "value";
         });
@@ -96,13 +97,15 @@ class HostExecutorAdoptionTest {
 
     @Test
     void anAvatarDownloadRunsOnTheHostExecutor() throws Exception {
-        SkinAvatarCache<String> cache = new SkinAvatarCache<>(
-                (uuid, size) -> {
-                    onHostThread();
-                    return new byte[] {1};
-                },
-                bytes -> "handle",
-                Runnable::run);
+        SkinAvatarCache<String> cache = SkinAccess.bridge()
+                .cache(
+                        (uuid, size) -> {
+                            onHostThread();
+                            return new byte[] {1};
+                        },
+                        bytes -> "handle",
+                        Runnable::run,
+                        host);
 
         cache.get("uuid-1");
         for (int i = 0; i < 400 && cache.get("uuid-1") == null; i++) {

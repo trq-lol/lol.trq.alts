@@ -8,8 +8,9 @@ import com.google.gson.GsonBuilder;
  * focused services — profile, entitlements, name, skin, cape, player attributes, chat-signing
  * certificates, the privacy blocklist — each of which a host can hold on its own.
  *
- * <p>Construct one per account from its access token. Nothing here installs a session or touches the
- * account store; these operate directly on the account the token belongs to.
+ * <p>Reached through {@code AltsRuntime#accountServices}, one per account, over its access token; there is
+ * no public factory, so every instance runs on its runtime's endpoints. Nothing here installs a session
+ * or touches the account store; these operate directly on the account the token belongs to.
  *
  * @author trq
  * @since 1.0.0
@@ -17,6 +18,10 @@ import com.google.gson.GsonBuilder;
 public final class AccountServices {
 
     private static final Gson GSON = new GsonBuilder().create();
+
+    static {
+        AccountBridge.install();
+    }
 
     private final ProfileService profile;
     private final EntitlementService entitlements;
@@ -40,29 +45,16 @@ public final class AccountServices {
     }
 
     /**
-     * Builds the services for an account, against the public Minecraft services.
-     *
-     * @param token the account's Minecraft access token
-     * @param accountUuid the account UUID, for per-account request routing; may be null
-     * @return the services
-     * @since 1.0.0
-     */
-    public static AccountServices of(String token, String accountUuid) {
-        return of(token, accountUuid, AccountEndpoints.defaults());
-    }
-
-    /**
-     * Builds the services against a given endpoint base — for a host fronting Minecraft services with
-     * its own proxy, or a test pointing at a loopback.
+     * Builds the services against a given endpoint base. Package-private: the runtime reaches it through
+     * {@link AccountBridge}, and a host through {@code AltsRuntime#accountServices}.
      *
      * @param token the account's Minecraft access token
      * @param accountUuid the account UUID, for per-account request routing; may be null
      * @param endpoints the Minecraft services base
      * @return the services
-     * @since 1.0.0
      */
-    public static AccountServices of(String token, String accountUuid, AccountEndpoints endpoints) {
-        return new AccountServices(token, accountUuid, endpoints);
+    static AccountServices create(String token, String accountUuid, AccountEndpoints endpoints) {
+        return new AccountServices(token, accountUuid, endpoints == null ? AccountEndpoints.defaults() : endpoints);
     }
 
     /**

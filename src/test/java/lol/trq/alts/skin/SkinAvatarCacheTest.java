@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import lol.trq.alts.spi.AvatarSource;
@@ -19,6 +21,9 @@ import org.junit.jupiter.api.Test;
  * regressions this guards.
  */
 class SkinAvatarCacheTest {
+
+    private static final Executor IO =
+            Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory());
 
     private static final byte[] PNG = {1, 2, 3, 4};
 
@@ -41,7 +46,7 @@ class SkinAvatarCacheTest {
             fetches.incrementAndGet();
             return PNG;
         };
-        SkinAvatarCache<String> cache = new SkinAvatarCache<>(source, bytes -> "handle", Runnable::run);
+        SkinAvatarCache<String> cache = new SkinAvatarCache<>(source, bytes -> "handle", Runnable::run, IO);
 
         assertEquals("handle", await(cache, "uuid-1"));
         // A filled entry is served from memory, not refetched.
@@ -51,7 +56,7 @@ class SkinAvatarCacheTest {
 
     @Test
     void nullUploaderMeansTheCacheStaysEmpty() {
-        SkinAvatarCache<String> cache = new SkinAvatarCache<>((uuid, size) -> PNG, null, Runnable::run);
+        SkinAvatarCache<String> cache = new SkinAvatarCache<>((uuid, size) -> PNG, null, Runnable::run, IO);
 
         assertNull(cache.get("uuid-1"), "with no uploader there is nowhere to put a handle");
     }
@@ -66,7 +71,7 @@ class SkinAvatarCacheTest {
         AtomicLong now = new AtomicLong(0);
         // Fails the first call, succeeds the second.
         AvatarSource source = (uuid, size) -> fetches.incrementAndGet() == 1 ? null : PNG;
-        SkinAvatarCache<String> cache = new SkinAvatarCache<>(source, bytes -> "handle", Runnable::run, now::get);
+        SkinAvatarCache<String> cache = new SkinAvatarCache<>(source, bytes -> "handle", Runnable::run, IO, now::get);
 
         // First get triggers the failing fetch.
         assertNull(cache.get("uuid-1"));
@@ -87,20 +92,11 @@ class SkinAvatarCacheTest {
             fetches.incrementAndGet();
             return PNG;
         };
-        SkinAvatarCache<String> cache = new SkinAvatarCache<>(source, bytes -> "handle", Runnable::run);
+        SkinAvatarCache<String> cache = new SkinAvatarCache<>(source, bytes -> "handle", Runnable::run, IO);
 
         assertNotNull(await(cache, "ABCDEF"));
         cache.get("abcdef");
         assertEquals(1, fetches.get(), "the same UUID in another case is the same entry");
-    }
-
-    @Test
-    void defaultsToTheMojangSourceWhenNoneIsGiven() {
-        // A null source must not NPE; it resolves to MojangAvatarSource. With no uploader the fetch never
-        // runs, so this only proves construction and the null-source branch.
-        SkinAvatarCache<String> cache = new SkinAvatarCache<>(null, null, Runnable::run);
-
-        assertNull(cache.get("uuid-1"));
     }
 
     /**
@@ -110,8 +106,8 @@ class SkinAvatarCacheTest {
     @Test
     void invalidateRefetchesAndReturnsTheOldHandle() throws Exception {
         AtomicInteger uploads = new AtomicInteger();
-        SkinAvatarCache<String> cache =
-                new SkinAvatarCache<>((uuid, size) -> PNG, bytes -> "head-" + uploads.incrementAndGet(), Runnable::run);
+        SkinAvatarCache<String> cache = new SkinAvatarCache<>(
+                (uuid, size) -> PNG, bytes -> "head-" + uploads.incrementAndGet(), Runnable::run, IO);
 
         assertEquals("head-1", await(cache, "uuid-1"));
         assertEquals("head-1", cache.invalidate("UUID-1"), "invalidate hands back the handle it dropped");
@@ -120,7 +116,7 @@ class SkinAvatarCacheTest {
 
     @Test
     void invalidateOfAnUnknownOrBlankKeyReturnsNull() {
-        SkinAvatarCache<String> cache = new SkinAvatarCache<>((uuid, size) -> PNG, bytes -> "h", Runnable::run);
+        SkinAvatarCache<String> cache = new SkinAvatarCache<>((uuid, size) -> PNG, bytes -> "h", Runnable::run, IO);
 
         assertNull(cache.invalidate("never-requested"));
         assertNull(cache.invalidate(" "));
@@ -136,7 +132,7 @@ class SkinAvatarCacheTest {
         ConcurrentLinkedQueue<Runnable> mainThread = new ConcurrentLinkedQueue<>();
         AtomicInteger uploads = new AtomicInteger();
         SkinAvatarCache<String> cache = new SkinAvatarCache<>(
-                (uuid, size) -> PNG, bytes -> "head-" + uploads.incrementAndGet(), mainThread::add);
+                (uuid, size) -> PNG, bytes -> "head-" + uploads.incrementAndGet(), mainThread::add, IO);
 
         assertNull(cache.get("uuid-1"));
         // Let the stale fetch reach the main-thread queue, then invalidate before it runs.
@@ -160,7 +156,7 @@ class SkinAvatarCacheTest {
             fetches.incrementAndGet();
             return null;
         };
-        SkinAvatarCache<String> cache = new SkinAvatarCache<>(failing, bytes -> "h", Runnable::run, now::get);
+        SkinAvatarCache<String> cache = new SkinAvatarCache<>(failing, bytes -> "h", Runnable::run, IO, now::get);
 
         cache.get("uuid-1");
         Thread.sleep(30);
@@ -195,7 +191,7 @@ class SkinAvatarCacheTest {
             }
             return PNG;
         };
-        SkinAvatarCache<String> cache = new SkinAvatarCache<>(source, bytes -> "handle", Runnable::run, now::get);
+        SkinAvatarCache<String> cache = new SkinAvatarCache<>(source, bytes -> "handle", Runnable::run, IO, now::get);
 
         assertNull(cache.get("uuid-1"));
         Thread.sleep(50);
@@ -219,6 +215,7 @@ class SkinAvatarCacheTest {
                     return "handle";
                 },
                 Runnable::run,
+                IO,
                 now::get);
 
         assertNull(cache.get("uuid-1"));
@@ -242,6 +239,7 @@ class SkinAvatarCacheTest {
                     }
                     task.run();
                 },
+                IO,
                 now::get);
 
         assertNull(cache.get("uuid-1"));
@@ -270,7 +268,7 @@ class SkinAvatarCacheTest {
             }
             return PNG;
         };
-        SkinAvatarCache<String> cache = new SkinAvatarCache<>(source, bytes -> "handle", Runnable::run);
+        SkinAvatarCache<String> cache = new SkinAvatarCache<>(source, bytes -> "handle", Runnable::run, IO);
 
         for (int i = 0; i < 40; i++) {
             cache.get("uuid-" + i);
@@ -292,7 +290,7 @@ class SkinAvatarCacheTest {
             release.await();
             return PNG;
         };
-        SkinAvatarCache<String> cache = new SkinAvatarCache<>(source, bytes -> "handle", Runnable::run);
+        SkinAvatarCache<String> cache = new SkinAvatarCache<>(source, bytes -> "handle", Runnable::run, IO);
 
         for (int i = 0; i < SkinAvatarCache.MAX_CONCURRENT_FETCHES; i++) {
             cache.get("busy-" + i);
