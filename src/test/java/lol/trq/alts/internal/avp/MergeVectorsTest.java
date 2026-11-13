@@ -175,6 +175,24 @@ class MergeVectorsTest {
         assertEquals(4 + 6 + 2, steps);
     }
 
+    /**
+     * A clock pushed to the last stamp (by observing a hostile one) refuses to tick rather than issue a
+     * stamp it has already seen; a full counter still moves on to the next millisecond.
+     */
+    @Test
+    void theClockRefusesWhenNoGreaterStampExists() {
+        Hlc full = new Hlc(5, Long.MAX_VALUE);
+        Stamp next = full.tick(0, "a");
+        assertEquals(new Stamp(6, 0, "a"), next);
+
+        Hlc last = new Hlc(0, 0);
+        last.observe(new Stamp(Long.MAX_VALUE, Long.MAX_VALUE, "x"));
+        AltsException e = assertThrows(AltsException.class, () -> last.tick(0, "a"));
+        assertEquals(Kind.PROTOCOL, e.kind());
+        assertEquals(Long.MAX_VALUE, last.at());
+        assertEquals(Long.MAX_VALUE, last.n());
+    }
+
     @Test
     void observingAPayloadMakesTheNextTickGreaterThanEveryStampInIt() {
         for (JsonObject c : Vectors.cases(ROOT, "cases", 9)) {

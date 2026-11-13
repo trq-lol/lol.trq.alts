@@ -57,11 +57,14 @@ public final class Hlc {
 
     /**
      * Advances the clock for one write and returns its stamp. A counter that cannot grow moves the clock to
-     * {@code (at + 1, 0)}, which still issues a greater stamp.
+     * {@code (at + 1, 0)}, which still issues a greater stamp. At {@code (Long.MAX_VALUE, Long.MAX_VALUE)},
+     * reachable only by observing a hostile stamp, no greater stamp exists, and the clock refuses rather
+     * than issue one it has already seen.
      *
      * @param nowMillis the wall clock in epoch milliseconds
      * @param by the writer's member id
      * @return the write's stamp
+     * @throws lol.trq.alts.AltsException of kind {@code PROTOCOL} if no greater stamp exists
      */
     public Stamp tick(long nowMillis, String by) {
         if (nowMillis > at) {
@@ -72,6 +75,8 @@ public final class Hlc {
         } else if (at < Long.MAX_VALUE) {
             at++;
             n = 0;
+        } else {
+            throw AvpFailures.protocol("the clock cannot issue a stamp greater than one it has seen");
         }
         return new Stamp(at, n, by);
     }
