@@ -3,6 +3,7 @@ package lol.trq.alts.auth;
 import java.nio.file.Path;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.store.AccountStore;
+import lol.trq.alts.store.StoreTestHooks;
 
 /**
  * An {@link AccountStore} of a test's own, in a scratch directory, so login tests can hand it to the
@@ -18,7 +19,7 @@ final class AccountStoreTestSupport implements AutoCloseable {
     }
 
     static AccountStoreTestSupport openIn(Path directory) {
-        AccountStore store = AccountStore.open(directory);
+        AccountStore store = StoreTestHooks.openAccountStore(directory);
         store.load();
         return new AccountStoreTestSupport(store);
     }
@@ -50,6 +51,6 @@ final class AccountStoreTestSupport implements AutoCloseable {
 
     @Override
     public void close() {
-        store.close();
+        StoreTestHooks.close(store);
     }
 }

@@ -28,6 +28,7 @@ import lol.trq.alts.net.IoExecutor;
 import lol.trq.alts.net.NetTestHooks;
 import lol.trq.alts.skin.SkinAvatarCache;
 import lol.trq.alts.store.AccountStore;
+import lol.trq.alts.store.StoreTestHooks;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -59,12 +60,12 @@ class HostExecutorAdoptionTest {
     @BeforeEach
     void bindHostExecutor() {
         IoExecutor.bind(host);
-        store = AccountStore.open(storeDir);
+        store = StoreTestHooks.openAccountStore(storeDir);
     }
 
     @AfterEach
     void restoreDefault() {
-        store.close();
+        StoreTestHooks.close(store);
         NetTestHooks.resetExecutor();
     }
 

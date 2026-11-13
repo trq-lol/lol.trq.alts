@@ -28,14 +28,14 @@ import lol.trq.alts.spi.StoreKeyProvider;
  * <p>Persistence follows the account store's rules: a write replaces the file in one step, writes are
  * serialized, a failure is reported on {@link #saveError()} rather than thrown, an unreadable file is
  * copied aside before anything replaces it, and nothing is written while the store key was unavailable
- * to the last load. The store holds an exclusive lock on a sidecar {@code <file>.lock} from opening to
- * {@link #close()}; after {@code close()} the mutators change memory only and record "the store is
- * closed" on {@link #saveError()}.
+ * to the last load. The store holds an exclusive lock on a sidecar {@code <file>.lock} for the life of the
+ * runtime that owns it; once the runtime is closed the mutators change memory only and record "the store
+ * is closed" on {@link #saveError()}.
  *
  * @author trq
  * @since 1.0.0
  */
-public final class HostSecrets implements AutoCloseable {
+public final class HostSecrets {
 
     /** The neutral default filename. */
     static final String DEFAULT_FILE_NAME = "secrets.dat";
@@ -56,22 +56,25 @@ public final class HostSecrets implements AutoCloseable {
     /** Arbitrary host key/value secrets, persisted as a single encrypted file. */
     private final Map<String, String> secrets = new ConcurrentHashMap<>();
 
+    static {
+        StoreBridge.install();
+    }
+
     private HostSecrets(StoreFile file) {
         this.file = file;
     }
 
     /**
      * Opens the secret store in {@code directory} with the neutral defaults: the default filename and key
-     * binding, the machine-derived key, and synchronous writes. Nothing is read until {@link #load()}. A
-     * host normally gets its secrets from the runtime instead.
+     * binding, the machine-derived key, and synchronous writes. Nothing is read until {@link #load()}. For
+     * tests; a host gets its secrets from the runtime.
      *
      * @param directory the directory the store file lives in; created when missing
      * @return the open store, which the caller closes
      * @throws IllegalStateException when the store file is in use by another owner or cannot be locked;
      *     the message names the file, never its path
-     * @since 1.0.0
      */
-    public static HostSecrets open(Path directory) {
+    static HostSecrets open(Path directory) {
         return open(directory, null, null, null, false, Duration.ZERO);
     }
 
@@ -90,9 +93,8 @@ public final class HostSecrets implements AutoCloseable {
      * @return the open store, which the caller closes
      * @throws IllegalStateException when the store file is in use by another owner or cannot be locked;
      *     the message names the file, never its path
-     * @since 1.0.0
      */
-    public static HostSecrets open(
+    static HostSecrets open(
             Path directory,
             String fileName,
             String keyBinding,
@@ -218,7 +220,7 @@ public final class HostSecrets implements AutoCloseable {
     /**
      * Loads and decrypts secrets from disk into memory, clearing existing entries first. A file that
      * exists but cannot be read leaves the in-memory map alone and records the reason on
-     * {@link #loadError()}. After {@link #close()} nothing is read, and {@link #loadError()} says so.
+     * {@link #loadError()}. Once the runtime is closed nothing is read, and {@link #loadError()} says so.
      *
      * @since 1.0.0
      */
@@ -246,16 +248,12 @@ public final class HostSecrets implements AutoCloseable {
     }
 
     /**
-     * Writes what is still waiting, releases the store's lock and stops its background writer. The
-     * runtime that opened the store calls this from {@code AltsRuntime#close()}; a host closes the
-     * runtime, not the store. Idempotent. Afterwards the secrets stay readable, a mutator changes memory
-     * only and records "the store is closed" on {@link #saveError()}, {@link #flush()} does nothing, and
-     * {@link #load()} reads nothing.
-     *
-     * @since 1.0.0
+     * Writes what is still waiting, releases the store's lock and stops its background writer. Reached
+     * from {@code AltsRuntime#close()} only. Idempotent. Afterwards the secrets stay readable, a mutator
+     * changes memory only and records "the store is closed" on {@link #saveError()}, {@link #flush()} does
+     * nothing, and {@link #load()} reads nothing.
      */
-    @Override
-    public void close() {
+    void close() {
         synchronized (lock) {
             file.close();
         }

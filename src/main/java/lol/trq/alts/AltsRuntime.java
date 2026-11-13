@@ -16,6 +16,7 @@ import lol.trq.alts.auth.MicrosoftAuthConfig;
 import lol.trq.alts.bulk.BulkOperations;
 import lol.trq.alts.bulk.BulkOperationsImpl;
 import lol.trq.alts.cache.AsyncCache;
+import lol.trq.alts.internal.store.StoreAccess;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.GameStats;
 import lol.trq.alts.net.HttpUtil;
@@ -66,6 +67,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
     private final AsyncCache<String, GameStats> emptyStatsCache;
     private final ToastSink toasts;
     private final VaultTransportResolver vaultResolver;
+    private final StoreAccess.Bridge stores;
     private final AccountStore store;
     private final HostSecrets secrets;
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -87,23 +89,22 @@ public final class AltsRuntime<H> implements AutoCloseable {
         // corrupting them later. When the second lock is refused, the first is released again: a build
         // that fails holds nothing. Coalescing keeps a burst of logins from writing the file once each.
         Path directory = Objects.requireNonNull(builder.vaultDirectory.vaultDirectory(), "vaultDirectory");
-        this.store = AccountStore.open(
+        this.stores = StoreAccess.bridge();
+        this.store = stores.openAccounts(
                 directory,
                 builder.storeFileName,
                 builder.storeKeyBinding,
                 builder.storeKeyProvider,
-                builder.migrateFromMachineKey,
-                AccountStore.DEFAULT_WRITE_DELAY);
+                builder.migrateFromMachineKey);
         try {
-            this.secrets = HostSecrets.open(
+            this.secrets = stores.openSecrets(
                     directory,
                     builder.secretsFileName,
                     builder.secretsKeyBinding,
                     builder.storeKeyProvider,
-                    builder.migrateFromMachineKey,
-                    AccountStore.DEFAULT_WRITE_DELAY);
+                    builder.migrateFromMachineKey);
         } catch (RuntimeException | Error refused) {
-            store.close();
+            stores.close(store);
             throw refused;
         }
 
@@ -153,8 +154,8 @@ public final class AltsRuntime<H> implements AutoCloseable {
             this.gameStatsCaches = Map.copyOf(caches);
             this.emptyStatsCache = new AsyncCache<>(uuid -> null, STATS_TTL_MILLIS);
         } catch (RuntimeException | Error failed) {
-            secrets.close();
-            store.close();
+            stores.close(secrets);
+            stores.close(store);
             throw failed;
         }
     }
@@ -218,9 +219,9 @@ public final class AltsRuntime<H> implements AutoCloseable {
             return;
         }
         try {
-            store.close();
+            stores.close(store);
         } finally {
-            secrets.close();
+            stores.close(secrets);
         }
     }
 

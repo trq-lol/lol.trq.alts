@@ -16,6 +16,7 @@ import lol.trq.alts.net.NetTestHooks;
 import lol.trq.alts.spi.StoreKeyProvider;
 import lol.trq.alts.store.AccountStore;
 import lol.trq.alts.store.HostSecrets;
+import lol.trq.alts.store.StoreTestHooks;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -129,14 +130,17 @@ class AltsRuntimeStoresTest {
 
     @Test
     void aBuildRefusedOnTheSecondFileReleasesTheFirst() {
-        try (HostSecrets held = HostSecrets.open(dirA)) {
+        HostSecrets held = StoreTestHooks.openHostSecrets(dirA);
+        try {
             assertThrows(IllegalStateException.class, () -> builder(dirA).build());
 
             // The refused build had already locked the account file; it must have let it go again.
-            try (AccountStore accounts = AccountStore.open(dirA)) {
-                accounts.load();
-                assertTrue(accounts.loadError().isEmpty());
-            }
+            AccountStore accounts = StoreTestHooks.openAccountStore(dirA);
+            accounts.load();
+            assertTrue(accounts.loadError().isEmpty());
+            StoreTestHooks.close(accounts);
+        } finally {
+            StoreTestHooks.close(held);
         }
     }
 

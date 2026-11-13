@@ -40,9 +40,18 @@ class StoreLockTest {
         return store.accounts().stream().anyMatch(account -> uuid.equals(account.uuid()));
     }
 
+    /** Opens the directory afresh, as the next owner would, loads it, and closes it again. */
+    private AccountStore reopened() {
+        AccountStore next = AccountStore.open(storeDir);
+        next.load();
+        next.close();
+        return next;
+    }
+
     @Test
     void aSecondOwnerOfTheSameFileIsRefusedAndTheFirstKeepsWorking() {
-        try (AccountStore first = AccountStore.open(storeDir)) {
+        AccountStore first = AccountStore.open(storeDir);
+        try {
             first.load();
             first.addAccount(alex());
 
@@ -54,21 +63,25 @@ class StoreLockTest {
 
             first.addAccount(steve());
             assertTrue(first.saveError().isEmpty(), "the refused second owner must not disturb the first");
+        } finally {
+            first.close();
         }
 
-        try (AccountStore next = AccountStore.open(storeDir)) {
-            next.load();
-            assertTrue(next.loadError().isEmpty());
-            assertTrue(holds(next, UUID) && holds(next, OTHER_UUID), "what the first owner wrote is all there");
-        }
+        AccountStore next = reopened();
+        assertTrue(next.loadError().isEmpty());
+        assertTrue(holds(next, UUID) && holds(next, OTHER_UUID), "what the first owner wrote is all there");
     }
 
     @Test
     void theAccountAndSecretFilesAreLockedApart() {
-        try (AccountStore accounts = AccountStore.open(storeDir);
-                HostSecrets secrets = HostSecrets.open(storeDir)) {
+        AccountStore accounts = AccountStore.open(storeDir);
+        HostSecrets secrets = HostSecrets.open(storeDir);
+        try {
             assertThrows(IllegalStateException.class, () -> HostSecrets.open(storeDir));
             assertThrows(IllegalStateException.class, () -> AccountStore.open(storeDir));
+        } finally {
+            secrets.close();
+            accounts.close();
         }
     }
 
@@ -80,10 +93,7 @@ class StoreLockTest {
         store.close();
         store.close();
 
-        try (AccountStore next = AccountStore.open(storeDir)) {
-            next.load();
-            assertTrue(holds(next, UUID));
-        }
+        assertTrue(holds(reopened(), UUID));
     }
 
     @Test
@@ -94,10 +104,7 @@ class StoreLockTest {
 
         store.close();
 
-        try (AccountStore next = AccountStore.open(storeDir)) {
-            next.load();
-            assertTrue(holds(next, UUID), "closing must not lose a coalesced write");
-        }
+        assertTrue(holds(reopened(), UUID), "closing must not lose a coalesced write");
     }
 
     @Test
@@ -133,10 +140,10 @@ class StoreLockTest {
         assertEquals("other", secrets.get("feature.other-key"));
         assertTrue(secrets.saveError().isPresent());
         assertArrayEquals(before, Files.readAllBytes(storeDir.resolve("secrets.dat")));
-        try (HostSecrets next = HostSecrets.open(storeDir)) {
-            next.load();
-            assertEquals("value", next.get("feature.api-key"));
-            assertNull(next.get("feature.other-key"));
-        }
+        HostSecrets next = HostSecrets.open(storeDir);
+        next.load();
+        next.close();
+        assertEquals("value", next.get("feature.api-key"));
+        assertNull(next.get("feature.other-key"));
     }
 }

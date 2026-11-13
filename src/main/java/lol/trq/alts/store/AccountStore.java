@@ -45,25 +45,16 @@ import lol.trq.alts.spi.StoreKeyProvider;
  * file in one step, so neither a concurrent login nor a crash can leave a half-written store. A write
  * that fails is reported on {@link #saveError()}; nothing here throws at a caller for an I/O failure.
  *
- * <p>The store holds an exclusive lock on a sidecar {@code <file>.lock} in its directory from the moment
- * it is opened until {@link #close()}, so a second owner of the same file, in this process or another,
- * is refused when it opens rather than discovered later as a corrupt file. After {@code close()} the
- * mutators still change the list in memory but write nothing: each records "the store is closed" on
+ * <p>The store holds an exclusive lock on a sidecar {@code <file>.lock} in its directory for the life of
+ * the runtime that owns it, so a second runtime on the same file, in this process or another, is refused
+ * when it builds rather than discovered later as a corrupt file. Once the runtime is closed the mutators
+ * still change the list in memory but write nothing: each records "the store is closed" on
  * {@link #saveError()} instead.
  *
  * @author trq
  * @since 1.0.0
  */
-public final class AccountStore implements AutoCloseable {
-
-    /**
-     * How long a burst of mutations is gathered for before one write covers them, in a store a runtime
-     * built: a mutator returns as soon as memory is updated, and a background daemon thread writes the
-     * file this long after.
-     *
-     * @since 1.0.0
-     */
-    public static final Duration DEFAULT_WRITE_DELAY = StoreFile.DEFAULT_WRITE_DELAY;
+public final class AccountStore {
 
     /** The neutral default filename. */
     static final String DEFAULT_FILE_NAME = "accounts.dat";
@@ -87,6 +78,12 @@ public final class AccountStore implements AutoCloseable {
     private volatile AltAccount currentAccount;
     private volatile String loadWarning;
 
+    static {
+        // The runtime, in another package, opens and closes stores through this bridge only, so neither
+        // the factories nor close() have to be public.
+        StoreBridge.install();
+    }
+
     private AccountStore(StoreFile file) {
         this.file = file;
     }
@@ -94,16 +91,15 @@ public final class AccountStore implements AutoCloseable {
     /**
      * Opens the account store in {@code directory} with the neutral defaults: the default filename and
      * key binding, the machine-derived key, and synchronous writes, so a file is on disk the moment a
-     * mutator returns. Nothing is read until {@link #load()}. A host normally gets its store from the
-     * runtime instead.
+     * mutator returns. Nothing is read until {@link #load()}. For tests; a host gets its store from the
+     * runtime.
      *
      * @param directory the directory the store file lives in; created when missing
      * @return the open store, which the caller closes
      * @throws IllegalStateException when the store file is in use by another owner or cannot be locked;
      *     the message names the file, never its path
-     * @since 1.0.0
      */
-    public static AccountStore open(Path directory) {
+    static AccountStore open(Path directory) {
         return open(directory, null, null, null, false, Duration.ZERO);
     }
 
@@ -133,9 +129,8 @@ public final class AccountStore implements AutoCloseable {
      * @return the open store, which the caller closes
      * @throws IllegalStateException when the store file is in use by another owner or cannot be locked;
      *     the message names the file, never its path
-     * @since 1.0.0
      */
-    public static AccountStore open(
+    static AccountStore open(
             Path directory,
             String fileName,
             String keyBinding,
@@ -239,7 +234,7 @@ public final class AccountStore implements AutoCloseable {
      *
      * <p>Two failures are not retried by writing: while the last {@link #load()} failed because the store
      * key was unavailable, writes are refused on purpose, and only a {@code load()} that succeeds lifts
-     * that (see {@link #loadError()}); and after {@link #close()} nothing is written at all.
+     * that (see {@link #loadError()}); and once the runtime is closed nothing is written at all.
      *
      * @return the failure description, or empty when the last write succeeded
      * @since 1.0.0
@@ -395,7 +390,7 @@ public final class AccountStore implements AutoCloseable {
     /**
      * Writes any state still waiting on the write delay and returns once it is on disk. A no-op when
      * nothing is waiting. Worth calling before a host exits by a route that skips shutdown hooks; a normal
-     * exit flushes on its own, and {@link #close()} flushes too.
+     * exit flushes on its own, and closing the runtime flushes too.
      *
      * @since 1.0.0
      */
@@ -407,7 +402,7 @@ public final class AccountStore implements AutoCloseable {
      * Loads and decrypts accounts from disk into memory, clearing existing entries first. A file that
      * exists but cannot be read leaves the in-memory list alone and records the reason on
      * {@link #loadError()}. Entries that cannot be used are skipped and noted on {@link #loadWarning()}.
-     * After {@link #close()} nothing is read, and {@link #loadError()} says so.
+     * Once the runtime is closed nothing is read, and {@link #loadError()} says so.
      *
      * @since 1.0.0
      */
@@ -437,19 +432,16 @@ public final class AccountStore implements AutoCloseable {
     }
 
     /**
-     * Writes what is still waiting, releases the store's lock and stops its background writer. The
-     * runtime that opened the store calls this from {@code AltsRuntime#close()}; a host closes the
-     * runtime, not the store. Idempotent.
+     * Writes what is still waiting, releases the store's lock and stops its background writer. Reached
+     * from {@code AltsRuntime#close()} only, so a store is never closed under a runtime that is still
+     * open. Idempotent.
      *
      * <p>After this the store writes nothing. The list stays readable, and the mutators still change it
      * in memory, but each records "the store is closed" on {@link #saveError()} instead of writing, as
      * does {@link #save()}; {@link #flush()} does nothing, and {@link #load()} reads nothing. Another owner
      * may open the file as soon as this returns.
-     *
-     * @since 1.0.0
      */
-    @Override
-    public void close() {
+    void close() {
         synchronized (lock) {
             file.close();
         }

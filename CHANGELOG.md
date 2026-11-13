@@ -35,10 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Breaking:** `AltStore` and `SecretStore`, with no deprecation bridge. Their static `bind`,
   `configure`, `keyProvider` and `writeDelay` have no replacement call: the builder sets the directory,
-  file names, key bindings and key provider, and a runtime always coalesces writes
-  (`AccountStore.DEFAULT_WRITE_DELAY`, 100 ms). `AltStore.DEFAULT_WRITE_DELAY` moved to `AccountStore`.
-  A store can be opened directly with `AccountStore.open(...)` / `HostSecrets.open(...)`, which takes
-  the same lock.
+  file names, key bindings and key provider, and a runtime always coalesces writes (100 ms).
+  `AltStore.DEFAULT_WRITE_DELAY` has no public replacement. A store is reached only through its runtime:
+  `AccountStore` and `HostSecrets` have no public factory and no public `close()`, so a store cannot be
+  closed under a runtime that is still open; closing the runtime closes both.
 - The store test seam (`StoreTestHooks.reset()` and the package-private `resetForTests()` behind it);
   a test that owns its runtime or store needs no process-wide reset.
 

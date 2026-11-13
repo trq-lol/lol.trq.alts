@@ -21,6 +21,7 @@ import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.net.HttpUtil;
 import lol.trq.alts.net.NetTestHooks;
 import lol.trq.alts.store.AccountStore;
+import lol.trq.alts.store.StoreTestHooks;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -45,12 +46,12 @@ class BulkOperationsTest {
 
     @BeforeAll
     static void openStore() {
-        store = AccountStore.open(storeDir);
+        store = StoreTestHooks.openAccountStore(storeDir);
     }
 
     @AfterAll
     static void closeStore() {
-        store.close();
+        StoreTestHooks.close(store);
     }
 
     private static AltAccount account(int index) {

@@ -16,6 +16,26 @@ public final class StoreTestHooks {
 
     private StoreTestHooks() {}
 
+    /** Opens an account store in {@code directory} with synchronous writes and the machine key. */
+    public static AccountStore openAccountStore(Path directory) {
+        return AccountStore.open(directory);
+    }
+
+    /** Opens the host secrets in {@code directory} with synchronous writes and the machine key. */
+    public static HostSecrets openHostSecrets(Path directory) {
+        return HostSecrets.open(directory);
+    }
+
+    /** Closes a store a test opened, releasing its lock. */
+    public static void close(AccountStore store) {
+        store.close();
+    }
+
+    /** Closes host secrets a test opened, releasing their lock. */
+    public static void close(HostSecrets secrets) {
+        secrets.close();
+    }
+
     /** Returns the content of every unreadable copy kept beside {@code fileName}, oldest first. */
     public static List<byte[]> unreadableCopies(Path directory, String fileName) throws IOException {
         List<Path> copies;
