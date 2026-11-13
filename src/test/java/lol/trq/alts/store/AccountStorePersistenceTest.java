@@ -326,6 +326,25 @@ class AccountStorePersistenceTest {
     }
 
     @Test
+    void updateCredentialsNeverAddsAnAccountTheStoreDoesNotHold() throws Exception {
+        AltAccount current = account(7);
+        store.useAccount(current);
+        AltAccount unknown = account(1).withTokens("fresh-access", "fresh-refresh", 9_000L);
+
+        store.updateCredentials(unknown);
+
+        assertTrue(store.accounts().isEmpty(), "an account the user chose not to save stays unsaved");
+        assertEquals(current.uuid(), store.currentAccount().orElseThrow().uuid(), "the current one is untouched");
+        reload();
+        assertTrue(store.accounts().isEmpty(), "and its credential never reaches the disk");
+        if (Files.exists(storeFile())) {
+            String onDisk = EncryptionUtil.decrypt(
+                    Files.readString(storeFile()).strip(), EncryptionUtil.getHardwareKey("lol.trq.alts"));
+            assertFalse(onDisk.contains("fresh-refresh"), "not even as a written-out entry");
+        }
+    }
+
+    @Test
     void usingAnAccountPersistsItsLastUsedTime() {
         AltAccount stored =
                 new AltAccount(UUID, "Alex", "access", AccountType.MICROSOFT, 1L, null, null, null, null, null, 0L);

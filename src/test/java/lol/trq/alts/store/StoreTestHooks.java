@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
@@ -24,6 +25,21 @@ public final class StoreTestHooks {
     /** Opens the host secrets in {@code directory} with synchronous writes and the machine key. */
     public static HostSecrets openHostSecrets(Path directory) {
         return HostSecrets.open(directory);
+    }
+
+    /** Returns the coalescing window {@code store} was opened with. */
+    public static Duration writeDelayOf(AccountStore store) {
+        return store.fileForTests().writeDelay();
+    }
+
+    /** Returns the coalescing window {@code secrets} were opened with. */
+    public static Duration writeDelayOf(HostSecrets secrets) {
+        return secrets.fileForTests().writeDelay();
+    }
+
+    /** Returns the write delay a runtime opens its stores with. */
+    public static Duration runtimeWriteDelay() {
+        return StoreFile.DEFAULT_WRITE_DELAY;
     }
 
     /** Closes a store a test opened, releasing its lock. */

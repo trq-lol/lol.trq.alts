@@ -111,6 +111,9 @@ public final class AltsRuntime<H> implements AutoCloseable {
             // are two steps. Both are safe to repeat: each clears its in-memory state before refilling it.
             store.load();
             secrets.load();
+            if (builder.afterStoresOpen != null) {
+                builder.afterStoresOpen.run();
+            }
 
             this.toasts = builder.toastSink;
             this.vaultResolver = builder.vaultTransportResolver;
@@ -370,6 +373,21 @@ public final class AltsRuntime<H> implements AutoCloseable {
         private String secretsKeyBinding;
         private StoreKeyProvider storeKeyProvider;
         private boolean migrateFromMachineKey;
+
+        // A test seam: runs inside build() once both stores are open and loaded, so a test can make the
+        // rest of construction fail and see that the stores are released. Package-private on purpose.
+        private Runnable afterStoresOpen;
+
+        /**
+         * Sets a task that runs inside {@link #build()} once both stores are open. For tests only.
+         *
+         * @param task the task, or null for none
+         * @return this builder
+         */
+        Builder<H> afterStoresOpenForTests(Runnable task) {
+            this.afterStoresOpen = task;
+            return this;
+        }
 
         /** Creates an empty builder; populate it with the host seams, then call {@link #build()}. */
         public Builder() {}

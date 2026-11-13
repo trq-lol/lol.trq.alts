@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
@@ -165,6 +166,35 @@ class AltsRuntimeStoresTest {
             AltsToasts.info("still mine", "");
             assertEquals(List.of("still mine"), toastsA, "nor its toast sink");
             assertTrue(toastsB.isEmpty());
+        }
+    }
+
+    @Test
+    void aRuntimeCoalescesTheWritesOfBothStores() {
+        try (AltsRuntime<Object> alts = builder(dirA).build()) {
+            Duration delay = StoreTestHooks.runtimeWriteDelay();
+            assertTrue(delay.toMillis() > 0, "a burst of logins must not write the file once each");
+            assertEquals(delay, StoreTestHooks.writeDelayOf(alts.store()));
+            assertEquals(delay, StoreTestHooks.writeDelayOf(alts.secrets()));
+        }
+    }
+
+    @Test
+    void aBuildThatFailsAfterOpeningTheStoresReleasesBoth() {
+        assertThrows(
+                IllegalStateException.class,
+                () -> builder(dirA)
+                        .afterStoresOpenForTests(() -> {
+                            throw new IllegalStateException("construction failed after the stores opened");
+                        })
+                        .build());
+
+        AccountStore accounts = StoreTestHooks.openAccountStore(dirA);
+        HostSecrets secrets = StoreTestHooks.openHostSecrets(dirA);
+        StoreTestHooks.close(secrets);
+        StoreTestHooks.close(accounts);
+        try (AltsRuntime<Object> next = builder(dirA).build()) {
+            assertTrue(next.store().loadError().isEmpty(), "and a runtime builds there afterwards");
         }
     }
 

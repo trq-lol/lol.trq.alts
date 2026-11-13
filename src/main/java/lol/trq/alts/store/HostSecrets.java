@@ -49,6 +49,11 @@ public final class HostSecrets {
     /** The encrypted file, owned and locked by this store. */
     private final StoreFile file;
 
+    /** The file behind this store, for tests in this package and {@code StoreTestHooks}. */
+    StoreFile fileForTests() {
+        return file;
+    }
+
     /** Guards each mutation together with the hand-off of its snapshot to {@link #file}. */
     private final Object lock = new Object();
 

@@ -3,6 +3,7 @@ package lol.trq.alts.store;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -105,6 +106,38 @@ class StoreLockTest {
         store.close();
 
         assertTrue(holds(reopened(), UUID), "closing must not lose a coalesced write");
+    }
+
+    @Test
+    void closeRemovesTheShutdownFlush() {
+        AccountStore store = AccountStore.open(storeDir, null, null, null, false, Duration.ofMinutes(10));
+        store.addAccount(alex());
+        Thread hook = store.fileForTests().shutdownFlushForTests();
+        assertNotNull(hook, "a coalesced write registers the flush that runs at exit");
+
+        store.close();
+
+        assertNull(store.fileForTests().shutdownFlushForTests());
+        assertFalse(Runtime.getRuntime().removeShutdownHook(hook), "close() must have deregistered it already");
+    }
+
+    @Test
+    void theShutdownFlushWritesWhatAHostThatNeverClosedLeftWaiting() throws Exception {
+        AccountStore store = AccountStore.open(storeDir, null, null, null, false, Duration.ofMinutes(10));
+        try {
+            store.addAccount(alex());
+            assertFalse(Files.exists(storeDir.resolve("accounts.dat")));
+
+            // What the JVM does at exit for a host that never closed its runtime.
+            store.fileForTests().shutdownFlushForTests().run();
+
+            String onDisk = EncryptionUtil.decrypt(
+                    Files.readString(storeDir.resolve("accounts.dat")).strip(),
+                    EncryptionUtil.getHardwareKey("lol.trq.alts"));
+            assertTrue(onDisk.contains(UUID), "the gathered write reached the disk without a close");
+        } finally {
+            store.close();
+        }
     }
 
     @Test

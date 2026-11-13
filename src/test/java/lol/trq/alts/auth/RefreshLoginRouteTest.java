@@ -116,6 +116,20 @@ class RefreshLoginRouteTest {
     }
 
     @Test
+    void aDirectLoginPersistsNothingItRotated() throws Exception {
+        LoginResult result =
+                service().loginRefreshToken("original", LoginMode.DIRECT).get();
+
+        assertTrue(result.success(), result.message());
+        assertEquals("rotated", result.account().refreshToken(), "the caller gets the rotated credential");
+        localStore.store().accounts().clear();
+        localStore.store().load();
+        assertTrue(
+                localStore.store().accounts().isEmpty(),
+                "DIRECT is a login the user chose not to save: nothing of it may reach the store");
+    }
+
+    @Test
     void refreshRouteLogsInAndStoresTheRotatedToken() throws Exception {
         LoginResult result =
                 service().loginRefreshToken("original", LoginMode.ADD).get();

@@ -248,6 +248,27 @@ final class StoreFile {
     }
 
     /**
+     * Returns the coalescing window this file was opened with.
+     *
+     * @return the write delay, zero for synchronous writes
+     */
+    Duration writeDelay() {
+        return Duration.ofMillis(writeDelayMillis);
+    }
+
+    /**
+     * Returns the shutdown hook that flushes this file at exit, for tests: registered with the first
+     * coalesced write, removed by {@link #close()}.
+     *
+     * @return the registered hook, or null when none is
+     */
+    Thread shutdownFlushForTests() {
+        synchronized (pendingLock) {
+            return shutdownFlush;
+        }
+    }
+
+    /**
      * Returns the filename, for messages that name the file without naming its path.
      *
      * @return the on-disk filename
