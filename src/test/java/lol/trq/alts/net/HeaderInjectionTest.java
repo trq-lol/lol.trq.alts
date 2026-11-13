@@ -89,6 +89,31 @@ class HeaderInjectionTest {
         assertEquals(0, requests.get());
     }
 
+    /**
+     * The proxy credential is the route's to place. A caller that names it itself would put it on a
+     * connection the JDK sends straight to the origin, so it is refused on every request shape, in any
+     * capitalisation, before anything is sent.
+     */
+    @Test
+    void aCallerSetProxyCredentialIsRefusedOnEveryRequestShape() {
+        for (String name : new String[] {"Proxy-Authorization", "proxy-authorization", "PROXY-AUTHORIZATION"}) {
+            Map<String, String> headers = Map.of(name, "Basic " + SECRET);
+
+            assertSilentAbout(assertThrows(IllegalArgumentException.class, () -> http.get(url(), headers, null)));
+            assertSilentAbout(
+                    assertThrows(IllegalArgumentException.class, () -> http.postJson(url(), headers, "{}", null)));
+            assertSilentAbout(assertThrows(
+                    IllegalArgumentException.class, () -> http.postFormForStatus(url(), headers, "a=b", null)));
+            assertSilentAbout(
+                    assertThrows(IllegalArgumentException.class, () -> http.getBytes(url(), headers, 1024, null)));
+            assertSilentAbout(assertThrows(
+                    IllegalArgumentException.class, () -> http.getHeader(url(), headers, "Location", null)));
+            assertSilentAbout(assertThrows(
+                    IllegalArgumentException.class, () -> http.sendForStatus("PUT", url(), null, headers, null, null)));
+        }
+        assertEquals(0, requests.get(), "nothing was sent with a caller-set proxy credential");
+    }
+
     @Test
     void anOrdinaryHeaderStillGoesThrough() throws Exception {
         HttpTransport.HttpResponse response =

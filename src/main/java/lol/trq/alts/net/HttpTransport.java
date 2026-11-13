@@ -97,6 +97,9 @@ public final class HttpTransport implements AutoCloseable {
     /** The whole message of a refused header: it must never quote the header, which may be a token. */
     private static final String UNSAFE_HEADER = "a request header holds a control character";
 
+    /** The whole message of a refused caller-set proxy credential; it quotes nothing. */
+    private static final String PROXY_CREDENTIAL_HEADER = "only the transport sets the proxy credential";
+
     /** How many redirects one fetch follows before the chain is treated as a loop. */
     private static final int MAX_REDIRECTS = 5;
 
@@ -1191,11 +1194,16 @@ public final class HttpTransport implements AutoCloseable {
      * control character anywhere in a name or a value is refused first, with a message that quotes
      * nothing.
      *
+     * <p>A caller header named {@code Proxy-Authorization} is refused too. The proxy credential is the
+     * route's, and only {@link #open(URI, ProxyRoute)} decides where it goes: on the {@code CONNECT} of a
+     * tunnel, or on a plain request to the proxy itself. Set by a caller on a tunnelled or direct
+     * connection, the JDK would send it to the origin.
+     *
      * @param conn the connection to configure
      * @param contentType the Content-Type header value, or null if no body is sent
      * @param headers map of additional headers to apply
-     * @throws IllegalArgumentException if a header name or value holds a control character; the message
-     *     names neither
+     * @throws IllegalArgumentException if a header name or value holds a control character, or a header
+     *     is named {@code Proxy-Authorization}; the message names neither the header nor its value
      */
     private static void applyHeaders(HttpURLConnection conn, String contentType, Map<String, String> headers) {
         requireHeaderText(contentType);
@@ -1206,6 +1214,9 @@ public final class HttpTransport implements AutoCloseable {
                 }
                 requireHeaderText(name);
                 requireHeaderText(value);
+                if (name.trim().equalsIgnoreCase("Proxy-Authorization")) {
+                    throw new IllegalArgumentException(PROXY_CREDENTIAL_HEADER);
+                }
             });
         }
         if (contentType != null) {
