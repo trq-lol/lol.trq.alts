@@ -295,7 +295,7 @@ public final class HttpTransport implements AutoCloseable {
     }
 
     private static IOException closedFailure(Throwable cause) {
-        return new IOException("the runtime is closed", cause);
+        return new TransportClosedException(cause);
     }
 
     private static void closeQuietly(AutoCloseable closeable) {
@@ -319,7 +319,7 @@ public final class HttpTransport implements AutoCloseable {
      */
     ProxyRoute routeFor(NetworkScope scope) throws IOException {
         if (tunnels.closed) {
-            throw new IOException("the runtime is closed");
+            throw new TransportClosedException(null);
         }
         ProxyProvider provider = proxyProvider;
         if (provider == null) {
