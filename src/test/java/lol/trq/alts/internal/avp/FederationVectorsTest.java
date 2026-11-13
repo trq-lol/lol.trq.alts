@@ -219,6 +219,13 @@ class FederationVectorsTest {
                 Tokens.signLeave("AAAAAAAAAAAAAAAAAAAAAA", alice.at(), hex(seedOf("alice"), "ed25519SeedHex"));
         assertEquals(Tokens.LeaveVerdict.WRONG_REPOSITORY, Tokens.leaveVerdict(elsewhere, members));
 
+        // The signature is checked first: a forged request for another repository is a bad signature.
+        byte[] forgedElsewhere = elsewhere.signature();
+        forgedElsewhere[5] ^= 0x01;
+        LeaveRequest both =
+                new LeaveRequest(elsewhere.repoId(), elsewhere.memberKey(), elsewhere.at(), forgedElsewhere);
+        assertEquals(Tokens.LeaveVerdict.BAD_SIGNATURE, Tokens.leaveVerdict(both, members));
+
         LeaveRequest owner = Tokens.signLeave(alice.repoId(), alice.at(), hex(seedOf("owner"), "ed25519SeedHex"));
         assertEquals(Tokens.LeaveVerdict.OWNER, Tokens.leaveVerdict(owner, members));
         assertEquals("forbidden", Tokens.LeaveVerdict.OWNER.code().orElseThrow());
