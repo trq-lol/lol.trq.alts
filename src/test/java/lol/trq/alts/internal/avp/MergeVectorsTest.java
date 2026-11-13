@@ -192,6 +192,24 @@ class MergeVectorsTest {
         }
     }
 
+    /**
+     * SPEC 5: an account is deleted only if its marker is greater than every field stamp and every ban
+     * stamp, so one ban observed after the deletion keeps it live.
+     */
+    @Test
+    void aBanNewerThanTheMarkerKeepsTheAccountLive() {
+        String fields = "\"fields\":{\"username\":{\"value\":\"u\",\"at\":5,\"n\":0,\"by\":\"a\"}}";
+        String deleted = "\"deleted\":{\"at\":10,\"n\":0,\"by\":\"a\"}";
+        Payload newerBan = Payload.parse(("{\"v\":2,\"accounts\":{\"u\":{" + deleted + "," + fields
+                        + ",\"bans\":{\"play.example\":{\"value\":null,\"at\":11,\"n\":0,\"by\":\"a\"}}}}}")
+                .getBytes(StandardCharsets.UTF_8));
+        Payload olderBan = Payload.parse(("{\"v\":2,\"accounts\":{\"u\":{" + deleted + "," + fields
+                        + ",\"bans\":{\"play.example\":{\"value\":null,\"at\":9,\"n\":0,\"by\":\"a\"}}}}}")
+                .getBytes(StandardCharsets.UTF_8));
+        assertFalse(newerBan.accounts().get("u").isDeleted(), "a ban after the marker revives it");
+        assertTrue(olderBan.accounts().get("u").isDeleted(), "every stamp older than the marker");
+    }
+
     /** SPEC 5 merge step 3: {@code deleted} is the greatest marker among the inputs, in either order. */
     @Test
     void theMergedMarkerIsTheGreatestInEitherOrder() {
