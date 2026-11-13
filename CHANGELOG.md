@@ -222,6 +222,7 @@ says the kind); *none* means success, so `failure()` is empty.
 | `RefreshRejectedException.rateLimited()` | `RATE_LIMITED` | |
 | `RefreshRejectedException`, an outage | `NETWORK` | Status 5xx or 408, or unreachable. |
 | `RefreshRejectedException`, another refusal | `UNAUTHORIZED` | Was `NETWORK`; the stored token is kept. |
+| `RefreshRejectedException`, `invalid_client` or `unauthorized_client` | `NOT_CONFIGURED` | The host's client registration was refused; the token is kept. |
 | `SkinValidationException.Reason.UNREADABLE` | `INVALID_INPUT` | `SkinProblem.UNREADABLE` |
 | `SkinValidationException.Reason.EMPTY` | `INVALID_INPUT` | `SkinProblem.EMPTY` |
 | `SkinValidationException.Reason.TOO_LARGE` | `INVALID_INPUT` | `SkinProblem.TOO_LARGE` |

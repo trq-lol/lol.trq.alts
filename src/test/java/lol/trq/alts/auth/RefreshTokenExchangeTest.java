@@ -260,18 +260,22 @@ class RefreshTokenExchangeTest {
 
     @Test
     void hostMisconfigurationDoesNotDestroyTheCredential() throws Exception {
-        tokenStatus = 400;
-        tokenBody = "{\"error\":\"invalid_client\"}";
-        MicrosoftAuthConfig config = startServer();
+        for (String error : new String[] {"invalid_client", "unauthorized_client"}) {
+            tokenStatus = 400;
+            tokenBody = "{\"error\":\"" + error + "\"}";
+            MicrosoftAuthConfig config = startServer();
 
-        assertEquals(
-                Kind.UNAUTHORIZED,
-                rejectionFor(config).kind(),
-                "a wrong client id is the host's mistake; the user's refresh token is still good");
+            assertEquals(
+                    Kind.NOT_CONFIGURED,
+                    rejectionFor(config).kind(),
+                    "a wrong client id is the host's mistake; the user's refresh token is still good");
+            stopServer();
+            server = null;
+        }
     }
 
     @Test
-    void anUnreadableClientErrorIsTransient() throws Exception {
+    void anUnreadableClientErrorIsARefusalThatKeepsTheToken() throws Exception {
         tokenStatus = 400;
         tokenBody = "not json at all";
         MicrosoftAuthConfig config = startServer();

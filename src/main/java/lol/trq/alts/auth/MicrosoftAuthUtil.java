@@ -941,9 +941,23 @@ public final class MicrosoftAuthUtil {
      */
     static AltsException stepFailure(String step, HttpTransport.HttpResponse response) {
         return new AltsException(AltsFailure.of(
-                kindForStatus(response.status()),
+                clientRefused(response) ? Kind.NOT_CONFIGURED : kindForStatus(response.status()),
                 step + " failed with status " + response.status(),
                 response.retryAfter()));
+    }
+
+    /**
+     * Returns whether a token endpoint refused the host's client registration rather than the user's
+     * credential: OAuth's {@code invalid_client} or {@code unauthorized_client}. That is a host
+     * misconfiguration ({@link Kind#NOT_CONFIGURED}), which no retry and no fresh sign-in fixes.
+     *
+     * @param response the failing response
+     * @return true when the body states one of those two errors
+     */
+    private static boolean clientRefused(HttpTransport.HttpResponse response) {
+        JsonObject body = response.body();
+        String error = body == null ? null : stringOrNull(body, "error");
+        return "invalid_client".equals(error) || "unauthorized_client".equals(error);
     }
 
     /**
@@ -1011,7 +1025,8 @@ public final class MicrosoftAuthUtil {
         if (tokenIsSpent(response)) {
             return new AltsException(Kind.REAUTH_REQUIRED, message);
         }
-        return new AltsException(AltsFailure.of(kindForStatus(response.status()), message, response.retryAfter()));
+        Kind kind = clientRefused(response) ? Kind.NOT_CONFIGURED : kindForStatus(response.status());
+        return new AltsException(AltsFailure.of(kind, message, response.retryAfter()));
     }
 
     private static String encode(String value) {

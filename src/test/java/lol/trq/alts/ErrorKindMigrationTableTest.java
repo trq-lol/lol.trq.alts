@@ -61,6 +61,7 @@ class ErrorKindMigrationTableTest {
         rows.put("RefreshRejectedException.rateLimited()", "RATE_LIMITED");
         rows.put("RefreshRejectedException, an outage", "NETWORK");
         rows.put("RefreshRejectedException, another refusal", "UNAUTHORIZED");
+        rows.put("RefreshRejectedException, invalid_client or unauthorized_client", "NOT_CONFIGURED");
         for (SkinProblem problem : SkinProblem.values()) {
             rows.put("SkinValidationException.Reason." + problem.name(), "INVALID_INPUT");
         }
