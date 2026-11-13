@@ -116,14 +116,24 @@ class StoreKeyProviderTest {
     }
 
     @Test
-    void aStoreWrittenUnderADifferentHostKeyDoesNotOpen() {
+    void aStoreWrittenUnderADifferentHostKeyDoesNotOpen() throws Exception {
         restart(HOST_KEY, false);
         store.addAccount(alex());
+        byte[] sealed = Files.readAllBytes(storeFile());
 
         restart(() -> "another-host-key-of-enough-bytes".getBytes(), false);
 
         assertTrue(store.loadError().isPresent());
         assertTrue(store.accounts().isEmpty());
+
+        store.addAccount(steve());
+        store.save();
+        store.close();
+
+        assertArrayEquals(sealed, Files.readAllBytes(storeFile()), "the wrong key writes nothing over the file");
+        restart(HOST_KEY, false);
+        assertTrue(store.loadError().isEmpty(), "and it still opens under the key that sealed it");
+        assertTrue(holds(UUID) && !holds(OTHER_UUID));
     }
 
     @Test
@@ -232,7 +242,12 @@ class StoreKeyProviderTest {
         assertEquals(List.of(storeFile()), listDirectory(), "and nothing else may appear on disk either");
 
         store.load();
+        store.flush();
 
+        assertArrayEquals(
+                real,
+                Files.readAllBytes(storeFile()),
+                "the snapshot held back while refused is stale once the load replaced memory; it is never written");
         assertTrue(store.loadError().isEmpty(), "a load that works retracts the failure");
         assertTrue(store.saveError().isEmpty(), "and with it the refusal");
         assertTrue(holds(UUID), "the real store is what the list holds now");
@@ -241,6 +256,25 @@ class StoreKeyProviderTest {
         reload();
 
         assertTrue(holds(UUID) && holds(OTHER_UUID), "and from here on writes land again");
+    }
+
+    @Test
+    void discardingAFileUnreadForWantOfTheKeyKeepsACopyOfIt() throws Exception {
+        restart(HOST_KEY, false);
+        store.addAccount(alex());
+        byte[] real = Files.readAllBytes(storeFile());
+        restart(
+                () -> {
+                    throw new IllegalStateException("keychain gone for good");
+                },
+                false);
+        assertEquals(List.of(), StoreTestHooks.unreadableCopies(storeDir, FILE_NAME), "intact, so not copied yet");
+
+        store.discardUnreadable();
+
+        List<byte[]> kept = StoreTestHooks.unreadableCopies(storeDir, FILE_NAME);
+        assertEquals(1, kept.size(), "giving up on the file must not cost it");
+        assertArrayEquals(real, kept.get(0));
     }
 
     @Test

@@ -131,7 +131,12 @@ class AccountStoreUnreadableFileTest {
         Files.writeString(
                 storeFile(),
                 EncryptionUtil.encrypt("{\"accounts\":[]}", EncryptionUtil.getHardwareKey("lol.trq.alts")));
+        byte[] restored = Files.readAllBytes(storeFile());
         store.load();
+        store.flush();
+
+        assertArrayEquals(
+                restored, Files.readAllBytes(storeFile()), "the load must not write the snapshot it held back");
 
         assertTrue(store.loadError().isEmpty(), "a load that works must retract the earlier failure");
         assertTrue(store.saveError().isEmpty(), "and with it the refusal");
@@ -140,6 +145,52 @@ class AccountStoreUnreadableFileTest {
         reload();
         assertTrue(holds(OTHER_UUID), "writes land again");
         assertFalse(holds(UUID), "what was added while refused was replaced by what the load read");
+    }
+
+    @Test
+    void aSecondFailedLoadKeepsTheRefusal() throws Exception {
+        byte[] original = "not an encrypted store".getBytes(StandardCharsets.UTF_8);
+        Files.write(storeFile(), original);
+        store.load();
+        store.load();
+
+        store.addAccount(alex());
+        store.save();
+
+        assertTrue(store.saveError().isPresent(), "failing again is no reason to start writing");
+        assertArrayEquals(original, Files.readAllBytes(storeFile()));
+    }
+
+    @Test
+    void aFileThatDecryptsButIsNotAStoreIsNotWrittenOver() throws Exception {
+        Files.writeString(
+                storeFile(), EncryptionUtil.encrypt("not json at all", EncryptionUtil.getHardwareKey("lol.trq.alts")));
+        byte[] original = Files.readAllBytes(storeFile());
+        store.load();
+        assertTrue(store.loadError().isPresent());
+
+        store.addAccount(alex());
+        store.save();
+        store.close();
+
+        assertTrue(store.saveError().isPresent());
+        assertArrayEquals(original, Files.readAllBytes(storeFile()), "opening is not the same as being a store");
+    }
+
+    @Test
+    void aDirectoryWhereTheFileShouldBeIsNotReplaced() throws Exception {
+        Files.createDirectory(storeFile());
+        store.load();
+        assertTrue(store.loadError().isPresent());
+
+        store.addAccount(alex());
+        store.save();
+
+        assertTrue(store.saveError().isPresent());
+        assertTrue(Files.isDirectory(storeFile()), "whatever is there is left as it is");
+        // A move over a directory can fail on its own; what must hold is that the failed read refused the
+        // writes, which only a refusal has to be discarded to lift.
+        assertTrue(store.discardUnreadable(), "the failed read is what refused the writes");
     }
 
     @Test
