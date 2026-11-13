@@ -135,8 +135,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of an exception. A bulk run cut short (the runtime closed under a wait, or its executor refused a
   task) reports every entry it did not finish as a failure of kind `CANCELLED`, so its report holds
   every entry; a `BulkProgress.started` that throws fails that entry with kind `UNKNOWN`, unattempted,
-  and the run goes on. A `BulkProgress.completed` or `finished` that throws is ignored: the entry stays
-  recorded and the run is not cut short. An account-service call on a closed runtime throws `AltsException` of kind
+  and the run goes on. A `BulkProgress.completed` or `finished` that throws a `RuntimeException` is ignored:
+  the entry stays recorded and the run is not cut short. An `Error` from a callback does cut it short:
+  the entry being reported keeps its result and every remaining entry is reported as `CANCELLED`. An account-service call on a closed runtime throws `AltsException` of kind
   `CANCELLED`.
 - **Breaking: `VaultIdentity.signChallenge` refuses an AVP structure.** It signs nothing and throws
   `AltsException` of kind `INVALID_INPUT` for an input that begins with the ASCII bytes `avp/`, or is
