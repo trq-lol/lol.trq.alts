@@ -112,6 +112,33 @@ class ProxyRoutingTest {
         assertEquals("Basic dXNlcjpwYXNz", proxy.authorizations().get(0));
     }
 
+    /**
+     * The JDK pools a plain-HTTP proxy connection by proxy address alone, so a kept-alive one would carry
+     * the next request, under another credential, through whatever session the gateway pinned to it. On
+     * that path the transport closes every connection after its request, and a caller's own
+     * {@code Connection} header cannot turn pooling back on.
+     */
+    @Test
+    void anAuthenticatedPlainHttpProxyConnectionIsNeverReused() throws Exception {
+        try (KeepAliveProxy keepAlive = new KeepAliveProxy()) {
+            bind(scope -> ProxyRoute.http(InetAddress.getLoopbackAddress().getHostAddress(), keepAlive.port())
+                    .withCredentials("user", "pass".toCharArray()));
+            java.util.Map<String, String> keepItAlive = java.util.Map.of("Connection", "keep-alive");
+
+            http.get(originUrl(), null, NetworkScope.of(NetworkScope.Purpose.PROFILE));
+            http.get(originUrl(), keepItAlive, NetworkScope.of(NetworkScope.Purpose.PROFILE));
+            http.getForStatus(originUrl(), keepItAlive, NetworkScope.of(NetworkScope.Purpose.PROFILE));
+
+            assertEquals(3, keepAlive.heads().size(), keepAlive.heads().toString());
+            assertEquals(3, keepAlive.connections(), "each request opened its own connection: " + keepAlive.heads());
+            for (String head : keepAlive.heads()) {
+                assertTrue(
+                        head.toLowerCase(Locale.ROOT).contains("\r\nconnection: close\r\n"),
+                        "every request asked for its connection to be closed: " + head);
+            }
+        }
+    }
+
     @Test
     void eachScopeIsRoutedOnItsOwn() throws Exception {
         bind(scope -> scope.purpose() == NetworkScope.Purpose.PROFILE ? throughProxy() : ProxyRoute.direct());
