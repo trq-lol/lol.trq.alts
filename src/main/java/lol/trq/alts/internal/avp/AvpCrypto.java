@@ -125,6 +125,7 @@ public final class AvpCrypto {
             block[block.length - 1] = (byte) counter;
             Arrays.fill(previous, (byte) 0);
             previous = hmacSha256(prk, block);
+            Arrays.fill(block, (byte) 0);
             int take = Math.min(previous.length, length - filled);
             System.arraycopy(previous, 0, out, filled, take);
             filled += take;

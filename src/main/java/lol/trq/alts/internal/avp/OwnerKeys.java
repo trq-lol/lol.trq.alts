@@ -51,9 +51,15 @@ public final class OwnerKeys {
         if (seed.length != 64) {
             throw AvpFailures.invalidInput("a BIP39 seed is 64 bytes");
         }
-        return new OwnerKeys(
-                AvpCrypto.hkdf(seed, new byte[0], ED25519_INFO.getBytes(StandardCharsets.UTF_8), 32),
-                AvpCrypto.hkdf(seed, new byte[0], X25519_INFO.getBytes(StandardCharsets.UTF_8), 32));
+        byte[] ed = AvpCrypto.hkdf(seed, new byte[0], ED25519_INFO.getBytes(StandardCharsets.UTF_8), 32);
+        byte[] x = AvpCrypto.hkdf(seed, new byte[0], X25519_INFO.getBytes(StandardCharsets.UTF_8), 32);
+        try {
+            return new OwnerKeys(ed, x);
+        } catch (RuntimeException failed) {
+            Arrays.fill(ed, (byte) 0);
+            Arrays.fill(x, (byte) 0);
+            throw failed;
+        }
     }
 
     /**

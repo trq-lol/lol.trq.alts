@@ -10,8 +10,10 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import javax.crypto.SecretKey;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
+import javax.security.auth.DestroyFailedException;
 
 /**
  * The BIP39 encoding of the owner identity (AVP SPEC 3.1): 32 bytes of entropy to a 24-word English
@@ -175,9 +177,16 @@ public final class Bip39 {
         PBEKeySpec spec = new PBEKeySpec(password, salt, 2048, 512);
         try {
             // The JDK's PBKDF2 encodes the char[] password as UTF-8, which an NFKD English phrase is.
-            return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA512")
-                    .generateSecret(spec)
-                    .getEncoded();
+            SecretKey key = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA512").generateSecret(spec);
+            try {
+                return key.getEncoded();
+            } finally {
+                try {
+                    key.destroy();
+                } catch (DestroyFailedException notSupported) {
+                    // A provider whose key cannot be destroyed: its copy goes with the garbage collector.
+                }
+            }
         } catch (GeneralSecurityException | RuntimeException e) {
             throw AvpFailures.crypto("PBKDF2 failed", e);
         } finally {
