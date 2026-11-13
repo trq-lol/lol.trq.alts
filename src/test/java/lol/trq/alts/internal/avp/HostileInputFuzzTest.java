@@ -1,5 +1,6 @@
 package lol.trq.alts.internal.avp;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.gson.JsonArray;
@@ -9,7 +10,10 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -31,7 +35,33 @@ class HostileInputFuzzTest {
 
     private final Map<String, Integer> escapes = new TreeMap<>();
     private final Random rnd = new Random(20261113L);
+    private final MessageDigest inputs = sha256();
     private int calls;
+
+    /** The digest of every input the rounds generate, pinned so a change to the generator is a visible one. */
+    private static final String INPUT_DIGEST = "efb81a4c63df4cc1f9dfd1de61bf33dfb0c23aaa280f7d196ecb83552e305561";
+
+    private static MessageDigest sha256() {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** Bytes from the seeded source only, so every run feeds the same inputs. */
+    private byte[] bytes(int n) {
+        byte[] out = new byte[n];
+        rnd.nextBytes(out);
+        return out;
+    }
+
+    /** Records a generated input in the digest and hands it back. */
+    private byte[] fed(byte[] input) {
+        inputs.update(input);
+        inputs.update((byte) 0);
+        return input;
+    }
 
     private interface Op {
         void run() throws Exception;
@@ -61,7 +91,7 @@ class HostileInputFuzzTest {
             case 8 -> new JsonPrimitive("AAAA");
             case 9 -> new JsonPrimitive("AA==");
             case 10 -> new JsonPrimitive(true);
-            default -> new JsonPrimitive(AvpBytes.base64(AvpCrypto.randomBytes(rnd.nextInt(70))));
+            default -> new JsonPrimitive(AvpBytes.base64(bytes(rnd.nextInt(70))));
         };
     }
 
@@ -140,7 +170,7 @@ class HostileInputFuzzTest {
         for (int round = 0; round < 3000; round++) {
             // Manifests
             JsonElement mj = mutate(states.get(rnd.nextInt(states.size())));
-            byte[] mtext = rnd.nextBoolean() ? AvpJson.write(mj) : mangle(AvpJson.write(states.get(0)));
+            byte[] mtext = fed(rnd.nextBoolean() ? AvpJson.write(mj) : mangle(AvpJson.write(states.get(0))));
             call("manifest", () -> {
                 SignedManifest m = Manifest.signedFromJson(AvpJson.parse(mtext));
                 ManifestRules.check(m, null);
@@ -154,17 +184,17 @@ class HostileInputFuzzTest {
             });
             // Commits
             JsonElement cj = mutate(cs.get(rnd.nextInt(cs.size())));
-            byte[] ctext = rnd.nextBoolean() ? AvpJson.write(cj) : mangle(AvpJson.write(cs.get(0)));
+            byte[] ctext = fed(rnd.nextBoolean() ? AvpJson.write(cj) : mangle(AvpJson.write(cs.get(0))));
             call("commit", () -> {
                 Commit c = Commits.fromJson(AvpJson.parse(ctext));
                 Commits.verify(c);
                 Commits.shapeOk(c);
                 Commits.id(c);
-                Commits.open(c, AvpCrypto.randomBytes(rnd.nextBoolean() ? 32 : rnd.nextInt(40)));
+                Commits.open(c, fed(bytes(rnd.nextBoolean() ? 32 : rnd.nextInt(40))));
             });
             // Payloads
             JsonElement pj = mutate(payloads.get(rnd.nextInt(payloads.size())));
-            byte[] ptext = rnd.nextBoolean() ? AvpJson.write(pj) : mangle(AvpJson.write(payloads.get(0)));
+            byte[] ptext = fed(rnd.nextBoolean() ? AvpJson.write(pj) : mangle(AvpJson.write(payloads.get(0))));
             call("payload", () -> {
                 Payload p = Payload.parse(ptext);
                 Payload q = Payload.merge(List.of(p, Payload.parse(AvpJson.write(payloads.get(0)))));
@@ -174,7 +204,7 @@ class HostileInputFuzzTest {
             });
             // Tokens
             JsonElement tj = mutate(tokens.get(rnd.nextInt(tokens.size())));
-            byte[] ttext = rnd.nextBoolean() ? AvpJson.write(tj) : mangle(AvpJson.write(tokens.get(0)));
+            byte[] ttext = fed(rnd.nextBoolean() ? AvpJson.write(tj) : mangle(AvpJson.write(tokens.get(0))));
             String tok =
                     rnd.nextInt(5) == 0 ? new String(ttext, StandardCharsets.ISO_8859_1) : AvpBytes.base64Url(ttext);
             call("token", () -> {
@@ -196,18 +226,19 @@ class HostileInputFuzzTest {
                     // next
                 }
                 Tokens.LinkGrant g = Tokens.linkGrantFromJson(o);
-                Tokens.openLinkGrant(g, AvpCrypto.randomBytes(32));
+                Tokens.openLinkGrant(g, fed(bytes(32)));
             });
             JsonElement lj = mutate(leaves.get(rnd.nextInt(leaves.size())));
+            fed(AvpJson.write(lj));
             call("leave", () -> {
                 Tokens.LeaveRequest l = Tokens.leaveFromJson(AvpJson.object(AvpJson.parse(AvpJson.write(lj)), "l"));
                 Tokens.verifyLeave(l);
                 Tokens.leaveVerdict(l, genesis.state());
             });
             // Raw primitives with wrong lengths
-            byte[] a = AvpCrypto.randomBytes(rnd.nextInt(40));
-            byte[] b = AvpCrypto.randomBytes(rnd.nextInt(70));
-            byte[] n = AvpCrypto.randomBytes(rnd.nextInt(80));
+            byte[] a = fed(bytes(rnd.nextInt(40)));
+            byte[] b = fed(bytes(rnd.nextInt(70)));
+            byte[] n = fed(bytes(rnd.nextInt(80)));
             call("ed25519.verify", () -> Ed25519Strict.verify(a, n, b));
             call("challenge.verify", () -> Challenge.verify(a, a, n, b));
             call("challenge.sign", () -> Challenge.sign(a, a, n));
@@ -258,7 +289,8 @@ class HostileInputFuzzTest {
             h.tick(0, "x");
         });
 
-        assertTrue(calls > 75_000, "every round ran");
+        assertEquals(75_006, calls, "every round ran, and the same number of calls each run");
+        assertEquals(INPUT_DIGEST, HexFormat.of().formatHex(inputs.digest()), "the same inputs each run");
         assertTrue(escapes.isEmpty(), escapes.toString());
     }
 }
