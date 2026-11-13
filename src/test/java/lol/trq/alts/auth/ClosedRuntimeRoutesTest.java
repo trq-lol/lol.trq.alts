@@ -168,6 +168,13 @@ class ClosedRuntimeRoutesTest {
                             .failure()
                             .orElseThrow()
                             .kind());
+
+            // A failed refresh says it was a refresh, a failed check that it was a check.
+            AccountStatus refreshed = alts.accountService().refresh(STORED).get(5, TimeUnit.SECONDS);
+            assertEquals(Kind.CANCELLED, refreshed.failure().orElseThrow().kind());
+            assertTrue(refreshed.message().startsWith("Refresh"), refreshed.message());
+            AccountStatus checked = alts.accountService().check(STORED).get(5, TimeUnit.SECONDS);
+            assertTrue(checked.message().startsWith("Check"), checked.message());
         } finally {
             alts.close();
         }
