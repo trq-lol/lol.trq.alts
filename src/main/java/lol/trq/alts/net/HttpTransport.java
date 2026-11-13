@@ -284,6 +284,16 @@ public final class HttpTransport implements AutoCloseable {
         return waited;
     }
 
+    /**
+     * Returns how many close actions are registered and waiting, on this transport and its views. For
+     * tests, which check that a wait that ended some other way leaves nothing registered behind.
+     *
+     * @return the number of registered close actions
+     */
+    int closerCount() {
+        return tunnels.closers.size();
+    }
+
     private static IOException closedFailure(Throwable cause) {
         return new IOException("the runtime is closed", cause);
     }

@@ -4,9 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -70,5 +73,42 @@ class HttpTransportWaitTest {
         } finally {
             host.shutdownNow();
         }
+    }
+
+    /**
+     * A wait registers itself so close() can end it, and must unregister once it ends some other way,
+     * or a long-lived runtime that paces many runs would hold one closure per wait it ever made.
+     */
+    @Test
+    void completedWaitsLeaveNothingRegistered() throws Exception {
+        ExecutorService host = Executors.newSingleThreadExecutor();
+        try {
+            HttpTransport transport = new HttpTransport(null, host);
+            List<CompletableFuture<Void>> waits = new ArrayList<>();
+            for (int i = 0; i < 50; i++) {
+                waits.add(transport.delay(Duration.ofMillis(5 + i % 7)));
+            }
+            assertTrue(transport.closerCount() > 0, "a pending wait is registered");
+
+            CompletableFuture.allOf(waits.toArray(CompletableFuture[]::new)).get(5, TimeUnit.SECONDS);
+
+            assertEquals(0, transport.closerCount(), "every completed wait unregistered itself");
+            transport.schedule(0, () -> {}, failure -> {});
+            assertEquals(0, transport.closerCount(), "and so does a task run at once");
+        } finally {
+            host.shutdownNow();
+        }
+    }
+
+    @Test
+    void closingRunsAndForgetsEveryPendingWait() throws Exception {
+        HttpTransport transport = TestTransports.direct();
+        CompletableFuture<Void> wait = transport.delay(Duration.ofHours(1));
+        assertEquals(1, transport.closerCount());
+
+        transport.close();
+
+        assertThrows(ExecutionException.class, () -> wait.get(2, TimeUnit.SECONDS));
+        assertEquals(0, transport.closerCount());
     }
 }

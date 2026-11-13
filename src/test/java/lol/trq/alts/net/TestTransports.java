@@ -38,6 +38,11 @@ public final class TestTransports {
         return new HttpTransport(provider, EXECUTOR, tls);
     }
 
+    /** Returns how many close actions {@code transport} still holds registered. */
+    public static int closerCount(HttpTransport transport) {
+        return transport.closerCount();
+    }
+
     /** Returns the route {@code transport} resolves for {@code scope}. */
     public static ProxyRoute routeFor(HttpTransport transport, NetworkScope scope) throws IOException {
         return transport.routeFor(scope);

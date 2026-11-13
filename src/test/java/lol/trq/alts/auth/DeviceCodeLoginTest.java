@@ -315,6 +315,61 @@ class DeviceCodeLoginTest {
     }
 
     /**
+     * A device-code login registers its wait and each poll with the transport so close() can end them.
+     * Once the login ends on its own, whichever way, nothing of it may stay registered.
+     */
+    @Test
+    void aSucceededDeviceCodeLoginLeavesNothingRegistered() throws Exception {
+        chain.deviceTokenError("authorization_pending");
+        chain.deviceTokenError("authorization_pending");
+        chain.deviceTokenSuccess();
+        HttpTransport transport = TestTransports.direct();
+
+        assertTrue(registering(transport)
+                .loginDeviceCode(prompt, LoginMode.DIRECT)
+                .get(10, TimeUnit.SECONDS)
+                .success());
+
+        assertEquals(0, TestTransports.closerCount(transport), "a successful login unregistered everything");
+    }
+
+    @Test
+    void aDeclinedDeviceCodeLoginLeavesNothingRegistered() throws Exception {
+        chain.deviceTokenError("authorization_pending");
+        chain.deviceTokenError("authorization_declined");
+        HttpTransport transport = TestTransports.direct();
+
+        assertFalse(registering(transport)
+                .loginDeviceCode(prompt, LoginMode.DIRECT)
+                .get(10, TimeUnit.SECONDS)
+                .success());
+
+        assertEquals(0, TestTransports.closerCount(transport), "a declined login unregistered everything");
+    }
+
+    @Test
+    void aCancelledDeviceCodeLoginLeavesNothingRegistered() throws Exception {
+        chain.deviceTokenError("authorization_pending");
+        HttpTransport transport = TestTransports.direct();
+        CompletableFuture<LoginResult> login = registering(transport).loginDeviceCode(prompt, LoginMode.DIRECT);
+        waitUntil(() -> chain.deviceTokenPolls() >= 2);
+        assertTrue(TestTransports.closerCount(transport) > 0, "a pending login is registered");
+
+        login.cancel(true);
+
+        // The poll already scheduled fires, sees the login cancelled, and schedules nothing more.
+        waitUntil(() -> TestTransports.closerCount(transport) == 0);
+    }
+
+    /** A device-code login service over {@code transport}, so the test can count what it registers. */
+    private AltLoginServiceImpl registering(HttpTransport transport) {
+        AltLoginServiceImpl service =
+                new AltLoginServiceImpl(localStore.store(), injected::set, chain.config(), transport);
+        service.deviceCodeTiming = new DeviceCodeTiming(SECOND_MILLIS, SLOW_DOWN_MILLIS);
+        return service;
+    }
+
+    /**
      * A runtime closed while the user is still entering the code ends the login at once. Its own
      * executor refuses the next poll, and a wait the JDK's delayer could not hand over would otherwise
      * leave the future pending for good.
