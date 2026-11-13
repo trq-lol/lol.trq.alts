@@ -14,7 +14,6 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import javax.imageio.ImageIO;
 import lol.trq.alts.account.AccountEndpoints;
-import lol.trq.alts.account.AccountException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -81,7 +80,7 @@ class AltsRuntimeBuilderRoutesTest {
                 builder().accountEndpoints(new AccountEndpoints(base())).build()) {
             assertTrue(alts.profileLookup().byName("Alex").isEmpty(), "the loopback knows nobody");
             assertThrows(
-                    AccountException.class,
+                    AltsException.class,
                     () -> alts.accountServices("token", UUID).entitlements().fetch());
         }
 

@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure.Kind;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -168,40 +170,38 @@ class PlayerAttributesTest {
     }
 
     @Test
-    void aRefusedTokenIsAnExceptionCarryingItsStatus() {
+    void aRefusedTokenIsAnExceptionCarryingItsKind() {
         server.canned(
                 401, "{\"path\":\"/player/attributes\",\"error\":\"UNAUTHORIZED\",\"errorMessage\":\"Bad token\"}");
 
-        AccountException read = assertThrows(
-                AccountException.class, () -> server.services().attributes().fetch());
-        AccountException write = assertThrows(
-                AccountException.class, () -> server.services().attributes().setProfanityFilter(true));
+        AltsException read = assertThrows(
+                AltsException.class, () -> server.services().attributes().fetch());
+        AltsException write = assertThrows(
+                AltsException.class, () -> server.services().attributes().setProfanityFilter(true));
 
-        assertEquals(401, read.status());
-        assertTrue(read.tokenRefused());
-        assertTrue(read.getMessage().contains("Bad token"));
-        assertTrue(write.tokenRefused());
+        assertEquals(Kind.UNAUTHORIZED, read.kind());
+        assertFalse(read.getMessage().contains("Bad token"), "the service's own text is not repeated");
+        assertEquals(Kind.UNAUTHORIZED, write.kind());
     }
 
     @Test
     void aRateLimitCarriesTheWaitTheServiceAskedFor() {
         server.rateLimited(7);
 
-        AccountException read = assertThrows(
-                AccountException.class, () -> server.services().attributes().fetch());
-        AccountException write = assertThrows(
-                AccountException.class, () -> server.services().attributes().setProfanityFilter(true));
+        AltsException read = assertThrows(
+                AltsException.class, () -> server.services().attributes().fetch());
+        AltsException write = assertThrows(
+                AltsException.class, () -> server.services().attributes().setProfanityFilter(true));
 
-        assertTrue(read.rateLimited());
-        assertEquals(Duration.ofSeconds(7), read.retryAfter());
-        assertTrue(write.rateLimited());
+        assertTrue(read.kind() == Kind.RATE_LIMITED);
+        assertEquals(Duration.ofSeconds(7), read.failure().retryAfter().orElse(null));
+        assertTrue(write.kind() == Kind.RATE_LIMITED);
     }
 
     @Test
     void aWriteAnsweredWithNoBodyIsAFailureRatherThanEmptyAttributes() {
         server.canned(204, "");
 
-        assertThrows(
-                AccountException.class, () -> server.services().attributes().setProfanityFilter(true));
+        assertThrows(AltsException.class, () -> server.services().attributes().setProfanityFilter(true));
     }
 }

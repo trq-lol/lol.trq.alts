@@ -16,18 +16,18 @@ public interface PlayerAttributesService {
      * Fetches the account's attributes.
      *
      * @return the attributes
-     * @throws AccountException if the token was refused or the service failed
+     * @throws lol.trq.alts.AltsException if the token was refused or the service failed
      * @since 0.12.0
      */
-    PlayerAttributes fetch() throws AccountException;
+    PlayerAttributes fetch();
 
     /**
      * Turns the profanity filter on or off.
      *
      * @param enabled whether the filter should be on
      * @return the attributes as the service holds them after the change
-     * @throws AccountException if the token was refused or the service failed
+     * @throws lol.trq.alts.AltsException if the token was refused or the service failed
      * @since 0.12.0
      */
-    PlayerAttributes setProfanityFilter(boolean enabled) throws AccountException;
+    PlayerAttributes setProfanityFilter(boolean enabled);
 }

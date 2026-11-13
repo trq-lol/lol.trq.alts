@@ -1,9 +1,9 @@
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure;
 import lol.trq.alts.AltsRuntime;
-import lol.trq.alts.account.AccountException;
 import lol.trq.alts.account.AccountServices;
 import lol.trq.alts.account.ClaimOptions;
 import lol.trq.alts.account.Entitlements;
@@ -478,9 +478,9 @@ public final class GettingStartedExample {
      *
      * @param alts the runtime built by {@link #buildRuntime}
      * @param account the account to operate on
-     * @throws AccountException if a call was refused or the service failed
+     * @throws AltsException if a call was refused or the service failed; switch on its kind
      */
-    public static void manageAccount(AltsRuntime<MyHandle> alts, AltAccount account) throws AccountException {
+    public static void manageAccount(AltsRuntime<MyHandle> alts, AltAccount account) {
         AccountServices services = alts.accountServices(account);
 
         // What it looks like: name, skins, capes, and any pending moderation action.
@@ -509,9 +509,9 @@ public final class GettingStartedExample {
      *
      * @param alts the runtime built by {@link #buildRuntime}
      * @param account the account to read
-     * @throws AccountException if the call was refused or the service failed
+     * @throws AltsException if the call was refused or the service failed; switch on its kind
      */
-    public static void readAttributes(AltsRuntime<MyHandle> alts, AltAccount account) throws AccountException {
+    public static void readAttributes(AltsRuntime<MyHandle> alts, AltAccount account) {
         PlayerAttributes attributes = alts.accountServices(account).attributes().fetch();
 
         if (!attributes.canPlayMultiplayer()) {
@@ -535,9 +535,9 @@ public final class GettingStartedExample {
      *
      * @param alts the runtime built by {@link #buildRuntime}
      * @param names the usernames to resolve
-     * @throws AccountException if the service refused or could not be reached
+     * @throws AltsException if the service refused or could not be reached; switch on its kind
      */
-    public static void lookUpPlayers(AltsRuntime<MyHandle> alts, List<String> names) throws AccountException {
+    public static void lookUpPlayers(AltsRuntime<MyHandle> alts, List<String> names) {
         // One name: empty when nobody holds it, which is an answer rather than an error.
         alts.profileLookup().byName("DesiredName").ifPresent(player -> render(player.name() + " " + player.uuid()));
 
@@ -546,12 +546,13 @@ public final class GettingStartedExample {
             for (PublicProfile player : alts.profileLookup().byNames(names)) {
                 render(player.name() + " " + player.uuid());
             }
-        } catch (AccountException failure) {
-            if (!failure.rateLimited()) {
+        } catch (AltsException failure) {
+            if (failure.kind() != AltsFailure.Kind.RATE_LIMITED) {
                 throw failure;
             }
             // Not "those players do not exist": come back after the wait, when the service named one.
-            showRetry("Lookup rate limited" + (failure.retryAfter() != null ? " for " + failure.retryAfter() : ""));
+            showRetry("Lookup rate limited"
+                    + failure.failure().retryAfter().map(wait -> " for " + wait).orElse(""));
         }
     }
 
@@ -574,8 +575,11 @@ public final class GettingStartedExample {
                     if (result.claimed()) {
                         render("claimed " + name + " in " + result.attempts() + " attempts");
                     } else {
-                        showError("did not get " + name + ": "
-                                + result.finalResult().message());
+                        // Why the run ended; a terminal failure says what kind it was.
+                        showError("did not get " + name + ": " + result.stopReason()
+                                + result.failure()
+                                        .map(f -> " (" + f.kind() + ")")
+                                        .orElse(""));
                     }
                 });
     }

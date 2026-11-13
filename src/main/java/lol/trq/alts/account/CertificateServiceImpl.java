@@ -24,20 +24,20 @@ final class CertificateServiceImpl implements CertificateService {
     }
 
     @Override
-    public PlayerCertificate fetch() throws AccountException {
+    public PlayerCertificate fetch() {
         // An explicitly empty body rather than none: the endpoint is a POST, and a POST with no declared
         // length is refused by some intermediaries.
         JsonObject body = http.sendRaw(
                 "POST", endpoints.playerCertificates(), "application/json", new byte[0], NetworkScope.Purpose.PROFILE);
         if (body == null) {
-            throw new AccountException("empty or non-JSON response", 0);
+            throw AccountHttp.unreadable("Player certificate");
         }
         JsonElement pair = body.get("keyPair");
         JsonObject keyPair = pair != null && pair.isJsonObject() ? pair.getAsJsonObject() : null;
         String privateKey = AccountHttp.string(keyPair, "privateKey");
         String publicKey = AccountHttp.string(keyPair, "publicKey");
         if (privateKey == null || publicKey == null) {
-            throw new AccountException("certificate response carried no key pair", 0);
+            throw AccountHttp.unreadable("Player certificate");
         }
         return new PlayerCertificate(
                 privateKey,

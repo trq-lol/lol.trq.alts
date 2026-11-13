@@ -13,6 +13,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import javax.imageio.ImageIO;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure.Kind;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,11 +51,15 @@ class SkinUploadTest {
         return out.toByteArray();
     }
 
-    private SkinValidationException.Reason refusal(byte[] bytes) {
-        SkinValidationException thrown = assertThrows(
-                SkinValidationException.class, () -> server.services().skin().upload(bytes, SkinModel.CLASSIC));
-        assertEquals(0, thrown.status(), "a local refusal carries no HTTP status");
-        return thrown.reason();
+    /**
+     * Asserts an upload of {@code bytes} is refused locally as {@link Kind#INVALID_INPUT}, and returns the
+     * problem {@link SkinService#validate(byte[])} names for the same bytes.
+     */
+    private SkinProblem refusal(byte[] bytes) {
+        AltsException thrown =
+                assertThrows(AltsException.class, () -> server.services().skin().upload(bytes, SkinModel.CLASSIC));
+        assertEquals(Kind.INVALID_INPUT, thrown.kind(), "a local refusal is invalid input");
+        return server.services().skin().validate(bytes).orElseThrow();
     }
 
     @Test
@@ -82,41 +88,44 @@ class SkinUploadTest {
 
     @Test
     void bytesThatAreNotASkinAreRefusedBeforeAnyRequest() throws Exception {
-        assertEquals(SkinValidationException.Reason.EMPTY, refusal(null));
-        assertEquals(SkinValidationException.Reason.EMPTY, refusal(new byte[0]));
-        assertEquals(SkinValidationException.Reason.NOT_PNG, refusal(new byte[] {1, 2, 3}));
+        assertEquals(SkinProblem.EMPTY, refusal(null));
+        assertEquals(SkinProblem.EMPTY, refusal(new byte[0]));
+        assertEquals(SkinProblem.NOT_PNG, refusal(new byte[] {1, 2, 3}));
         assertEquals(
-                SkinValidationException.Reason.NOT_PNG,
+                SkinProblem.NOT_PNG,
                 refusal("<html>definitely not an image, but long enough to hold a header</html>"
                         .getBytes(StandardCharsets.UTF_8)));
         byte[] jpegish = new byte[64];
         jpegish[0] = (byte) 0xff;
         jpegish[1] = (byte) 0xd8;
-        assertEquals(SkinValidationException.Reason.NOT_PNG, refusal(jpegish));
+        assertEquals(SkinProblem.NOT_PNG, refusal(jpegish));
         byte[] truncated = new byte[20];
         System.arraycopy(png(64, 64), 0, truncated, 0, 20);
-        assertEquals(SkinValidationException.Reason.NOT_PNG, refusal(truncated), "a header cut short is not a PNG");
+        assertEquals(SkinProblem.NOT_PNG, refusal(truncated), "a header cut short is not a PNG");
 
-        assertEquals(SkinValidationException.Reason.WRONG_DIMENSIONS, refusal(png(128, 128)));
-        assertEquals(SkinValidationException.Reason.WRONG_DIMENSIONS, refusal(png(64, 48)));
-        assertEquals(SkinValidationException.Reason.WRONG_DIMENSIONS, refusal(png(32, 64)));
-        assertEquals(SkinValidationException.Reason.WRONG_DIMENSIONS, refusal(png(16, 16)));
+        assertEquals(SkinProblem.WRONG_DIMENSIONS, refusal(png(128, 128)));
+        assertEquals(SkinProblem.WRONG_DIMENSIONS, refusal(png(64, 48)));
+        assertEquals(SkinProblem.WRONG_DIMENSIONS, refusal(png(32, 64)));
+        assertEquals(SkinProblem.WRONG_DIMENSIONS, refusal(png(16, 16)));
 
         byte[] oversized = new byte[SkinService.MAX_SKIN_BYTES + 1];
         System.arraycopy(png(64, 64), 0, oversized, 0, 24);
-        assertEquals(SkinValidationException.Reason.TOO_LARGE, refusal(oversized));
+        assertEquals(SkinProblem.TOO_LARGE, refusal(oversized));
 
         assertTrue(server.requests().isEmpty(), "nothing invalid reached the service");
     }
 
     @Test
-    void aValidationFailureIsStillAnAccountException() {
-        AccountException thrown = assertThrows(
-                AccountException.class, () -> server.services().skin().upload(new byte[] {9}, SkinModel.CLASSIC));
+    void validateSaysWhyWithoutSendingAnything() throws Exception {
+        SkinService skin = server.services().skin();
 
-        assertTrue(thrown instanceof SkinValidationException, "an existing catch block still sees it");
-        assertFalse(thrown.tokenRefused());
-        assertFalse(thrown.rateLimited());
+        assertEquals(java.util.Optional.empty(), skin.validate(png(64, 64)));
+        assertEquals(java.util.Optional.empty(), skin.validate(png(64, 32)), "the legacy canvas is a skin too");
+        assertEquals(java.util.Optional.of(SkinProblem.EMPTY), skin.validate(null));
+        assertEquals(java.util.Optional.of(SkinProblem.NOT_PNG), skin.validate(new byte[] {9}));
+        assertEquals(
+                java.util.Optional.of(SkinProblem.TOO_LARGE), skin.validate(new byte[SkinService.MAX_SKIN_BYTES + 1]));
+        assertTrue(server.requests().isEmpty(), "validating sends nothing");
     }
 
     @Test
@@ -143,28 +152,26 @@ class SkinUploadTest {
         Files.write(huge, new byte[SkinService.MAX_SKIN_BYTES + 1]);
 
         SkinService skin = server.services().skin();
-        SkinValidationException gone =
-                assertThrows(SkinValidationException.class, () -> skin.upload(missing, SkinModel.CLASSIC));
-        SkinValidationException folder =
-                assertThrows(SkinValidationException.class, () -> skin.upload(directory, SkinModel.CLASSIC));
-        SkinValidationException text =
-                assertThrows(SkinValidationException.class, () -> skin.upload(notASkin, SkinModel.CLASSIC));
-        SkinValidationException big =
-                assertThrows(SkinValidationException.class, () -> skin.upload(wrongSize, SkinModel.CLASSIC));
-        SkinValidationException tooLarge =
-                assertThrows(SkinValidationException.class, () -> skin.upload(huge, SkinModel.CLASSIC));
-        SkinValidationException none =
-                assertThrows(SkinValidationException.class, () -> skin.upload((Path) null, SkinModel.CLASSIC));
+        AltsException gone = assertThrows(AltsException.class, () -> skin.upload(missing, SkinModel.CLASSIC));
+        AltsException folder = assertThrows(AltsException.class, () -> skin.upload(directory, SkinModel.CLASSIC));
+        AltsException text = assertThrows(AltsException.class, () -> skin.upload(notASkin, SkinModel.CLASSIC));
+        AltsException big = assertThrows(AltsException.class, () -> skin.upload(wrongSize, SkinModel.CLASSIC));
+        AltsException tooLarge = assertThrows(AltsException.class, () -> skin.upload(huge, SkinModel.CLASSIC));
+        AltsException none = assertThrows(AltsException.class, () -> skin.upload((Path) null, SkinModel.CLASSIC));
 
-        assertEquals(SkinValidationException.Reason.UNREADABLE, gone.reason());
-        assertEquals(SkinValidationException.Reason.UNREADABLE, folder.reason());
-        assertEquals(SkinValidationException.Reason.NOT_PNG, text.reason());
-        assertEquals(SkinValidationException.Reason.WRONG_DIMENSIONS, big.reason());
-        assertEquals(SkinValidationException.Reason.TOO_LARGE, tooLarge.reason());
-        assertEquals(SkinValidationException.Reason.UNREADABLE, none.reason());
+        for (AltsException failure : new AltsException[] {gone, folder, text, big, tooLarge, none}) {
+            assertEquals(Kind.INVALID_INPUT, failure.kind());
+        }
+        assertEquals(
+                SkinProblem.NOT_PNG, skin.validate(Files.readAllBytes(notASkin)).orElseThrow());
+        assertEquals(
+                SkinProblem.WRONG_DIMENSIONS,
+                skin.validate(Files.readAllBytes(wrongSize)).orElseThrow());
+        assertEquals(
+                SkinProblem.TOO_LARGE, skin.validate(Files.readAllBytes(huge)).orElseThrow());
 
         String root = directory.toAbsolutePath().toString();
-        for (SkinValidationException failure : new SkinValidationException[] {gone, folder, text, big, tooLarge}) {
+        for (AltsException failure : new AltsException[] {gone, folder, text, big, tooLarge}) {
             String everything = failure.getMessage() + " " + failure + " " + failure.getCause();
             assertFalse(everything.contains(root), "the absolute path leaked: " + everything);
             assertFalse(everything.contains("secret-folder-name"), "a path segment leaked: " + everything);
@@ -176,23 +183,25 @@ class SkinUploadTest {
     }
 
     @Test
-    void aServiceRefusalOfAnUploadCarriesItsStatus() throws Exception {
+    void aServiceRefusalOfAnUploadCarriesItsKind() throws Exception {
         byte[] skin = png(64, 64);
 
         server.canned(401, "{\"errorMessage\":\"Invalid token\"}");
-        assertTrue(assertThrows(
-                        AccountException.class, () -> server.services().skin().upload(skin, SkinModel.CLASSIC))
-                .tokenRefused());
+        assertEquals(
+                Kind.UNAUTHORIZED,
+                assertThrows(AltsException.class, () -> server.services().skin().upload(skin, SkinModel.CLASSIC))
+                        .kind());
 
         server.rateLimited(4);
-        assertTrue(assertThrows(
-                        AccountException.class, () -> server.services().skin().upload(skin, SkinModel.CLASSIC))
-                .rateLimited());
+        assertEquals(
+                Kind.RATE_LIMITED,
+                assertThrows(AltsException.class, () -> server.services().skin().upload(skin, SkinModel.CLASSIC))
+                        .kind());
 
         server.canned(400, "{\"errorMessage\":\"Could not validate image data.\"}");
-        AccountException rejected = assertThrows(
-                AccountException.class, () -> server.services().skin().upload(skin, SkinModel.CLASSIC));
-        assertEquals(400, rejected.status());
-        assertFalse(rejected instanceof SkinValidationException, "a service rejection is not a local one");
+        AltsException rejected =
+                assertThrows(AltsException.class, () -> server.services().skin().upload(skin, SkinModel.CLASSIC));
+        assertEquals(Kind.INVALID_INPUT, rejected.kind(), "the service refused the input");
+        assertEquals(3, server.requests().size(), "each of these refusals came from the service");
     }
 }

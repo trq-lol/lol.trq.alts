@@ -12,8 +12,8 @@ public interface EntitlementService {
      * Fetches the account's entitlements.
      *
      * @return the products the account holds
-     * @throws AccountException if the token was refused or the service failed
+     * @throws lol.trq.alts.AltsException if the token was refused or the service failed
      * @since 1.0.0
      */
-    Entitlements fetch() throws AccountException;
+    Entitlements fetch();
 }

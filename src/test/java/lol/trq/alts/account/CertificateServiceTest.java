@@ -15,6 +15,8 @@ import java.security.Signature;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure.Kind;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -163,25 +165,23 @@ class CertificateServiceTest {
     @Test
     void aResponseWithNoKeyPairIsAFailure() {
         server.canned(200, "{\"publicKeySignatureV2\":\"sig\"}");
-        assertThrows(
-                AccountException.class, () -> server.services().certificates().fetch());
+        assertThrows(AltsException.class, () -> server.services().certificates().fetch());
 
         server.canned(204, "");
-        assertThrows(
-                AccountException.class, () -> server.services().certificates().fetch());
+        assertThrows(AltsException.class, () -> server.services().certificates().fetch());
     }
 
     @Test
     void certificateFailuresCarryTheirStatus() {
         server.canned(401, "{\"errorMessage\":\"Invalid token\"}");
-        AccountException refused = assertThrows(
-                AccountException.class, () -> server.services().certificates().fetch());
-        assertTrue(refused.tokenRefused());
+        AltsException refused = assertThrows(
+                AltsException.class, () -> server.services().certificates().fetch());
+        assertTrue(refused.kind() == Kind.UNAUTHORIZED);
 
         server.rateLimited(30);
-        AccountException limited = assertThrows(
-                AccountException.class, () -> server.services().certificates().fetch());
-        assertTrue(limited.rateLimited());
-        assertEquals(Duration.ofSeconds(30), limited.retryAfter());
+        AltsException limited = assertThrows(
+                AltsException.class, () -> server.services().certificates().fetch());
+        assertTrue(limited.kind() == Kind.RATE_LIMITED);
+        assertEquals(Duration.ofSeconds(30), limited.failure().retryAfter().orElse(null));
     }
 }

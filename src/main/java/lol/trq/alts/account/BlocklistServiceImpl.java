@@ -23,7 +23,7 @@ final class BlocklistServiceImpl implements BlocklistService {
     }
 
     @Override
-    public Blocklist fetch() throws AccountException {
+    public Blocklist fetch() {
         JsonObject body = http.get(endpoints.blocklist(), NetworkScope.Purpose.PROFILE);
         List<String> blocked = new ArrayList<>();
         JsonElement profiles = body.get("blockedProfiles");

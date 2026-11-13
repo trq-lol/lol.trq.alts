@@ -16,7 +16,6 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import lol.trq.alts.account.AccountEndpoints;
-import lol.trq.alts.account.AccountException;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
@@ -169,7 +168,7 @@ class AltsRuntimeStoresTest {
                             .toastSink((level, title, description, durationMs) -> toastsB.add(title))
                             .build());
 
-            assertThrows(AccountException.class, () -> first.profileLookup().byName("Alex"));
+            assertThrows(AltsException.class, () -> first.profileLookup().byName("Alex"));
             first.loginService().loginOffline("Alex", LoginMode.DIRECT).get(5, TimeUnit.SECONDS);
             first.toasts().toast(ToastSink.Level.INFO, "still mine", "", 0);
 

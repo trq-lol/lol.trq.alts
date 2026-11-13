@@ -2,8 +2,6 @@ package lol.trq.alts.account;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.net.httpserver.HttpServer;
@@ -14,12 +12,12 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
@@ -75,7 +73,7 @@ class ScheduledClaimTest {
 
     /**
      * A claim scheduled an hour ahead must not outlive the runtime: closing it ends the wait at once,
-     * as a failure, and nothing fires afterwards.
+     * as a terminal failure of kind CANCELLED, and nothing fires afterwards.
      */
     @Test
     void aClaimWaitingWhenTheRuntimeClosesResolves() throws Exception {
@@ -90,8 +88,11 @@ class ScheduledClaimTest {
         transport.close();
         owned.shutdown();
 
-        ExecutionException ended = assertThrows(ExecutionException.class, () -> claim.get(2, TimeUnit.SECONDS));
-        assertInstanceOf(IOException.class, ended.getCause(), "the wait ended because the runtime closed");
+        // Ended with a result, never an exception: the run's failure says the runtime closed.
+        ClaimResult ended = claim.get(2, TimeUnit.SECONDS);
+        assertFalse(ended.claimed());
+        assertEquals(ClaimResult.StopReason.TERMINAL_FAILURE, ended.stopReason());
+        assertEquals(Kind.CANCELLED, ended.failure().orElseThrow().kind(), "the wait ended because the runtime closed");
         assertEquals(0, changeCalls.get(), "nothing fired");
     }
 
@@ -142,7 +143,7 @@ class ScheduledClaimTest {
         assertTrue(elapsed < 1_000, "a terminal failure ends the run rather than filling the window: " + elapsed);
         assertTrue(changeCalls.get() <= 2, "a change that can never land is not retried for the window");
         assertEquals(ClaimResult.StopReason.TERMINAL_FAILURE, result.stopReason());
-        assertFalse(result.rateLimited(), "a dead token is not a rate limit");
+        assertEquals(Kind.UNAUTHORIZED, result.failure().orElseThrow().kind(), "a dead token is not a rate limit");
     }
 
     /**
@@ -160,9 +161,9 @@ class ScheduledClaimTest {
         long elapsed = System.currentTimeMillis() - start;
 
         assertFalse(result.claimed(), "a rate limit is not a claim");
-        assertEquals(ClaimResult.StopReason.RATE_LIMITED, result.stopReason());
-        assertTrue(result.rateLimited());
-        assertEquals(NameChangeResult.Outcome.RATE_LIMITED, result.finalResult().outcome());
+        assertEquals(ClaimResult.StopReason.TERMINAL_FAILURE, result.stopReason());
+        assertEquals(Kind.RATE_LIMITED, result.failure().orElseThrow().kind());
+        assertEquals(NameChangeResult.Outcome.FAILED, result.finalResult().outcome());
         assertTrue(elapsed < 1_000, "the run stops at the limit rather than filling the window: " + elapsed);
         // Each of the three workers may already have an attempt on the wire when the first 429 lands.
         assertTrue(changeCalls.get() <= 3, "no worker keeps sending after the limit, saw " + changeCalls.get());
@@ -183,7 +184,7 @@ class ScheduledClaimTest {
 
         assertFalse(result.claimed());
         assertEquals(ClaimResult.StopReason.WINDOW_ELAPSED, result.stopReason());
-        assertFalse(result.rateLimited());
+        assertEquals(java.util.Optional.empty(), result.failure());
         assertTrue(result.attempts() > 1, "an ordinary refusal is retried across the window");
     }
 
@@ -236,16 +237,30 @@ class ScheduledClaimTest {
     }
 
     @Test
-    void aResultBuiltWithoutAStopReasonInfersOne() {
-        NameChangeResult limited =
-                new NameChangeResult(NameChangeResult.Outcome.RATE_LIMITED, null, "slow down", Duration.ofSeconds(1));
-        NameChangeResult refused = new NameChangeResult(NameChangeResult.Outcome.UNAUTHORIZED, null, "no", null);
-        NameChangeResult taken = new NameChangeResult(NameChangeResult.Outcome.UNAVAILABLE, null, "taken", null);
+    void aFailureTravelsWithTerminalFailureAndNothingElse() {
+        lol.trq.alts.AltsFailure limited = lol.trq.alts.AltsFailure.rateLimited("slow down", Duration.ofSeconds(1));
+        NameChangeResult failed = NameChangeResult.failed(limited);
 
-        assertEquals(ClaimResult.StopReason.CLAIMED, new ClaimResult(true, 1, null).stopReason());
-        assertEquals(ClaimResult.StopReason.RATE_LIMITED, new ClaimResult(false, 1, limited).stopReason());
-        assertEquals(ClaimResult.StopReason.TERMINAL_FAILURE, new ClaimResult(false, 1, refused).stopReason());
-        assertEquals(ClaimResult.StopReason.WINDOW_ELAPSED, new ClaimResult(false, 9, taken).stopReason());
-        assertEquals(ClaimResult.StopReason.UNKNOWN, new ClaimResult(false, 0, null).stopReason());
+        assertEquals(
+                limited,
+                new ClaimResult(
+                                false,
+                                1,
+                                failed,
+                                ClaimResult.StopReason.TERMINAL_FAILURE,
+                                java.util.Optional.of(limited))
+                        .failure()
+                        .orElseThrow());
+        org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> new ClaimResult(
+                        false, 1, failed, ClaimResult.StopReason.TERMINAL_FAILURE, java.util.Optional.empty()));
+        org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> new ClaimResult(
+                        false, 1, failed, ClaimResult.StopReason.WINDOW_ELAPSED, java.util.Optional.of(limited)));
+        org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> new NameChangeResult(NameChangeResult.Outcome.FAILED, null, "m", java.util.Optional.empty()));
     }
 }

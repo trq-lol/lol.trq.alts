@@ -31,12 +31,12 @@ final class PlayerAttributesServiceImpl implements PlayerAttributesService {
     }
 
     @Override
-    public PlayerAttributes fetch() throws AccountException {
+    public PlayerAttributes fetch() {
         return parse(http.get(endpoints.playerAttributes(), NetworkScope.Purpose.PROFILE));
     }
 
     @Override
-    public PlayerAttributes setProfanityFilter(boolean enabled) throws AccountException {
+    public PlayerAttributes setProfanityFilter(boolean enabled) {
         JsonObject preferences = new JsonObject();
         preferences.addProperty("profanityFilterOn", enabled);
         JsonObject request = new JsonObject();

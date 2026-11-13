@@ -11,9 +11,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.function.Function;
 import java.util.function.IntFunction;
+import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure;
 import lol.trq.alts.AltsFailure.Kind;
-import lol.trq.alts.account.AccountException;
 import lol.trq.alts.account.EntitlementService;
 import lol.trq.alts.account.Entitlements;
 import lol.trq.alts.auth.AccountStatus;
@@ -143,17 +143,9 @@ public final class BulkOperationsImpl implements BulkOperations {
             Entitlements owned = entitlementServices.apply(account).fetch();
             String summary = owned.isEmpty() ? "Owns nothing" : owned.products().size() + " product(s)";
             return new Attempt(account, Optional.empty(), summary, owned);
-        } catch (AccountException failure) {
-            if (failure.rateLimited()) {
-                return Attempt.failed(
-                        AltsFailure.rateLimited("Rate limited by the entitlement service", failure.retryAfter()));
-            }
-            if (failure.tokenRefused()) {
-                return Attempt.failed(AltsFailure.of(Kind.UNAUTHORIZED, "Access token was refused"));
-            }
-            return Attempt.failed(AltsFailure.of(
-                    Kind.NETWORK,
-                    "Entitlement lookup failed" + (failure.status() > 0 ? " with status " + failure.status() : "")));
+        } catch (AltsException failure) {
+            // Classified where it happened: a refused token, a throttle with its wait, an outage.
+            return Attempt.failed(failure.failure());
         }
     }
 

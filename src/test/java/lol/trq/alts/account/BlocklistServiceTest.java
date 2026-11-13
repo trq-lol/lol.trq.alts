@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.util.List;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure.Kind;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -64,14 +66,16 @@ class BlocklistServiceTest {
     void blocklistFailuresCarryTheirStatus() {
         server.canned(401, "{}");
         assertTrue(assertThrows(
-                        AccountException.class,
-                        () -> server.services().blocklist().fetch())
-                .tokenRefused());
+                                AltsException.class,
+                                () -> server.services().blocklist().fetch())
+                        .kind()
+                == Kind.UNAUTHORIZED);
 
         server.rateLimited(2);
         assertTrue(assertThrows(
-                        AccountException.class,
-                        () -> server.services().blocklist().fetch())
-                .rateLimited());
+                                AltsException.class,
+                                () -> server.services().blocklist().fetch())
+                        .kind()
+                == Kind.RATE_LIMITED);
     }
 }

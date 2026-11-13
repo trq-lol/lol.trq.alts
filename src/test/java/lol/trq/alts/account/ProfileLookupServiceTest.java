@@ -21,6 +21,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -284,11 +286,11 @@ class ProfileLookupServiceTest {
             names.add("Player_" + i);
         }
 
-        AccountException limited = assertThrows(AccountException.class, () -> lookup.byNames(names));
+        AltsException limited = assertThrows(AltsException.class, () -> lookup.byNames(names));
 
-        assertTrue(limited.rateLimited());
-        assertEquals(429, limited.status());
-        assertEquals(Duration.ofSeconds(17), limited.retryAfter());
+        assertTrue(limited.kind() == Kind.RATE_LIMITED);
+        assertEquals(Kind.RATE_LIMITED, limited.kind());
+        assertEquals(Duration.ofSeconds(17), limited.failure().retryAfter().orElse(null));
         assertEquals(2, batches.size(), "the list stops at the limit instead of sending the rest");
     }
 
@@ -296,7 +298,7 @@ class ProfileLookupServiceTest {
     void aBatchAnswerThatIsNotAListIsAnExceptionNotAnEmptyAnswer() {
         batchBody = "{\"unexpected\":true}";
 
-        assertThrows(AccountException.class, () -> lookup.byNames(List.of("Alex")));
+        assertThrows(AltsException.class, () -> lookup.byNames(List.of("Alex")));
     }
 
     @Test
@@ -330,38 +332,38 @@ class ProfileLookupServiceTest {
         forcedStatus = 429;
         forcedRetryAfter = "9";
 
-        AccountException single = assertThrows(AccountException.class, () -> lookup.byName("Alex"));
-        AccountException byId =
-                assertThrows(AccountException.class, () -> lookup.byUuid("069a79f4-44e9-4726-a5be-fca90e38aaf5"));
-        AccountException list = assertThrows(AccountException.class, () -> lookup.byNames(List.of("Alex", "Steve_1")));
+        AltsException single = assertThrows(AltsException.class, () -> lookup.byName("Alex"));
+        AltsException byId =
+                assertThrows(AltsException.class, () -> lookup.byUuid("069a79f4-44e9-4726-a5be-fca90e38aaf5"));
+        AltsException list = assertThrows(AltsException.class, () -> lookup.byNames(List.of("Alex", "Steve_1")));
 
-        assertTrue(single.rateLimited());
-        assertEquals(Duration.ofSeconds(9), single.retryAfter());
-        assertTrue(byId.rateLimited());
-        assertTrue(list.rateLimited(), "a limited list fails rather than reading as nobody existing");
-        assertEquals(Duration.ofSeconds(9), list.retryAfter());
+        assertTrue(single.kind() == Kind.RATE_LIMITED);
+        assertEquals(Duration.ofSeconds(9), single.failure().retryAfter().orElse(null));
+        assertTrue(byId.kind() == Kind.RATE_LIMITED);
+        assertTrue(list.kind() == Kind.RATE_LIMITED, "a limited list fails rather than reading as nobody existing");
+        assertEquals(Duration.ofSeconds(9), list.failure().retryAfter().orElse(null));
         assertEquals(3, paths.size(), "the list stops at the limit instead of sending the rest");
     }
 
     @Test
     void aRefusalOrServerErrorIsAnExceptionCarryingItsStatus() {
         forcedStatus = 401;
-        AccountException refused = assertThrows(AccountException.class, () -> lookup.byName("Alex"));
-        assertEquals(401, refused.status());
-        assertTrue(refused.tokenRefused());
+        AltsException refused = assertThrows(AltsException.class, () -> lookup.byName("Alex"));
+        assertEquals(Kind.UNAUTHORIZED, refused.kind());
+        assertTrue(refused.kind() == Kind.UNAUTHORIZED);
 
         forcedStatus = 503;
-        AccountException down = assertThrows(AccountException.class, () -> lookup.byName("Alex"));
-        assertEquals(503, down.status());
-        assertFalse(down.notFound());
+        AltsException down = assertThrows(AltsException.class, () -> lookup.byName("Alex"));
+        assertEquals(Kind.NETWORK, down.kind());
+        assertFalse(down.kind() == Kind.NOT_FOUND);
     }
 
     @Test
     void anUnreachableServiceIsAnException() {
         server.stop(0);
 
-        AccountException thrown = assertThrows(AccountException.class, () -> lookup.byName("Alex"));
-        assertEquals(0, thrown.status());
+        AltsException thrown = assertThrows(AltsException.class, () -> lookup.byName("Alex"));
+        assertEquals(Kind.NETWORK, thrown.kind());
     }
 
     @Test

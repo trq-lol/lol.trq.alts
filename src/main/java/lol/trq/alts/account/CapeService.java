@@ -15,28 +15,28 @@ public interface CapeService {
      * Returns the capes the account owns, as a convenience over reading them off the profile.
      *
      * @return the owned capes
-     * @throws AccountException if the token was refused or the service failed
+     * @throws lol.trq.alts.AltsException if the token was refused or the service failed
      * @since 1.0.0
      */
-    List<Cape> owned() throws AccountException;
+    List<Cape> owned();
 
     /**
      * Shows the cape with the given id.
      *
      * @param capeId the cape id (from {@link Cape#id()})
      * @return the updated profile
-     * @throws AccountException if the token was refused or the cape is not owned
+     * @throws lol.trq.alts.AltsException if the token was refused or the cape is not owned
      * @since 1.0.0
      */
-    PlayerProfile setActive(String capeId) throws AccountException;
+    PlayerProfile setActive(String capeId);
 
     /**
      * Hides whatever cape is shown.
      *
-     * @throws AccountException if the token was refused or the service failed
+     * @throws lol.trq.alts.AltsException if the token was refused or the service failed
      * @since 1.0.0
      */
-    void hide() throws AccountException;
+    void hide();
 
     /**
      * Hides whatever cape is shown and returns the profile as it stands afterwards, the way
@@ -44,10 +44,10 @@ public interface CapeService {
      *
      * @return the updated profile, or {@code null} when the service confirmed the change without sending
      *     one back
-     * @throws AccountException if the token was refused or the service failed
+     * @throws lol.trq.alts.AltsException if the token was refused or the service failed
      * @since 0.12.0
      */
-    default PlayerProfile hideActive() throws AccountException {
+    default PlayerProfile hideActive() {
         hide();
         return null;
     }

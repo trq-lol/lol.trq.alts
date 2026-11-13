@@ -8,11 +8,14 @@ import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.net.FailureText;
 import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
@@ -29,6 +32,10 @@ import lol.trq.alts.time.TimeSource;
  */
 final class NameServiceImpl implements NameService {
 
+    /** The kinds of failed change that end a claim run rather than being tried again. */
+    private static final java.util.Set<Kind> TERMINAL = java.util.EnumSet.of(
+            Kind.UNAUTHORIZED, Kind.REAUTH_REQUIRED, Kind.NOT_ENTITLED, Kind.RATE_LIMITED, Kind.CANCELLED);
+
     /** Below this much remaining, the wait switches from sleeping to a bounded spin for accuracy. */
     private static final long SPIN_THRESHOLD_MILLIS = 20L;
 
@@ -43,13 +50,13 @@ final class NameServiceImpl implements NameService {
     }
 
     @Override
-    public NameAvailability checkAvailability(String name) throws AccountException {
+    public NameAvailability checkAvailability(String name) {
         JsonObject body = http.get(endpoints.nameAvailability(name), NetworkScope.Purpose.PROFILE);
         return NameAvailability.from(AccountHttp.string(body, "status"));
     }
 
     @Override
-    public NameEligibility eligibility() throws AccountException {
+    public NameEligibility eligibility() {
         JsonObject body = http.get(endpoints.nameChangeInfo(), NetworkScope.Purpose.PROFILE);
         // Read as a boolean only when it is one: a JSON null, or any other shape, means the service did
         // not say the change is allowed, which is not the same as the request having failed.
@@ -65,7 +72,7 @@ final class NameServiceImpl implements NameService {
     }
 
     @Override
-    public NameChangeResult change(String name) throws AccountException {
+    public NameChangeResult change(String name) {
         HttpTransport.HttpResponse response;
         try {
             response = http.transport()
@@ -77,13 +84,17 @@ final class NameServiceImpl implements NameService {
                             null,
                             NetworkScope.forAccount(NetworkScope.Purpose.PROFILE, http.accountUuid(), name));
         } catch (Exception transport) {
-            throw new AccountException("PUT name change: " + FailureText.of(transport), transport);
+            // Unreachable is a failed change like any other: the result says what kind it was.
+            return NameChangeResult.failed(FailureText.toFailure("Name change", transport));
         }
         return classify(response);
     }
 
     /**
-     * Maps a name-change response onto a result, reading the error body so the message says why.
+     * Maps a name-change response onto a result: an invalid name and an unavailable one are outcomes;
+     * a refused token, an account with nothing to rename, a rate limit and anything else are a
+     * {@link NameChangeResult.Outcome#FAILED} carrying the kind. The service's own error text is not
+     * repeated.
      *
      * @param response the change response
      * @return the classified result
@@ -91,32 +102,26 @@ final class NameServiceImpl implements NameService {
     private NameChangeResult classify(HttpTransport.HttpResponse response) {
         int status = response.status();
         if (status >= 200 && status < 300) {
-            PlayerProfile profile =
-                    response.body() == null ? null : gson.fromJson(response.body(), PlayerProfile.class);
-            return new NameChangeResult(NameChangeResult.Outcome.CHANGED, profile, "Name changed", null);
+            PlayerProfile profile = AccountHttp.decode(gson, response.body(), PlayerProfile.class);
+            return new NameChangeResult(NameChangeResult.Outcome.CHANGED, profile, "Name changed", Optional.empty());
         }
-        NameChangeResult.Outcome outcome =
-                switch (status) {
-                    case 400 -> NameChangeResult.Outcome.INVALID_NAME;
-                    case 401 -> NameChangeResult.Outcome.UNAUTHORIZED;
-                    case 403 -> NameChangeResult.Outcome.UNAVAILABLE;
-                    case 404 -> NameChangeResult.Outcome.NOT_ENTITLED;
-                    case 429 -> NameChangeResult.Outcome.RATE_LIMITED;
-                    default -> NameChangeResult.Outcome.FAILED;
-                };
-        return new NameChangeResult(outcome, null, message(response, outcome), response.retryAfter());
-    }
-
-    private static String message(HttpTransport.HttpResponse response, NameChangeResult.Outcome outcome) {
-        JsonObject body = response.body();
-        if (body != null) {
-            for (String field : new String[] {"errorMessage", "error", "details"}) {
-                if (body.has(field) && body.get(field).isJsonPrimitive()) {
-                    return body.get(field).getAsString();
-                }
-            }
-        }
-        return outcome + " (status " + response.status() + ")";
+        return switch (status) {
+            case 400 ->
+                new NameChangeResult(
+                        NameChangeResult.Outcome.INVALID_NAME, null, "The name is not valid", Optional.empty());
+            case 403 ->
+                new NameChangeResult(
+                        NameChangeResult.Outcome.UNAVAILABLE,
+                        null,
+                        "The name is unavailable, or the account cannot change its name yet",
+                        Optional.empty());
+            case 404 ->
+                NameChangeResult.failed(
+                        AltsFailure.of(Kind.NOT_ENTITLED, "Name change: the account owns no Java profile to rename"));
+            default ->
+                NameChangeResult.failed(AccountHttp.failure("PUT", "/minecraft/profile/name", response)
+                        .failure());
+        };
     }
 
     @Override
@@ -129,10 +134,16 @@ final class NameServiceImpl implements NameService {
         // that completing it from outside — a cancel() — is observable here and stops the run. A
         // dependent future would swallow the cancellation and leave the workers firing.
         CompletableFuture<ClaimResult> result = new CompletableFuture<>();
-        result.whenComplete((ignored, failure) -> run.stop(ClaimResult.StopReason.CANCELLED, null));
+        result.whenComplete((ignored, failure) -> run.stop(ClaimResult.StopReason.CANCELLED, null, null));
 
-        waitUntil(begin, opts.timeSource(), run::stopped)
-                .thenCompose(ignored -> {
+        CompletableFuture<Void> waited;
+        try {
+            waited = waitUntil(begin, opts.timeSource(), run::stopped);
+        } catch (RuntimeException refused) {
+            // The executor refused the final spin (the runtime is closed): the run ends, with a result.
+            waited = CompletableFuture.failedFuture(refused);
+        }
+        waited.thenCompose(ignored -> {
                     List<CompletableFuture<Void>> workers = new ArrayList<>(opts.concurrency());
                     for (int i = 0; i < opts.concurrency(); i++) {
                         workers.add(worker(run));
@@ -141,10 +152,14 @@ final class NameServiceImpl implements NameService {
                 })
                 .whenComplete((ignored, failure) -> {
                     if (failure != null) {
-                        result.completeExceptionally(failure);
-                    } else {
-                        result.complete(run.result());
+                        // A wait the closed runtime ended, or an executor that refused an attempt: the run
+                        // stops on that failure, classified, and the future still holds a result.
+                        run.stop(
+                                ClaimResult.StopReason.TERMINAL_FAILURE,
+                                null,
+                                FailureText.toFailure("Name claim", failure));
                     }
+                    result.complete(run.result());
                 });
         return result;
     }
@@ -175,17 +190,15 @@ final class NameServiceImpl implements NameService {
                         return CompletableFuture.completedFuture((Void) null);
                     }
                     // A dead token or an unentitled account will never succeed; stop the whole run
-                    // rather than hammer a change that cannot land. The name was not claimed.
-                    if (result.outcome() == NameChangeResult.Outcome.UNAUTHORIZED
-                            || result.outcome() == NameChangeResult.Outcome.NOT_ENTITLED) {
-                        run.stop(ClaimResult.StopReason.TERMINAL_FAILURE, result);
-                        return CompletableFuture.completedFuture((Void) null);
-                    }
-                    // The service has asked to be left alone. Several workers a few milliseconds apart
-                    // for the rest of the window is the opposite of that, and it is how an address
-                    // turns a short limit into a long one — so one stated limit ends every chain.
-                    if (result.outcome() == NameChangeResult.Outcome.RATE_LIMITED) {
-                        run.stop(ClaimResult.StopReason.RATE_LIMITED, result);
+                    // rather than hammer a change that cannot land. The name was not claimed. And the
+                    // service asking to be left alone ends it too: several workers a few milliseconds
+                    // apart for the rest of the window is the opposite of that, and it is how an address
+                    // turns a short limit into a long one. A closed runtime ends it as well.
+                    if (result.failure().map(f -> TERMINAL.contains(f.kind())).orElse(false)) {
+                        run.stop(
+                                ClaimResult.StopReason.TERMINAL_FAILURE,
+                                result,
+                                result.failure().orElseThrow());
                         return CompletableFuture.completedFuture((Void) null);
                     }
                     return delay(run.opts.attemptSpacing()).thenCompose(ignored -> worker(run));
@@ -193,14 +206,14 @@ final class NameServiceImpl implements NameService {
     }
 
     /**
-     * Runs one change attempt, flattening a thrown {@link AccountException} into a failed result so a
-     * transport blip does not abort the whole burst.
+     * Runs one change attempt. A transport blip is a failed result, not an exception, so it does not
+     * abort the whole burst; anything else thrown is classified the same way.
      */
     private NameChangeResult attemptChange(String name) {
         try {
             return change(name);
-        } catch (AccountException failed) {
-            return new NameChangeResult(NameChangeResult.Outcome.FAILED, null, failed.getMessage(), null);
+        } catch (RuntimeException failed) {
+            return NameChangeResult.failed(FailureText.toFailure("Name change", failed));
         }
     }
 
@@ -269,6 +282,7 @@ final class NameServiceImpl implements NameService {
         private final AtomicReference<ClaimResult.StopReason> stopReason = new AtomicReference<>();
         private final AtomicReference<NameChangeResult> deciding = new AtomicReference<>();
         private final AtomicReference<NameChangeResult> winning = new AtomicReference<>();
+        private final AtomicReference<AltsFailure> failure = new AtomicReference<>();
 
         ClaimRun(String name, Instant deadline, ClaimOptions opts) {
             this.name = name;
@@ -292,16 +306,21 @@ final class NameServiceImpl implements NameService {
          *
          * @param reason why the run is stopping
          * @param result the change result that caused it, or null when none did
+         * @param cause what ended it, for {@link ClaimResult.StopReason#TERMINAL_FAILURE}; else null
          */
-        void stop(ClaimResult.StopReason reason, NameChangeResult result) {
-            if (stopReason.compareAndSet(null, reason) && result != null) {
-                deciding.set(result);
+        void stop(ClaimResult.StopReason reason, NameChangeResult result, AltsFailure cause) {
+            if (stopReason.compareAndSet(null, reason)) {
+                if (result != null) {
+                    deciding.set(result);
+                }
+                failure.set(cause);
             }
         }
 
         ClaimResult result() {
             if (claimed.get()) {
-                return new ClaimResult(true, attempts.get(), winning.get(), ClaimResult.StopReason.CLAIMED);
+                return new ClaimResult(
+                        true, attempts.get(), winning.get(), ClaimResult.StopReason.CLAIMED, Optional.empty());
             }
             ClaimResult.StopReason reason = stopReason.get();
             NameChangeResult decisive = deciding.get();
@@ -309,7 +328,8 @@ final class NameServiceImpl implements NameService {
                     false,
                     attempts.get(),
                     decisive != null ? decisive : last.get(),
-                    reason == null ? ClaimResult.StopReason.WINDOW_ELAPSED : reason);
+                    reason == null ? ClaimResult.StopReason.WINDOW_ELAPSED : reason,
+                    reason == ClaimResult.StopReason.TERMINAL_FAILURE ? Optional.of(failure.get()) : Optional.empty());
         }
     }
 }

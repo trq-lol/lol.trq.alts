@@ -12,7 +12,7 @@ import java.util.Optional;
  * <p>Reached through {@code AltsRuntime#profileLookup}; there is no public factory.
  *
  * <p>"No such player" is an answer here, not a failure: a lookup that finds nobody returns empty, and an
- * {@link AccountException} is kept for a service that could not be reached or refused to answer.
+ * {@link lol.trq.alts.AltsException} is kept for a service that could not be reached or refused to answer.
  *
  * @author trq
  * @since 0.12.0
@@ -28,10 +28,10 @@ public interface ProfileLookupService {
      *     hold at all (empty, longer than 16 characters, or using a character outside letters, digits,
      *     and underscore), which is answered without a request. A name of one or two characters is
      *     looked up: none can be taken today, but accounts that predate the minimum still hold them
-     * @throws AccountException if the service was rate limiting, refused, or could not be reached
+     * @throws lol.trq.alts.AltsException if the service was rate limiting, refused, or could not be reached
      * @since 0.12.0
      */
-    Optional<PublicProfile> byName(String name) throws AccountException;
+    Optional<PublicProfile> byName(String name);
 
     /**
      * Looks a player up by UUID.
@@ -39,10 +39,10 @@ public interface ProfileLookupService {
      * @param uuid the UUID, dashed or undashed
      * @return the player, or empty when no player has that UUID — including a value that is not a UUID
      *     at all, which is answered without a request
-     * @throws AccountException if the service was rate limiting, refused, or could not be reached
+     * @throws lol.trq.alts.AltsException if the service was rate limiting, refused, or could not be reached
      * @since 0.12.0
      */
-    Optional<PublicProfile> byUuid(String uuid) throws AccountException;
+    Optional<PublicProfile> byUuid(String uuid);
 
     /**
      * Looks up several players by username. A name nobody has is simply absent from the result, as is
@@ -52,13 +52,14 @@ public interface ProfileLookupService {
      * <p>Any number of names is accepted. They are sent to the batch endpoint ten at a time, so the
      * distinct valid names cost one request per ten. A very long list is still the caller's to pace: a
      * rate limit part-way through fails the call with an exception for which
-     * {@link AccountException#rateLimited()} is true and {@link AccountException#retryAfter()} carries
+     * the failure's kind is {@link lol.trq.alts.AltsFailure.Kind#RATE_LIMITED} and its
+     * {@link lol.trq.alts.AltsFailure#retryAfter()} carries
      * any stated wait, rather than returning a partial answer that reads as "those players do not exist".
      *
      * @param names the usernames to resolve
      * @return the players found, in the order their names were first given
-     * @throws AccountException if the service was rate limiting, refused, or could not be reached
+     * @throws lol.trq.alts.AltsException if the service was rate limiting, refused, or could not be reached
      * @since 0.12.0
      */
-    List<PublicProfile> byNames(Collection<String> names) throws AccountException;
+    List<PublicProfile> byNames(Collection<String> names);
 }

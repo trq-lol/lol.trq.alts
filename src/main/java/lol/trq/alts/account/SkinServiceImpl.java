@@ -7,6 +7,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.util.HexFormat;
+import java.util.Optional;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.net.Multipart;
 import lol.trq.alts.net.NetworkScope;
 
@@ -42,40 +45,48 @@ final class SkinServiceImpl implements SkinService {
     }
 
     @Override
-    public PlayerProfile setFromUrl(String url, SkinModel model) throws AccountException {
+    public Optional<SkinProblem> validate(byte[] pngBytes) {
+        return problemWith(pngBytes);
+    }
+
+    @Override
+    public PlayerProfile setFromUrl(String url, SkinModel model) {
         JsonObject request = new JsonObject();
         request.addProperty("variant", (model == null ? SkinModel.CLASSIC : model).apiVariant());
         request.addProperty("url", url);
         JsonObject response =
                 http.sendJson("POST", endpoints.skins(), request.toString(), NetworkScope.Purpose.PROFILE);
-        return gson.fromJson(response, PlayerProfile.class);
+        return AccountHttp.decode(gson, response, PlayerProfile.class);
     }
 
     @Override
-    public PlayerProfile upload(byte[] pngBytes, SkinModel model) throws AccountException {
-        validate(pngBytes);
+    public PlayerProfile upload(byte[] pngBytes, SkinModel model) {
+        Optional<SkinProblem> problem = problemWith(pngBytes);
+        if (problem.isPresent()) {
+            throw refused(problem.get());
+        }
         Multipart form = new Multipart(boundary())
                 .field("variant", (model == null ? SkinModel.CLASSIC : model).apiVariant())
                 .file("file", "skin.png", "image/png", pngBytes);
         JsonObject response =
                 http.sendRaw("POST", endpoints.skins(), form.contentType(), form.body(), NetworkScope.Purpose.PROFILE);
-        return gson.fromJson(response, PlayerProfile.class);
+        return AccountHttp.decode(gson, response, PlayerProfile.class);
     }
 
     @Override
-    public PlayerProfile upload(Path pngFile, SkinModel model) throws AccountException {
+    public PlayerProfile upload(Path pngFile, SkinModel model) {
         return upload(read(pngFile), model);
     }
 
     @Override
-    public void reset() throws AccountException {
+    public void reset() {
         resetToDefault();
     }
 
     @Override
-    public PlayerProfile resetToDefault() throws AccountException {
+    public PlayerProfile resetToDefault() {
         JsonObject response = http.sendJson("DELETE", endpoints.activeSkin(), null, NetworkScope.Purpose.PROFILE);
-        return response == null ? null : gson.fromJson(response, PlayerProfile.class);
+        return AccountHttp.decode(gson, response, PlayerProfile.class);
     }
 
     /**
@@ -86,25 +97,24 @@ final class SkinServiceImpl implements SkinService {
      *
      * @param file the file to read
      * @return its bytes
-     * @throws SkinValidationException if the file is missing, unreadable, or too large
+     * @throws AltsException of kind {@link Kind#INVALID_INPUT} if the file is missing, unreadable, or too
+     *     large
      */
-    private static byte[] read(Path file) throws SkinValidationException {
+    private static byte[] read(Path file) {
         if (file == null) {
-            throw new SkinValidationException(SkinValidationException.Reason.UNREADABLE, "No skin file was given");
+            throw refused(SkinProblem.UNREADABLE);
         }
         try {
             if (!Files.isRegularFile(file)) {
-                throw new SkinValidationException(
-                        SkinValidationException.Reason.UNREADABLE, "The skin file does not exist or is not a file");
+                throw refused(SkinProblem.UNREADABLE);
             }
             if (Files.size(file) > MAX_SKIN_BYTES) {
-                throw tooLarge();
+                throw refused(SkinProblem.TOO_LARGE);
             }
             return Files.readAllBytes(file);
         } catch (IOException | SecurityException unreadable) {
-            throw new SkinValidationException(
-                    SkinValidationException.Reason.UNREADABLE,
-                    "The skin file could not be read (" + unreadable.getClass().getSimpleName() + ")");
+            // Not kept as the cause: a file-system exception's message is the absolute path.
+            throw refused(SkinProblem.UNREADABLE);
         }
     }
 
@@ -116,31 +126,40 @@ final class SkinServiceImpl implements SkinService {
      * for nothing.
      *
      * @param png the candidate skin
-     * @throws SkinValidationException if the bytes are empty, too large, not a PNG, or the wrong size
+     * @return why the bytes are refused, or empty when they are an uploadable skin
      */
-    static void validate(byte[] png) throws SkinValidationException {
+    static Optional<SkinProblem> problemWith(byte[] png) {
         if (png == null || png.length == 0) {
-            throw new SkinValidationException(SkinValidationException.Reason.EMPTY, "The skin is empty");
+            return Optional.of(SkinProblem.EMPTY);
         }
         if (png.length > MAX_SKIN_BYTES) {
-            throw tooLarge();
+            return Optional.of(SkinProblem.TOO_LARGE);
         }
         if (png.length < PNG_HEADER_LENGTH || !startsWithSignature(png) || !declaresHeaderChunk(png)) {
-            throw new SkinValidationException(SkinValidationException.Reason.NOT_PNG, "The skin is not a PNG image");
+            return Optional.of(SkinProblem.NOT_PNG);
         }
         int width = readInt(png, 16);
         int height = readInt(png, 20);
         if (width != SKIN_WIDTH || (height != SKIN_HEIGHT && height != LEGACY_SKIN_HEIGHT)) {
-            throw new SkinValidationException(
-                    SkinValidationException.Reason.WRONG_DIMENSIONS,
-                    "A skin is 64x64 or 64x32 pixels; this image is " + Integer.toUnsignedString(width) + "x"
-                            + Integer.toUnsignedString(height));
+            return Optional.of(SkinProblem.WRONG_DIMENSIONS);
         }
+        return Optional.empty();
     }
 
-    private static SkinValidationException tooLarge() {
-        return new SkinValidationException(
-                SkinValidationException.Reason.TOO_LARGE, "The skin is larger than " + MAX_SKIN_BYTES + " bytes");
+    /** The failure an upload refused locally fails with: {@link Kind#INVALID_INPUT}, nothing sent. */
+    private static AltsException refused(SkinProblem problem) {
+        return new AltsException(Kind.INVALID_INPUT, describe(problem));
+    }
+
+    /** A fixed description of a problem, naming no path. */
+    private static String describe(SkinProblem problem) {
+        return switch (problem) {
+            case UNREADABLE -> "The skin file could not be read";
+            case EMPTY -> "The skin is empty";
+            case TOO_LARGE -> "The skin is larger than " + MAX_SKIN_BYTES + " bytes";
+            case NOT_PNG -> "The skin is not a PNG image";
+            case WRONG_DIMENSIONS -> "A skin is 64x64 or 64x32 pixels";
+        };
     }
 
     private static boolean startsWithSignature(byte[] png) {

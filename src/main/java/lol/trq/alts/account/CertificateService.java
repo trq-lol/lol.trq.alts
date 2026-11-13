@@ -15,8 +15,8 @@ public interface CertificateService {
      * <p>Nothing is persisted: the pair lives in the returned record and nowhere else.
      *
      * @return the key pair and its signatures
-     * @throws AccountException if the token was refused or the service failed
+     * @throws lol.trq.alts.AltsException if the token was refused or the service failed
      * @since 0.12.0
      */
-    PlayerCertificate fetch() throws AccountException;
+    PlayerCertificate fetch();
 }

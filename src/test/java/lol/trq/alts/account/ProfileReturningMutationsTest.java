@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure.Kind;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -62,19 +64,23 @@ class ProfileReturningMutationsTest {
     @Test
     void resetAndHideFailuresCarryTheirStatus() {
         server.canned(401, "{}");
-        assertTrue(assertThrows(
-                        AccountException.class, () -> server.services().skin().resetToDefault())
-                .tokenRefused());
-        assertTrue(assertThrows(
-                        AccountException.class, () -> server.services().cape().hideActive())
-                .tokenRefused());
+        assertTrue(
+                assertThrows(AltsException.class, () -> server.services().skin().resetToDefault())
+                                .kind()
+                        == Kind.UNAUTHORIZED);
+        assertTrue(
+                assertThrows(AltsException.class, () -> server.services().cape().hideActive())
+                                .kind()
+                        == Kind.UNAUTHORIZED);
 
         server.rateLimited(1);
-        assertTrue(assertThrows(
-                        AccountException.class, () -> server.services().skin().resetToDefault())
-                .rateLimited());
-        assertTrue(assertThrows(
-                        AccountException.class, () -> server.services().cape().hideActive())
-                .rateLimited());
+        assertTrue(
+                assertThrows(AltsException.class, () -> server.services().skin().resetToDefault())
+                                .kind()
+                        == Kind.RATE_LIMITED);
+        assertTrue(
+                assertThrows(AltsException.class, () -> server.services().cape().hideActive())
+                                .kind()
+                        == Kind.RATE_LIMITED);
     }
 }

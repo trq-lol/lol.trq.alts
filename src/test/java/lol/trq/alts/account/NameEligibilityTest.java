@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure.Kind;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -83,13 +85,15 @@ class NameEligibilityTest {
     @Test
     void eligibilityFailuresCarryTheirStatus() {
         server.canned(401, "{}");
-        assertTrue(assertThrows(
-                        AccountException.class, () -> server.services().name().eligibility())
-                .tokenRefused());
+        assertTrue(
+                assertThrows(AltsException.class, () -> server.services().name().eligibility())
+                                .kind()
+                        == Kind.UNAUTHORIZED);
 
         server.rateLimited(1);
-        assertTrue(assertThrows(
-                        AccountException.class, () -> server.services().name().eligibility())
-                .rateLimited());
+        assertTrue(
+                assertThrows(AltsException.class, () -> server.services().name().eligibility())
+                                .kind()
+                        == Kind.RATE_LIMITED);
     }
 }

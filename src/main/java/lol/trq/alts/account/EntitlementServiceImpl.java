@@ -28,13 +28,14 @@ final class EntitlementServiceImpl implements EntitlementService {
     }
 
     @Override
-    public Entitlements fetch() throws AccountException {
+    public Entitlements fetch() {
         JsonObject body = http.get(endpoints.entitlements(), NetworkScope.Purpose.PROFILE);
         Set<String> products = new LinkedHashSet<>();
         if (body.has("items") && body.get("items").isJsonArray()) {
             for (JsonElement item : body.getAsJsonArray("items")) {
-                if (item.isJsonObject() && item.getAsJsonObject().has("name")) {
-                    products.add(item.getAsJsonObject().get("name").getAsString());
+                String name = item.isJsonObject() ? AccountHttp.string(item.getAsJsonObject(), "name") : null;
+                if (name != null) {
+                    products.add(name);
                 }
             }
         }

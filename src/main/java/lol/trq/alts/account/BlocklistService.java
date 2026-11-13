@@ -13,8 +13,8 @@ public interface BlocklistService {
      * Fetches the players the account has blocked.
      *
      * @return the blocklist
-     * @throws AccountException if the token was refused or the service failed
+     * @throws lol.trq.alts.AltsException if the token was refused or the service failed
      * @since 0.12.0
      */
-    Blocklist fetch() throws AccountException;
+    Blocklist fetch();
 }

@@ -27,27 +27,27 @@ final class CapeServiceImpl implements CapeService {
     }
 
     @Override
-    public List<Cape> owned() throws AccountException {
+    public List<Cape> owned() {
         return profile.fetch().capes();
     }
 
     @Override
-    public PlayerProfile setActive(String capeId) throws AccountException {
+    public PlayerProfile setActive(String capeId) {
         JsonObject request = new JsonObject();
         request.addProperty("capeId", capeId);
         JsonObject response =
                 http.sendJson("PUT", endpoints.activeCape(), request.toString(), NetworkScope.Purpose.PROFILE);
-        return gson.fromJson(response, PlayerProfile.class);
+        return AccountHttp.decode(gson, response, PlayerProfile.class);
     }
 
     @Override
-    public void hide() throws AccountException {
+    public void hide() {
         hideActive();
     }
 
     @Override
-    public PlayerProfile hideActive() throws AccountException {
+    public PlayerProfile hideActive() {
         JsonObject response = http.sendJson("DELETE", endpoints.activeCape(), null, NetworkScope.Purpose.PROFILE);
-        return response == null ? null : gson.fromJson(response, PlayerProfile.class);
+        return AccountHttp.decode(gson, response, PlayerProfile.class);
     }
 }

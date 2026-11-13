@@ -39,7 +39,7 @@ final class ProfileLookupServiceImpl implements ProfileLookupService {
     }
 
     @Override
-    public Optional<PublicProfile> byName(String name) throws AccountException {
+    public Optional<PublicProfile> byName(String name) {
         if (!NameRules.lookupable(name)) {
             return Optional.empty();
         }
@@ -47,7 +47,7 @@ final class ProfileLookupServiceImpl implements ProfileLookupService {
     }
 
     @Override
-    public Optional<PublicProfile> byUuid(String uuid) throws AccountException {
+    public Optional<PublicProfile> byUuid(String uuid) {
         String undashed = Uuids.undashed(uuid);
         if (undashed == null) {
             return Optional.empty();
@@ -56,7 +56,7 @@ final class ProfileLookupServiceImpl implements ProfileLookupService {
     }
 
     @Override
-    public List<PublicProfile> byNames(Collection<String> names) throws AccountException {
+    public List<PublicProfile> byNames(Collection<String> names) {
         if (names == null) {
             return List.of();
         }
@@ -90,10 +90,10 @@ final class ProfileLookupServiceImpl implements ProfileLookupService {
      *
      * @param names the names to resolve, already validated and de-duplicated
      * @return the players that exist; a name nobody holds is simply absent
-     * @throws AccountException on a refusal — a rate limit included, carrying any stated wait — or when
+     * @throws lol.trq.alts.AltsException on a refusal — a rate limit included, carrying any stated wait — or when
      *     the service could not be reached or answered with something other than a list
      */
-    private List<PublicProfile> batch(List<String> names) throws AccountException {
+    private List<PublicProfile> batch(List<String> names) {
         JsonArray request = new JsonArray();
         names.forEach(request::add);
         String url = endpoints.lookupByNames();
@@ -113,7 +113,7 @@ final class ProfileLookupServiceImpl implements ProfileLookupService {
                             response.retryAfter()));
         }
         if (body == null || !body.isJsonArray()) {
-            throw new AccountException("lookup response was not a list", 0);
+            throw AccountHttp.unreadable("Profile lookup");
         }
         List<PublicProfile> found = new ArrayList<>();
         for (JsonElement entry : body.getAsJsonArray()) {
@@ -134,9 +134,9 @@ final class ProfileLookupServiceImpl implements ProfileLookupService {
      *
      * @param url the lookup URL
      * @return the player, or empty on a 404 or an empty answer
-     * @throws AccountException on any other refusal, or when the service could not be reached
+     * @throws lol.trq.alts.AltsException on any other refusal, or when the service could not be reached
      */
-    private Optional<PublicProfile> lookup(String url) throws AccountException {
+    private Optional<PublicProfile> lookup(String url) {
         HttpTransport.HttpResponse response = http.exchange("GET", url, null, null, NetworkScope.Purpose.PROFILE);
         if (response.status() == 404 || response.status() == 204) {
             return Optional.empty();
@@ -148,7 +148,7 @@ final class ProfileLookupServiceImpl implements ProfileLookupService {
         String id = AccountHttp.string(body, "id");
         String name = AccountHttp.string(body, "name");
         if (id == null || name == null) {
-            throw new AccountException("lookup response carried no identity", 0);
+            throw AccountHttp.unreadable("Profile lookup");
         }
         return Optional.of(new PublicProfile(id, name));
     }
