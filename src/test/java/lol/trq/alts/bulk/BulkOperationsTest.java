@@ -468,6 +468,30 @@ class BulkOperationsTest {
                 Kind.CANCELLED, report.results().get(2).failure().orElseThrow().kind());
     }
 
+    /**
+     * An operation that throws as it starts (an executor refusing the task) fails that entry, classified
+     * as any other failed attempt; it does not cut the run short, so every entry is still tried.
+     */
+    @Test
+    void anOperationThatThrowsAsItStartsIsClassifiedPerEntry() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        BulkOperations bulk = bulkOver(account -> {
+            calls.incrementAndGet();
+            throw new java.util.concurrent.RejectedExecutionException("refused");
+        });
+
+        BulkReport report = bulk.refreshAll(accounts(3), FAST.withConcurrency(1), BulkProgress.NONE)
+                .report()
+                .get(10, TimeUnit.SECONDS);
+
+        assertEquals(3, calls.get(), "each entry was tried, none was claimed by a cut-short");
+        assertEquals(3, report.results().size());
+        for (BulkEntryResult result : report.results()) {
+            assertEquals(Kind.CANCELLED, result.failure().orElseThrow().kind(), "entry " + result.index());
+            assertEquals(1, result.attempts(), "a refused start is not retried");
+        }
+    }
+
     /** A line that is no credential at all is input the host gave, refused without a request. */
     @Test
     void aLineThatIsNoCredentialIsInvalidInput() throws Exception {
