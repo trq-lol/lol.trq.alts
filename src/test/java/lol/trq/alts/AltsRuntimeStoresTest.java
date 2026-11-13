@@ -4,15 +4,22 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
+import lol.trq.alts.net.IoExecutor;
 import lol.trq.alts.net.NetTestHooks;
+import lol.trq.alts.net.NetworkScope;
+import lol.trq.alts.net.ProxyRoute;
 import lol.trq.alts.spi.StoreKeyProvider;
 import lol.trq.alts.store.AccountStore;
 import lol.trq.alts.store.HostSecrets;
@@ -125,6 +132,39 @@ class AltsRuntimeStoresTest {
         try (AltsRuntime<Object> third = builder(dirA).build()) {
             assertTrue(holds(third, ALEX) && holds(third, STEVE), "once the first closed, its data is there");
             assertEquals("value", third.secrets().get("feature.api-key"));
+        }
+    }
+
+    @Test
+    void aRefusedBuildLeavesTheFirstRuntimesTransportExecutorAndToastsInPlace() throws Exception {
+        ProxyRoute routeA = ProxyRoute.http("proxy-a.example", 3128);
+        ProxyRoute routeB = ProxyRoute.http("proxy-b.example", 3128);
+        Executor executorA = Runnable::run;
+        Executor executorB = Runnable::run;
+        List<String> toastsA = new CopyOnWriteArrayList<>();
+        List<String> toastsB = new CopyOnWriteArrayList<>();
+
+        try (AltsRuntime<Object> first = builder(dirA)
+                .proxyProvider(scope -> routeA)
+                .executor(executorA)
+                .toastSink((level, title, description, durationMs) -> toastsA.add(title))
+                .build()) {
+            assertThrows(
+                    IllegalStateException.class,
+                    () -> builder(dirA)
+                            .proxyProvider(scope -> routeB)
+                            .executor(executorB)
+                            .toastSink((level, title, description, durationMs) -> toastsB.add(title))
+                            .build());
+
+            assertSame(
+                    routeA,
+                    NetTestHooks.routeFor(NetworkScope.of(NetworkScope.Purpose.PROFILE)),
+                    "the refused build must not have installed its proxy provider");
+            assertSame(executorA, IoExecutor.executor(), "nor its executor");
+            AltsToasts.info("still mine", "");
+            assertEquals(List.of("still mine"), toastsA, "nor its toast sink");
+            assertTrue(toastsB.isEmpty());
         }
     }
 

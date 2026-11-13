@@ -78,12 +78,10 @@ public final class AltsRuntime<H> implements AutoCloseable {
         Objects.requireNonNull(builder.mainThread, "MainThreadExecutor required");
         Objects.requireNonNull(builder.toastSink, "ToastSink required");
 
-        // Bound first: everything below it that can reach the network must already know how to.
-        HttpUtil.bind(builder.proxyProvider);
-        IoExecutor.bind(builder.executor);
-
-        AltsToasts.bind(builder.toastSink);
-
+        // The stores come first: opening one is the step that can be refused (another runtime holds the
+        // file), and a refused build must leave nothing of its own behind, least of all the process-wide
+        // proxy provider, executor and toast sink of the runtime that holds the file.
+        //
         // Each store is opened with its key, its directory and its lock in one step, so nothing can be
         // written under another key, and a second runtime on the same files fails here rather than
         // corrupting them later. When the second lock is refused, the first is released again: a build
@@ -153,6 +151,12 @@ public final class AltsRuntime<H> implements AutoCloseable {
             }
             this.gameStatsCaches = Map.copyOf(caches);
             this.emptyStatsCache = new AsyncCache<>(uuid -> null, STATS_TTL_MILLIS);
+
+            // Bound last, once nothing above can throw. Nothing built above reaches the network or the
+            // executor while it is being built; each reads these when it first does work.
+            HttpUtil.bind(builder.proxyProvider);
+            IoExecutor.bind(builder.executor);
+            AltsToasts.bind(builder.toastSink);
         } catch (RuntimeException | Error failed) {
             stores.close(secrets);
             stores.close(store);

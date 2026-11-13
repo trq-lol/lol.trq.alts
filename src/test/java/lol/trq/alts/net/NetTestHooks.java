@@ -14,6 +14,11 @@ public final class NetTestHooks {
         HttpUtil.resetForTests();
     }
 
+    /** Returns the route the installed proxy provider gives {@code scope}. */
+    public static ProxyRoute routeFor(NetworkScope scope) throws java.io.IOException {
+        return HttpUtil.routeFor(scope);
+    }
+
     /** Restores the default executor. */
     public static void resetExecutor() {
         IoExecutor.resetForTests();
