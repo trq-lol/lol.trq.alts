@@ -135,6 +135,52 @@ class CookieFileTest {
                 "the containing directory must not travel into a message: " + thrown.getMessage());
     }
 
+    /**
+     * A file that exists but cannot be opened: the JDK's own exception names the absolute path, so it
+     * must neither be repeated in the message nor ride along as the cause. Read access is taken away
+     * with POSIX permissions where there are some, and with an empty ACL on Windows.
+     */
+    @Test
+    void aFileThatCannotBeReadIsInvalidInputWithoutThePath() throws IOException {
+        Path file = write("locked.txt", NETSCAPE.getBytes(StandardCharsets.UTF_8));
+        java.nio.file.attribute.PosixFileAttributeView posix =
+                Files.getFileAttributeView(file, java.nio.file.attribute.PosixFileAttributeView.class);
+        java.nio.file.attribute.AclFileAttributeView acl =
+                Files.getFileAttributeView(file, java.nio.file.attribute.AclFileAttributeView.class);
+        java.util.List<java.nio.file.attribute.AclEntry> granted = acl == null ? null : acl.getAcl();
+        if (posix != null) {
+            Files.setPosixFilePermissions(file, java.util.Set.of());
+        } else {
+            org.junit.jupiter.api.Assumptions.assumeTrue(acl != null, "no way to take read access away here");
+            acl.setAcl(java.util.List.of());
+        }
+        try {
+            org.junit.jupiter.api.Assumptions.assumeFalse(
+                    canOpen(file), "this user can read the file anyway (for example root)");
+
+            AltsException thrown = assertThrows(AltsException.class, () -> CookieFile.read(file));
+
+            assertEquals(Kind.INVALID_INPUT, thrown.kind());
+            assertFalse(thrown.getMessage().contains(dir.toString()), thrown.getMessage());
+            assertEquals(null, thrown.getCause(), "no exception carrying the path rides along");
+        } finally {
+            if (posix != null) {
+                Files.setPosixFilePermissions(
+                        file, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+            } else {
+                acl.setAcl(granted);
+            }
+        }
+    }
+
+    private static boolean canOpen(Path file) {
+        try (java.io.InputStream in = Files.newInputStream(file)) {
+            return true;
+        } catch (IOException refused) {
+            return false;
+        }
+    }
+
     @Test
     void aDirectoryIsRejectedAsNotAFileRatherThanAsMissing() {
         AltsException thrown = assertThrows(AltsException.class, () -> CookieFile.read(dir));
