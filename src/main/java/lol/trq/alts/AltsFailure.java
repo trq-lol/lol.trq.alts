@@ -1,6 +1,5 @@
 package lol.trq.alts;
 
-import com.google.gson.annotations.SerializedName;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
@@ -26,6 +25,9 @@ import lol.trq.alts.auth.XstsError;
  * own clock beside it. A failure with no stated wait records no time, so two such failures with the same
  * kind and message are equal whenever they were made.
  *
+ * <p>It is a value the library hands a host, not a wire DTO: it carries no {@code @SerializedName} and
+ * the library never serializes it. A host that wants to persist one writes the parts it needs.
+ *
  * @param kind what kind of failure this is; the thing to branch on
  * @param message a short description built by the library, safe to show and to log
  * @param retryAfter how long the service asked the caller to wait before trying again, when it said
@@ -35,11 +37,11 @@ import lol.trq.alts.auth.XstsError;
  * @since 1.0.0
  */
 public record AltsFailure(
-        @SerializedName("kind") Kind kind,
-        @SerializedName("message") String message,
-        @SerializedName("retryAfter") Optional<Duration> retryAfter,
-        @SerializedName("xstsError") Optional<XstsError> xstsError,
-        @SerializedName("retryAt") Optional<Instant> retryAt) {
+        Kind kind,
+        String message,
+        Optional<Duration> retryAfter,
+        Optional<XstsError> xstsError,
+        Optional<Instant> retryAt) {
 
     /**
      * What kind of failure happened. One enum for the whole library, so a host writes its {@code switch}
