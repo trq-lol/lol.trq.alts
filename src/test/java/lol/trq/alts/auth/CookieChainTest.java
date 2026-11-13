@@ -12,8 +12,10 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import lol.trq.alts.auth.AltLoginCallback.FailureReason;
 import lol.trq.alts.auth.MicrosoftAuthUtil.AuthFlowException;
+import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.net.ProxyRoute;
 import lol.trq.alts.net.TestTransports;
@@ -248,6 +250,49 @@ class CookieChainTest {
         assertEquals(NetworkScope.Purpose.PROFILE, scopes.get(1).purpose());
         for (NetworkScope scope : scopes) {
             assertEquals(AuthChainServer.UUID, scope.accountUuid());
+        }
+    }
+
+    /**
+     * A routed cookie import carries its tag from the first request of the redirect chain on. The chain
+     * starts at the identity service, which no test can stand in for, so the provider records the hop
+     * and then names a proxy nobody listens on: the request is asked about, tagged, and goes nowhere.
+     */
+    @Test
+    void aRoutedCookieSignInTagsTheFirstRedirectHop() throws Exception {
+        List<NetworkScope> scopes = new ArrayList<>();
+        HttpTransport transport = TestTransports.through(scope -> {
+            scopes.add(scope);
+            return ProxyRoute.http("127.0.0.1", 1);
+        });
+
+        assertThrows(
+                Exception.class,
+                () -> new CookieAuthUtil(transport.routed("pool-7")).authenticate(FULL_BROWSER_EXPORT, null, null));
+
+        assertEquals(1, scopes.size(), scopes.toString());
+        assertEquals(Optional.of("pool-7"), scopes.get(0).routeTag(), "the redirect hop carried the tag");
+        assertEquals(NetworkScope.Purpose.AUTH, scopes.get(0).purpose());
+    }
+
+    @Test
+    void aRoutedTailTagsTheMinecraftLoginAndTheProfileHops() throws Exception {
+        List<NetworkScope> scopes = new ArrayList<>();
+        CookieAuthUtil cookies = new CookieAuthUtil(TestTransports.through(scope -> {
+                    scopes.add(scope);
+                    return ProxyRoute.direct();
+                })
+                .routed("pool-7"));
+
+        try (AuthChainServer chain = new AuthChainServer()) {
+            assertEquals(
+                    "Alex",
+                    cookies.completeFromLanding(landing(), chain.config(), null).username());
+        }
+
+        assertEquals(2, scopes.size(), scopes.toString());
+        for (NetworkScope scope : scopes) {
+            assertEquals(Optional.of("pool-7"), scope.routeTag(), "a hop left without the tag: " + scope);
         }
     }
 

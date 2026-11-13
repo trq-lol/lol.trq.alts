@@ -15,9 +15,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -28,6 +31,8 @@ import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.model.SessionData;
 import lol.trq.alts.net.HttpTransport;
+import lol.trq.alts.net.NetworkScope;
+import lol.trq.alts.net.ProxyRoute;
 import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -165,6 +170,26 @@ class InteractiveLoginTest {
         assertFalse(login.get(2, TimeUnit.SECONDS).success(), "the sign-in ended with the runtime");
         waitUntil(() -> canBind(port));
         assertNull(injected.get());
+    }
+
+    @Test
+    void aRoutedBrowserSignInCarriesItsTagOnTheTokenExchangeAndEveryHopAfter() throws Exception {
+        List<NetworkScope> scopes = new CopyOnWriteArrayList<>();
+        AltLoginServiceImpl service = new AltLoginServiceImpl(
+                localStore.store(), injected::set, chain.config(), TestTransports.through(scope -> {
+                    scopes.add(scope);
+                    return ProxyRoute.direct();
+                }));
+        service.browser = AuthChainServer::completeInBrowser;
+
+        LoginResult result =
+                service.routed("pool-7").loginMicrosoft(LoginMode.DIRECT).get(10, TimeUnit.SECONDS);
+
+        assertTrue(result.success(), result.message());
+        assertEquals(5, scopes.size(), "token exchange, Xbox Live, XSTS, Minecraft login, profile: " + scopes);
+        for (NetworkScope scope : scopes) {
+            assertEquals(Optional.of("pool-7"), scope.routeTag(), "a hop left without the tag: " + scope);
+        }
     }
 
     @Test

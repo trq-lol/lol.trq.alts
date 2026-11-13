@@ -9,9 +9,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -25,6 +28,8 @@ import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.model.SessionData;
 import lol.trq.alts.net.HttpTransport;
+import lol.trq.alts.net.NetworkScope;
+import lol.trq.alts.net.ProxyRoute;
 import lol.trq.alts.net.TestTransports;
 import lol.trq.alts.spi.DeviceCodePrompt;
 import org.junit.jupiter.api.AfterEach;
@@ -336,6 +341,32 @@ class DeviceCodeLoginTest {
         Thread.sleep(300);
         assertEquals(polls, chain.deviceTokenPolls(), "and nothing polls after it closed");
         assertNull(injected.get());
+    }
+
+    @Test
+    void aRoutedDeviceCodeLoginCarriesItsTagOnTheRequestAndEveryPoll() throws Exception {
+        chain.deviceTokenError("authorization_pending");
+        chain.deviceTokenError("authorization_pending");
+        chain.deviceTokenSuccess();
+        List<NetworkScope> scopes = new CopyOnWriteArrayList<>();
+        AltLoginServiceImpl service = new AltLoginServiceImpl(
+                localStore.store(), injected::set, chain.config(), TestTransports.through(scope -> {
+                    scopes.add(scope);
+                    return ProxyRoute.direct();
+                }));
+        service.deviceCodeTiming = new DeviceCodeTiming(SECOND_MILLIS, SLOW_DOWN_MILLIS);
+
+        LoginResult result = service.routed("pool-7")
+                .loginDeviceCode(prompt, LoginMode.DIRECT)
+                .get(10, TimeUnit.SECONDS);
+
+        assertTrue(result.success(), result.message());
+        assertEquals(3, chain.deviceTokenPolls());
+        // The code request, three polls, Xbox Live, XSTS, the Minecraft login and the profile.
+        assertEquals(8, scopes.size(), scopes.toString());
+        for (NetworkScope scope : scopes) {
+            assertEquals(Optional.of("pool-7"), scope.routeTag(), "a request left without the tag: " + scope);
+        }
     }
 
     private static void waitUntil(java.util.function.BooleanSupplier condition) throws InterruptedException {
