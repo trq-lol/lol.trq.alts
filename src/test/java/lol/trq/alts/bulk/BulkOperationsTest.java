@@ -447,21 +447,35 @@ class BulkOperationsTest {
     }
 
     /**
-     * Cutting a run short claims only entries with no result: one already recorded is kept. No public
-     * route reaches this once callbacks cannot end a chain, so the run is driven directly.
+     * An {@link Error} from {@code completed} cuts the run short: the entry it was reporting stays
+     * recorded as it finished, and every entry not yet taken is reported as cancelled.
      */
     @Test
-    void cuttingARunShortKeepsAnEntryAlreadyRecorded() throws Exception {
-        BulkOperationsImpl.Run run = new BulkOperationsImpl.Run(
-                TestTransports.direct(), 3, FAST, BulkProgress.NONE, index -> "entry " + index, null);
-        BulkEntryResult done = BulkEntryResult.success(0, account(0), "ok", 1);
-        run.record(0, done);
+    void anErrorFromCompletedCutsTheRunShortAndKeepsTheRecordedEntry() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        BulkOperations bulk = bulkOver(account -> {
+            calls.incrementAndGet();
+            return CompletableFuture.completedFuture(AccountStatus.valid(account));
+        });
+        BulkProgress errorOnFirst = new BulkProgress() {
+            @Override
+            public void started(int index, int total, String label) {}
 
-        run.cancelFrom(0, lol.trq.alts.AltsFailure.of(Kind.CANCELLED, "cut short"));
-        run.finish();
-        BulkReport report = run.report().get(10, TimeUnit.SECONDS);
+            @Override
+            public void completed(int index, int total, BulkEntryResult result) {
+                if (index == 0) {
+                    throw new AssertionError("the host's callback failed hard");
+                }
+            }
+        };
 
-        assertEquals(done, report.results().get(0), "the recorded entry survives");
+        BulkReport report = bulk.refreshAll(accounts(3), FAST.withConcurrency(1), errorOnFirst)
+                .report()
+                .get(10, TimeUnit.SECONDS);
+
+        assertEquals(3, report.results().size());
+        assertTrue(report.results().get(0).success(), "the entry already recorded is kept");
+        assertEquals(1, calls.get(), "nothing after the cut was attempted");
         assertEquals(
                 Kind.CANCELLED, report.results().get(1).failure().orElseThrow().kind());
         assertEquals(

@@ -398,10 +398,12 @@ public final class BulkOperationsImpl implements BulkOperations {
         }
     }
 
-    /** The mutable state of one run, and its handle. */
-    // Package-private, not private, so a test can drive cancelFrom against an entry already recorded,
-    // a state no public route can reach once a throwing callback no longer ends a chain.
-    static final class Run implements BulkHandle {
+    /**
+     * The mutable state of one run, and its handle. An {@link Error} thrown by a progress callback
+     * escapes {@link #record} and ends that worker's chain; {@link #cancelFrom} then keeps the entry it
+     * had already recorded and claims only the entries with no result.
+     */
+    private static final class Run implements BulkHandle {
 
         private final HttpTransport transport;
         private final int total;
