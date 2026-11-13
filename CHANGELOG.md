@@ -12,9 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **One error model.** `lol.trq.alts.AltsFailure` is the one value that describes a failure anywhere in
   the library: a `kind()` to branch on, a `message()` the library builds (never a transport exception's
   text, a token or a path), an `Optional<Duration> retryAfter()`, an `Optional<XstsError> xstsError()`
-  (present only on `XBOX_DENIED`), and `at()`, the instant it was recorded. `retryable()` is true for
-  `NETWORK`, and for `RATE_LIMITED` once a stated `retryAfter` has passed since `at()`; a rate limit
-  that stated no wait is not retryable, and neither is any other kind. `AltsFailure.Kind` is one enum
+  (present only on `XBOX_DENIED`), and `Optional<Instant> retryAt()`, the instant a stated wait ends
+  (present exactly when `retryAfter` is). `retryable()` honours a stated wait for every retryable kind:
+  with `retryAt` present, `NETWORK` and `RATE_LIMITED` are retryable once it has passed; without one,
+  `NETWORK` is retryable and `RATE_LIMITED` is not; no other kind is retryable. A failure with no stated
+  wait records no time, so equality does not depend on when it was made. `AltsFailure.Kind` is one enum
   for the whole library: `NETWORK`, `RATE_LIMITED`, `UNAUTHORIZED`, `REAUTH_REQUIRED`, `NOT_ENTITLED`,
   `NOT_FOUND`, `XBOX_DENIED`, `DECLINED`, `TIMED_OUT`, `CANCELLED`, `INVALID_INPUT`, `CONFLICT`,
   `NOT_CONFIGURED`, `STORAGE`, `CRYPTO`, `PROTOCOL`, `UNKNOWN`. `lol.trq.alts.AltsException` (unchecked)

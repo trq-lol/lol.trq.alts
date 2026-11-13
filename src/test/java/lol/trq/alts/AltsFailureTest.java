@@ -19,35 +19,36 @@ import org.junit.jupiter.api.Test;
 /** Pins the one failure value: its invariants, and what {@link AltsFailure#retryable()} promises. */
 class AltsFailureTest {
 
-    private static AltsFailure at(Kind kind, Duration retryAfter, Instant at) {
-        return new AltsFailure(kind, "m", Optional.ofNullable(retryAfter), Optional.empty(), at);
+    /** A failure whose stated wait, if any, ends at {@code retryAt}. */
+    private static AltsFailure ending(Kind kind, Duration retryAfter, Instant retryAt) {
+        return new AltsFailure(
+                kind, "m", Optional.ofNullable(retryAfter), Optional.empty(), Optional.ofNullable(retryAt));
     }
 
     @Test
-    void aNetworkFailureIsAlwaysRetryable() {
+    void aNetworkFailureWithNoStatedWaitIsRetryable() {
         assertTrue(AltsFailure.of(Kind.NETWORK, "down").retryable());
-        assertTrue(at(Kind.NETWORK, Duration.ofHours(1), Instant.now()).retryable());
     }
 
     @Test
-    void aRateLimitIsRetryableOnlyOnceItsStatedWaitHasPassed() {
+    void aStatedWaitIsHonouredForEveryRetryableKind() {
         Instant now = Instant.now();
-        assertFalse(at(Kind.RATE_LIMITED, Duration.ofMinutes(5), now).retryable(), "the wait has not passed");
-        assertFalse(
-                at(Kind.RATE_LIMITED, Duration.ofMinutes(5), now.minus(Duration.ofMinutes(4)))
-                        .retryable(),
-                "four of five minutes have passed");
-        assertTrue(
-                at(Kind.RATE_LIMITED, Duration.ofMinutes(5), now.minus(Duration.ofMinutes(6)))
-                        .retryable(),
-                "the wait has passed since the failure was recorded");
-        assertTrue(at(Kind.RATE_LIMITED, Duration.ZERO, now).retryable(), "a zero wait has passed at once");
+        for (Kind kind : new Kind[] {Kind.NETWORK, Kind.RATE_LIMITED}) {
+            Duration fiveMinutes = Duration.ofMinutes(5);
+            assertFalse(
+                    ending(kind, fiveMinutes, now.plus(Duration.ofMinutes(1))).retryable(), kind + ": not yet");
+            assertTrue(ending(kind, fiveMinutes, now.minusSeconds(1)).retryable(), kind + ": the wait has ended");
+            assertTrue(ending(kind, fiveMinutes, now).retryable(), kind + ": at the instant it ends");
+            assertFalse(
+                    AltsFailure.of(kind, "m", Duration.ofMinutes(5)).retryable(),
+                    kind + ": a wait stated just now has not ended");
+            assertTrue(AltsFailure.of(kind, "m", Duration.ZERO).retryable(), kind + ": a zero wait ends at once");
+        }
     }
 
     @Test
     void aRateLimitThatStatedNoWaitIsNotRetryable() {
         assertFalse(AltsFailure.rateLimited("slow down", null).retryable());
-        assertFalse(at(Kind.RATE_LIMITED, null, Instant.EPOCH).retryable(), "however long ago it was recorded");
     }
 
     @Test
@@ -55,31 +56,48 @@ class AltsFailureTest {
         Set<Kind> retryable = EnumSet.of(Kind.NETWORK, Kind.RATE_LIMITED);
         for (Kind kind : Kind.values()) {
             if (!retryable.contains(kind)) {
-                assertFalse(at(kind, Duration.ZERO, Instant.EPOCH).retryable(), kind.name());
+                assertFalse(AltsFailure.of(kind, "m").retryable(), kind.name());
+                assertFalse(ending(kind, Duration.ZERO, Instant.EPOCH).retryable(), kind + " with an ended wait");
             }
         }
     }
 
     @Test
-    void theFactoriesRecordTheFailureNowWithWhatTheyWereGiven() {
+    void aStatedWaitEndsThatLongAfterTheFailureIsMade() {
         Instant before = Instant.now();
         AltsFailure limited = AltsFailure.rateLimited("slow", Duration.ofSeconds(40));
+        Instant after = Instant.now();
+
+        assertEquals(Optional.of(Duration.ofSeconds(40)), limited.retryAfter());
+        Instant end = limited.retryAt().orElseThrow();
+        assertFalse(end.isBefore(before.plusSeconds(40)));
+        assertFalse(end.isAfter(after.plusSeconds(40)));
+    }
+
+    @Test
+    void aFailureWithNoStatedWaitRecordsNoTimeSoEqualityIgnoresWhenItWasMade() throws Exception {
+        AltsFailure first = AltsFailure.of(Kind.NOT_FOUND, "none");
+        Thread.sleep(5);
+        AltsFailure second = AltsFailure.of(Kind.NOT_FOUND, "none");
+
+        assertEquals(Optional.empty(), first.retryAt());
+        assertEquals(first, second);
+    }
+
+    @Test
+    void theFactoriesCarryWhatTheyWereGiven() {
         AltsFailure denied = AltsFailure.xboxDenied("denied", XstsError.CHILD_ACCOUNT);
         AltsFailure plain = AltsFailure.of(Kind.NOT_FOUND, "none");
 
-        assertEquals(Kind.RATE_LIMITED, limited.kind());
-        assertEquals(Optional.of(Duration.ofSeconds(40)), limited.retryAfter());
         assertEquals(Kind.XBOX_DENIED, denied.kind());
         assertEquals(Optional.of(XstsError.CHILD_ACCOUNT), denied.xstsError());
         assertEquals(Optional.empty(), plain.retryAfter());
         assertEquals(Optional.empty(), plain.xstsError());
-        assertFalse(plain.at().isBefore(before));
-        assertFalse(plain.at().isAfter(Instant.now()));
     }
 
     @Test
     void aRelabelledFailureKeepsEverythingButItsMessage() {
-        AltsFailure original = at(Kind.RATE_LIMITED, Duration.ofSeconds(3), Instant.EPOCH);
+        AltsFailure original = ending(Kind.RATE_LIMITED, Duration.ofSeconds(3), Instant.EPOCH);
         AltsFailure relabelled = original.withMessage("Refresh: rate limited");
         assertEquals(
                 new AltsFailure(
@@ -87,7 +105,7 @@ class AltsFailureTest {
                         "Refresh: rate limited",
                         original.retryAfter(),
                         original.xstsError(),
-                        Instant.EPOCH),
+                        Optional.of(Instant.EPOCH)),
                 relabelled);
     }
 
@@ -96,13 +114,19 @@ class AltsFailureTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new AltsFailure(
-                        Kind.UNAUTHORIZED, "m", Optional.empty(), Optional.of(XstsError.UNKNOWN), Instant.now()));
+                        Kind.UNAUTHORIZED, "m", Optional.empty(), Optional.of(XstsError.UNKNOWN), Optional.empty()));
+    }
+
+    @Test
+    void theEndOfAWaitIsKnownExactlyWhenAWaitWasStated() {
+        assertThrows(IllegalArgumentException.class, () -> ending(Kind.NETWORK, Duration.ofSeconds(1), null));
+        assertThrows(IllegalArgumentException.class, () -> ending(Kind.NETWORK, null, Instant.now()));
     }
 
     @Test
     void aNegativeWaitAndAMissingComponentAreRefused() {
         assertThrows(
-                IllegalArgumentException.class, () -> at(Kind.RATE_LIMITED, Duration.ofSeconds(-1), Instant.now()));
+                IllegalArgumentException.class, () -> ending(Kind.RATE_LIMITED, Duration.ofSeconds(-1), Instant.now()));
         assertThrows(NullPointerException.class, () -> AltsFailure.of(null, "m"));
         assertThrows(NullPointerException.class, () -> AltsFailure.of(Kind.UNKNOWN, null));
         assertThrows(

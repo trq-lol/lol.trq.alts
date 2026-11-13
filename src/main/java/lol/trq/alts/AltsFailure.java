@@ -20,15 +20,17 @@ import lol.trq.alts.auth.XstsError;
  * carried by the result as an {@code Optional<AltsFailure>}. Everywhere else it is thrown, or completes a
  * future exceptionally, as an {@link AltsException} carrying it.
  *
- * <p>{@link #at()} is when the failure was recorded, which is what a stated wait is counted from:
- * {@link #retryable()} compares {@code at + retryAfter} with the current time, so a failure a host holds
- * on to becomes retryable once the wait has passed, without the host keeping its own clock beside it.
+ * <p>When the service stated a wait, {@link #retryAt()} is the instant it ends: the moment the failure
+ * was made plus {@link #retryAfter()}. {@link #retryable()} compares it with the current time, so a
+ * failure a host holds on to becomes retryable once the wait has passed, without the host keeping its
+ * own clock beside it. A failure with no stated wait records no time, so two such failures with the same
+ * kind and message are equal whenever they were made.
  *
  * @param kind what kind of failure this is; the thing to branch on
  * @param message a short description built by the library, safe to show and to log
  * @param retryAfter how long the service asked the caller to wait before trying again, when it said
  * @param xstsError why Xbox Live refused the account; present only on {@link Kind#XBOX_DENIED}
- * @param at when the failure was recorded, from which {@code retryAfter} is counted
+ * @param retryAt when the stated wait ends; present exactly when {@code retryAfter} is
  * @author trq
  * @since 1.0.0
  */
@@ -37,7 +39,7 @@ public record AltsFailure(
         @SerializedName("message") String message,
         @SerializedName("retryAfter") Optional<Duration> retryAfter,
         @SerializedName("xstsError") Optional<XstsError> xstsError,
-        @SerializedName("at") Instant at) {
+        @SerializedName("retryAt") Optional<Instant> retryAt) {
 
     /**
      * What kind of failure happened. One enum for the whole library, so a host writes its {@code switch}
@@ -147,29 +149,51 @@ public record AltsFailure(
     }
 
     /**
-     * Checks the components: everything is required, and an Xbox Live reason only travels with
-     * {@link Kind#XBOX_DENIED}.
+     * Checks the components: everything is required, an Xbox Live reason only travels with
+     * {@link Kind#XBOX_DENIED}, and the end of a wait is known exactly when a wait was stated.
      *
      * @throws NullPointerException if a component is null
-     * @throws IllegalArgumentException if {@code xstsError} is present on another kind, or
-     *     {@code retryAfter} is negative
+     * @throws IllegalArgumentException if {@code xstsError} is present on another kind, {@code retryAfter}
+     *     is negative, or {@code retryAt} is present without {@code retryAfter} or absent with it
      */
     public AltsFailure {
         Objects.requireNonNull(kind, "kind");
         Objects.requireNonNull(message, "message");
         Objects.requireNonNull(retryAfter, "retryAfter");
         Objects.requireNonNull(xstsError, "xstsError");
-        Objects.requireNonNull(at, "at");
+        Objects.requireNonNull(retryAt, "retryAt");
         if (xstsError.isPresent() && kind != Kind.XBOX_DENIED) {
             throw new IllegalArgumentException("an Xbox Live reason belongs to XBOX_DENIED only");
         }
         if (retryAfter.isPresent() && retryAfter.get().isNegative()) {
             throw new IllegalArgumentException("a stated wait is not negative");
         }
+        if (retryAt.isPresent() != retryAfter.isPresent()) {
+            throw new IllegalArgumentException("the end of a wait is known exactly when a wait was stated");
+        }
     }
 
     /**
-     * Creates a failure of {@code kind}, recorded now, with no stated wait and no Xbox Live reason.
+     * Builds a failure whose stated wait, if any, starts now.
+     *
+     * @param kind the kind
+     * @param message the message
+     * @param retryAfter the stated wait, or {@code null}
+     * @param xstsError the Xbox Live reason, or {@code null}
+     * @return the failure
+     */
+    private static AltsFailure made(Kind kind, String message, Duration retryAfter, XstsError xstsError) {
+        Optional<Duration> wait = Optional.ofNullable(retryAfter);
+        return new AltsFailure(
+                kind,
+                message,
+                wait,
+                Optional.ofNullable(xstsError),
+                wait.map(stated -> Instant.now().plus(stated)));
+    }
+
+    /**
+     * Creates a failure of {@code kind} with no stated wait and no Xbox Live reason.
      *
      * @param kind what kind of failure it is
      * @param message a short description built by the library
@@ -177,11 +201,11 @@ public record AltsFailure(
      * @since 1.0.0
      */
     public static AltsFailure of(Kind kind, String message) {
-        return new AltsFailure(kind, message, Optional.empty(), Optional.empty(), Instant.now());
+        return made(kind, message, null, null);
     }
 
     /**
-     * Creates a {@link Kind#RATE_LIMITED} failure, recorded now.
+     * Creates a {@link Kind#RATE_LIMITED} failure; a stated wait starts now.
      *
      * @param message a short description built by the library
      * @param retryAfter how long the service asked the caller to wait, or {@code null} when it did not say
@@ -189,12 +213,11 @@ public record AltsFailure(
      * @since 1.0.0
      */
     public static AltsFailure rateLimited(String message, Duration retryAfter) {
-        return new AltsFailure(
-                Kind.RATE_LIMITED, message, Optional.ofNullable(retryAfter), Optional.empty(), Instant.now());
+        return made(Kind.RATE_LIMITED, message, retryAfter, null);
     }
 
     /**
-     * Creates a failure of {@code kind} that may carry a stated wait, recorded now. A server error can
+     * Creates a failure of {@code kind} that may carry a stated wait, which starts now. A server error can
      * state one as well as a throttle.
      *
      * @param kind what kind of failure it is
@@ -204,11 +227,11 @@ public record AltsFailure(
      * @since 1.0.0
      */
     public static AltsFailure of(Kind kind, String message, Duration retryAfter) {
-        return new AltsFailure(kind, message, Optional.ofNullable(retryAfter), Optional.empty(), Instant.now());
+        return made(kind, message, retryAfter, null);
     }
 
     /**
-     * Creates an {@link Kind#XBOX_DENIED} failure, recorded now.
+     * Creates an {@link Kind#XBOX_DENIED} failure.
      *
      * @param message a short description built by the library
      * @param error why Xbox Live refused the account
@@ -216,42 +239,39 @@ public record AltsFailure(
      * @since 1.0.0
      */
     public static AltsFailure xboxDenied(String message, XstsError error) {
-        return new AltsFailure(
-                Kind.XBOX_DENIED,
-                message,
-                Optional.empty(),
-                Optional.of(Objects.requireNonNull(error, "error")),
-                Instant.now());
+        return made(Kind.XBOX_DENIED, message, null, Objects.requireNonNull(error, "error"));
     }
 
     /**
      * Returns the same failure under another message, for a caller that adds context (the route's name,
-     * say) to a failure a lower layer classified. Kind, wait, Xbox Live reason and time are kept.
+     * say) to a failure a lower layer classified. Kind, wait, end of the wait and Xbox Live reason are
+     * kept.
      *
      * @param message the new message, built by the library
      * @return the relabelled failure
      * @since 1.0.0
      */
     public AltsFailure withMessage(String message) {
-        return new AltsFailure(kind, message, retryAfter, xstsError, at);
+        return new AltsFailure(kind, message, retryAfter, xstsError, retryAt);
     }
 
     /**
      * Returns whether trying the same thing again, unchanged, may succeed now.
      *
-     * <p>{@link Kind#NETWORK} always is. {@link Kind#RATE_LIMITED} is once the stated
-     * {@link #retryAfter()} has passed since {@link #at()}; a throttle that stated no wait is not, since
-     * retrying into an unknown limit is how a short limit becomes a long one, and a host picks its own
-     * back-off for it. Every other kind is not: the credential, the input, the configuration or the
-     * user's choice has to change first.
+     * <p>A stated wait is honoured for every kind that can be retried: when {@link #retryAt()} is present,
+     * {@link Kind#NETWORK} and {@link Kind#RATE_LIMITED} are retryable once now is at or past it. With no
+     * stated wait, {@link Kind#NETWORK} is retryable, and {@link Kind#RATE_LIMITED} is not, since retrying
+     * into an unknown limit is how a short limit becomes a long one, and a host picks its own back-off for
+     * it. Every other kind is not: the credential, the input, the configuration or the user's choice has
+     * to change first.
      *
      * @return true when an unchanged retry may now succeed
      * @since 1.0.0
      */
     public boolean retryable() {
         return switch (kind) {
-            case NETWORK -> true;
-            case RATE_LIMITED -> retryAfter.isPresent() && !Instant.now().isBefore(at.plus(retryAfter.get()));
+            case NETWORK, RATE_LIMITED ->
+                retryAt.map(end -> !Instant.now().isBefore(end)).orElse(kind == Kind.NETWORK);
             default -> false;
         };
     }
