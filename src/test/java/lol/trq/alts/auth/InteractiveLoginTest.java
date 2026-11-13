@@ -172,6 +172,31 @@ class InteractiveLoginTest {
         assertNull(injected.get());
     }
 
+    /**
+     * The listener is stopped even when its executor is gone before the sign-in ends, as a host's own
+     * executor can be: the stop then runs on the thread that ends the sign-in.
+     */
+    @Test
+    void anExecutorShutDownFirstStillLeavesThePortReleased() throws Exception {
+        ExecutorService owned =
+                Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory());
+        HttpTransport transport = TestTransports.on(null, owned);
+        AltLoginServiceImpl service =
+                new AltLoginServiceImpl(localStore.store(), injected::set, chain.config(), transport);
+        service.browser = authorizationUrl::set;
+
+        CompletableFuture<LoginResult> login = service.loginMicrosoft(LoginMode.DIRECT);
+        waitUntil(() -> authorizationUrl.get() != null);
+        int port = URI.create(AuthChainServer.query(authorizationUrl.get()).get("redirect_uri"))
+                .getPort();
+
+        owned.shutdown();
+        transport.close();
+
+        assertFalse(login.get(2, TimeUnit.SECONDS).success());
+        waitUntil(() -> canBind(port));
+    }
+
     @Test
     void aRoutedBrowserSignInCarriesItsTagOnTheTokenExchangeAndEveryHopAfter() throws Exception {
         List<NetworkScope> scopes = new CopyOnWriteArrayList<>();
