@@ -207,6 +207,11 @@ final class StoreFile {
             synchronized (pendingLock) {
                 pending = null;
             }
+            // Nothing is written after this point, so nothing needs the key: drop it rather than keep the
+            // host's key material reachable from a closed store for as long as something holds the store.
+            hostSecret = null;
+            sealedUnder = null;
+            sealingKey = null;
             try {
                 lock.release();
             } catch (IOException | RuntimeException alreadyGone) {
@@ -245,6 +250,18 @@ final class StoreFile {
      */
     boolean closed() {
         return closed;
+    }
+
+    /**
+     * Returns whether this file still holds key material: the host's secret, or a key derived from it
+     * or from the machine. For tests, which check that {@link #close()} drops it.
+     *
+     * @return true while any key material is cached
+     */
+    boolean holdsKeyMaterialForTests() {
+        synchronized (ioLock) {
+            return hostSecret != null || sealedUnder != null || sealingKey != null;
+        }
     }
 
     /**

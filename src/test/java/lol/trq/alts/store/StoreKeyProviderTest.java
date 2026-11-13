@@ -75,6 +75,19 @@ class StoreKeyProviderTest {
     }
 
     @Test
+    void closingAStoreDropsTheHostKeyItHeld() {
+        restart(HOST_KEY, false);
+        store.addAccount(alex());
+        store.save();
+        StoreFile file = store.fileForTests();
+        assertTrue(file.holdsKeyMaterialForTests(), "a store that has written holds its key until it closes");
+
+        store.close();
+
+        assertFalse(file.holdsKeyMaterialForTests(), "a closed store keeps no key material reachable");
+    }
+
+    @Test
     void aStoreRoundTripsUnderAHostKey() {
         restart(HOST_KEY, false);
         store.addAccount(alex());
