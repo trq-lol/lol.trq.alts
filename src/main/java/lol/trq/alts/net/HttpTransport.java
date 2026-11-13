@@ -1204,6 +1204,10 @@ public final class HttpTransport implements AutoCloseable {
      * control character anywhere in a name or a value is refused first, with a message that quotes
      * nothing.
      *
+     * <p>A header the route set on the connection, {@code Connection: close} on an authenticated
+     * plain-HTTP proxy, is set again after the caller's, so no caller header can turn connection reuse
+     * back on where reuse would hand one credential's connection to another.
+     *
      * <p>A caller header named {@code Proxy-Authorization} is refused too. The proxy credential is the
      * route's, and only {@link #open(URI, ProxyRoute)} decides where it goes: on the {@code CONNECT} of a
      * tunnel, or on a plain request to the proxy itself. Set by a caller on a tunnelled or direct
@@ -1229,6 +1233,10 @@ public final class HttpTransport implements AutoCloseable {
                 }
             });
         }
+        // What the route set on the connection (Connection: close, on an authenticated plain-HTTP proxy) is
+        // the route's to decide, so it is put back after the caller's headers rather than left for one of
+        // them to replace.
+        String routeConnection = conn.getRequestProperty("Connection");
         if (contentType != null) {
             conn.setRequestProperty("Content-Type", contentType);
         }
@@ -1236,6 +1244,9 @@ public final class HttpTransport implements AutoCloseable {
         conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
         if (headers != null) {
             headers.forEach(conn::setRequestProperty);
+        }
+        if (routeConnection != null) {
+            conn.setRequestProperty("Connection", routeConnection);
         }
     }
 
