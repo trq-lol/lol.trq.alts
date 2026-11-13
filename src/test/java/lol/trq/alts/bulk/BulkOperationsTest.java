@@ -35,6 +35,7 @@ import org.junit.jupiter.api.io.TempDir;
  * that never gives up turns one dead credential into an endless loop, and a run that ignores a stated
  * rate limit earns a longer ban than the one it is already serving.
  */
+@org.junit.jupiter.api.Timeout(value = 60, unit = TimeUnit.SECONDS)
 class BulkOperationsTest {
 
     private static final BulkOptions FAST = new BulkOptions(4, Duration.ZERO, 2, Duration.ofMillis(1), true);
@@ -96,7 +97,7 @@ class BulkOperationsTest {
         BulkOperations bulk = bulkOver(account -> CompletableFuture.completedFuture(AccountStatus.valid(account)));
 
         BulkReport report =
-                bulk.refreshAll(accounts(10), FAST, BulkProgress.NONE).report().get();
+                bulk.refreshAll(accounts(10), FAST, BulkProgress.NONE).report().get(10, TimeUnit.SECONDS);
 
         assertEquals(10, report.succeeded());
         assertTrue(report.complete());
@@ -121,7 +122,7 @@ class BulkOperationsTest {
 
         bulk.refreshAll(accounts(12), FAST.withConcurrency(3), BulkProgress.NONE)
                 .report()
-                .get();
+                .get(10, TimeUnit.SECONDS);
 
         assertTrue(peak.get() <= 3, "the concurrency bound must hold, saw " + peak.get());
         assertTrue(peak.get() > 1, "the run must actually be concurrent, saw " + peak.get());
@@ -133,7 +134,7 @@ class BulkOperationsTest {
         BulkOperations bulk = bulkOver(account -> CompletableFuture.completedFuture(AccountStatus.valid(account)));
 
         long start = System.currentTimeMillis();
-        bulk.refreshAll(accounts(4), spaced, BulkProgress.NONE).report().get();
+        bulk.refreshAll(accounts(4), spaced, BulkProgress.NONE).report().get(10, TimeUnit.SECONDS);
         long elapsed = System.currentTimeMillis() - start;
 
         assertTrue(elapsed >= 90, "four entries spaced 30ms apart cannot finish in " + elapsed + "ms");
@@ -150,7 +151,7 @@ class BulkOperationsTest {
 
         BulkReport report = bulk.refreshAll(List.of(account(0)), FAST, BulkProgress.NONE)
                 .report()
-                .get();
+                .get(10, TimeUnit.SECONDS);
 
         assertEquals(3, calls.get(), "one attempt plus two retries");
         assertEquals(3, report.results().get(0).attempts());
@@ -167,7 +168,7 @@ class BulkOperationsTest {
                     account, AccountStatus.State.REAUTH_REQUIRED, AltsFailure.of(Kind.REAUTH_REQUIRED, "spent")));
         });
 
-        bulk.refreshAll(List.of(account(0)), FAST, BulkProgress.NONE).report().get();
+        bulk.refreshAll(List.of(account(0)), FAST, BulkProgress.NONE).report().get(10, TimeUnit.SECONDS);
 
         assertEquals(1, calls.get(), "a permanently spent credential is not worth a second attempt");
     }
@@ -181,7 +182,7 @@ class BulkOperationsTest {
 
         BulkReport report = bulk.refreshAll(accounts(20), FAST.withConcurrency(1), BulkProgress.NONE)
                 .report()
-                .get();
+                .get(10, TimeUnit.SECONDS);
 
         assertTrue(report.stoppedEarly(), "a service asking to be left alone must end the run");
         assertFalse(report.cancelled(), "stopping early is not the same as being cancelled");
@@ -203,7 +204,7 @@ class BulkOperationsTest {
 
         BulkReport report = bulk.refreshAll(List.of(account(0)), FAST.withoutStoppingOnRateLimit(), BulkProgress.NONE)
                 .report()
-                .get();
+                .get(10, TimeUnit.SECONDS);
 
         assertFalse(report.stoppedEarly());
         assertEquals(1, report.succeeded(), "the entry succeeded on the attempt after the wait");
@@ -224,7 +225,7 @@ class BulkOperationsTest {
 
         BulkReport checked = bulk.checkAll(accounts(20), FAST.withConcurrency(1), BulkProgress.NONE)
                 .report()
-                .get();
+                .get(10, TimeUnit.SECONDS);
 
         assertTrue(checked.stoppedEarly(), "a rate limit must end the run whether or not it names a wait");
         assertEquals(1, calls.get(), "the limited entry is not retried and the next is never started");
@@ -236,7 +237,7 @@ class BulkOperationsTest {
         calls.set(0);
         BulkReport refreshed = bulk.refreshAll(accounts(20), FAST.withConcurrency(1), BulkProgress.NONE)
                 .report()
-                .get();
+                .get(10, TimeUnit.SECONDS);
 
         assertTrue(refreshed.stoppedEarly());
         assertEquals(1, calls.get());
@@ -263,7 +264,7 @@ class BulkOperationsTest {
 
         BulkReport report = bulk.refreshAll(accounts(3), patient, BulkProgress.NONE)
                 .report()
-                .get();
+                .get(10, TimeUnit.SECONDS);
 
         assertFalse(report.stoppedEarly());
         assertEquals(3, report.succeeded());
@@ -286,7 +287,7 @@ class BulkOperationsTest {
 
         BulkReport report = bulk.checkAll(List.of(account(0)), FAST.withoutStoppingOnRateLimit(), BulkProgress.NONE)
                 .report()
-                .get();
+                .get(10, TimeUnit.SECONDS);
 
         assertEquals(3, calls.get(), "one attempt plus two waits");
         assertEquals(
@@ -317,7 +318,7 @@ class BulkOperationsTest {
 
             BulkReport report = bulk.refreshAll(accounts(2), FAST.withConcurrency(1), BulkProgress.NONE)
                     .report()
-                    .get();
+                    .get(10, TimeUnit.SECONDS);
 
             assertEquals(2, calls.get(), reason + " must fail its entry on the first attempt");
             assertFalse(report.stoppedEarly(), reason + " is about one account and must not end the run");
@@ -341,7 +342,7 @@ class BulkOperationsTest {
 
         BulkReport report = bulk.importCredentials(sessionTokens(20), LoginMode.DIRECT, FAST.withConcurrency(1), null)
                 .report()
-                .get();
+                .get(10, TimeUnit.SECONDS);
 
         assertTrue(report.stoppedEarly(), "a throttled import must stop sending credentials");
         assertEquals(1, calls.get());
@@ -359,7 +360,7 @@ class BulkOperationsTest {
         });
         flaky.importCredentials(sessionTokens(1), LoginMode.DIRECT, FAST, null)
                 .report()
-                .get();
+                .get(10, TimeUnit.SECONDS);
         assertEquals(3, outages.get(), "an outage is worth the retry budget");
 
         for (Kind reason : List.of(Kind.XBOX_DENIED, Kind.DECLINED, Kind.TIMED_OUT, Kind.UNAUTHORIZED)) {
@@ -371,7 +372,7 @@ class BulkOperationsTest {
 
             bulk.importCredentials(sessionTokens(1), LoginMode.DIRECT, FAST, null)
                     .report()
-                    .get();
+                    .get(10, TimeUnit.SECONDS);
 
             assertEquals(1, calls.get(), reason + " must not be retried");
         }
@@ -413,6 +414,42 @@ class BulkOperationsTest {
                 TestTransports.direct());
     }
 
+    /**
+     * A host's progress callback that throws as an entry starts fails that entry, with kind UNKNOWN and
+     * no attempt made, and the run goes on: one bad callback does not cost the rest of the list.
+     */
+    @Test
+    void aThrowingStartedCallbackFailsThatEntryAndTheRunGoesOn() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        BulkOperations bulk = bulkOver(account -> {
+            calls.incrementAndGet();
+            return CompletableFuture.completedFuture(AccountStatus.valid(account));
+        });
+        BulkProgress throwingOnSecond = new BulkProgress() {
+            @Override
+            public void started(int index, int total, String label) {
+                if (index == 1) {
+                    throw new IllegalStateException("the host's list view is gone");
+                }
+            }
+
+            @Override
+            public void completed(int index, int total, BulkEntryResult result) {}
+        };
+
+        BulkReport report = bulk.refreshAll(accounts(3), FAST.withConcurrency(1), throwingOnSecond)
+                .report()
+                .get(10, TimeUnit.SECONDS);
+
+        assertEquals(3, report.results().size());
+        assertEquals(2, calls.get(), "the entry whose callback threw was not attempted");
+        assertTrue(report.results().get(0).success());
+        assertEquals(
+                Kind.UNKNOWN, report.results().get(1).failure().orElseThrow().kind());
+        assertTrue(report.results().get(2).success(), "the run went on");
+        assertFalse(report.cancelled());
+    }
+
     @Test
     void cancellingStopsStartingNewEntries() throws Exception {
         BulkOptions slow = new BulkOptions(1, Duration.ofMillis(20), 0, Duration.ZERO, true);
@@ -421,7 +458,7 @@ class BulkOperationsTest {
         BulkHandle handle = bulk.refreshAll(accounts(50), slow, BulkProgress.NONE);
         Thread.sleep(60);
         handle.cancel();
-        BulkReport report = handle.report().get();
+        BulkReport report = handle.report().get(10, TimeUnit.SECONDS);
 
         assertTrue(report.cancelled());
         assertTrue(
@@ -435,7 +472,7 @@ class BulkOperationsTest {
         BulkOperations bulk = bulkOver(account -> CompletableFuture.completedFuture(AccountStatus.valid(account)));
 
         BulkReport report =
-                bulk.checkAll(List.of(), FAST, BulkProgress.NONE).report().get();
+                bulk.checkAll(List.of(), FAST, BulkProgress.NONE).report().get(10, TimeUnit.SECONDS);
 
         assertEquals(0, report.results().size());
         assertTrue(report.complete());
@@ -465,7 +502,7 @@ class BulkOperationsTest {
                     }
                 })
                 .report()
-                .get();
+                .get(10, TimeUnit.SECONDS);
 
         assertEquals(6, started.get());
         assertEquals(6, completed.get());
@@ -479,7 +516,7 @@ class BulkOperationsTest {
                 : CompletableFuture.completedFuture(AccountStatus.valid(account)));
 
         BulkReport report =
-                bulk.refreshAll(accounts(3), FAST, BulkProgress.NONE).report().get();
+                bulk.refreshAll(accounts(3), FAST, BulkProgress.NONE).report().get(10, TimeUnit.SECONDS);
 
         assertEquals(2, report.succeeded());
         assertEquals(1, report.failures().size());
@@ -569,7 +606,7 @@ class BulkOperationsTest {
             BulkReport report = server.bulk()
                     .entitlementsAll(swept, FAST, BulkProgress.NONE)
                     .report()
-                    .get();
+                    .get(10, TimeUnit.SECONDS);
 
             assertTrue(report.complete(), "every account was read");
             assertEquals(3, report.results().size());
@@ -601,7 +638,7 @@ class BulkOperationsTest {
             server.bulk()
                     .entitlementsAll(swept, FAST, BulkProgress.NONE)
                     .report()
-                    .get();
+                    .get(10, TimeUnit.SECONDS);
 
             assertEquals(3, scopes.size());
             for (AltAccount account : swept) {
@@ -623,7 +660,7 @@ class BulkOperationsTest {
                             FAST,
                             BulkProgress.NONE)
                     .report()
-                    .get();
+                    .get(10, TimeUnit.SECONDS);
 
             assertEquals(2, report.succeeded());
             assertFalse(report.stoppedEarly(), "one dead token does not end the sweep");
@@ -646,7 +683,7 @@ class BulkOperationsTest {
             BulkReport report = server.bulk()
                     .entitlementsAll(List.of(offline), FAST, BulkProgress.NONE)
                     .report()
-                    .get();
+                    .get(10, TimeUnit.SECONDS);
 
             assertEquals(
                     Kind.UNAUTHORIZED,
@@ -664,7 +701,7 @@ class BulkOperationsTest {
             BulkReport report = server.bulk()
                     .entitlementsAll(accounts(20), FAST.withConcurrency(1), BulkProgress.NONE)
                     .report()
-                    .get();
+                    .get(10, TimeUnit.SECONDS);
 
             assertTrue(report.stoppedEarly(), "a service asking to be left alone must end the sweep");
             assertFalse(report.cancelled());
@@ -682,7 +719,7 @@ class BulkOperationsTest {
             BulkReport report = server.bulk()
                     .entitlementsAll(accounts(20), FAST.withConcurrency(1), BulkProgress.NONE)
                     .report()
-                    .get();
+                    .get(10, TimeUnit.SECONDS);
 
             assertTrue(report.stoppedEarly());
             assertEquals(1, server.tokens.size(), "the first limit ends a one-at-a-time sweep");
@@ -701,7 +738,7 @@ class BulkOperationsTest {
             BulkReport report = server.bulk()
                     .entitlementsAll(List.of(owner(0, "t0-java")), FAST, BulkProgress.NONE)
                     .report()
-                    .get();
+                    .get(10, TimeUnit.SECONDS);
 
             assertEquals(1, report.succeeded(), "the entry recovers once the service does");
             assertEquals(3, report.results().get(0).attempts());
@@ -717,7 +754,7 @@ class BulkOperationsTest {
             BulkHandle handle = server.bulk().entitlementsAll(accounts(50), slow, BulkProgress.NONE);
             Thread.sleep(80);
             handle.cancel();
-            BulkReport report = handle.report().get();
+            BulkReport report = handle.report().get(10, TimeUnit.SECONDS);
 
             assertTrue(report.cancelled());
             assertTrue(report.results().size() < 50, "saw " + report.results().size());
@@ -749,7 +786,7 @@ class BulkOperationsTest {
                         }
                     })
                     .report()
-                    .get();
+                    .get(10, TimeUnit.SECONDS);
 
             assertEquals(6, started.get());
             assertEquals(6, completed.get());

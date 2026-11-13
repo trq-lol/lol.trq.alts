@@ -26,6 +26,9 @@ public interface BulkProgress {
     /**
      * Called as an entry begins.
      *
+     * <p>If this throws, that entry is not attempted: it fails with kind
+     * {@link lol.trq.alts.AltsFailure.Kind#UNKNOWN}, and the run goes on with the next entry.
+     *
      * @param index the entry's position, counting from 0
      * @param total how many entries the run was given
      * @param label a name safe to display, never the input line

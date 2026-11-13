@@ -232,17 +232,60 @@ public final class BulkOperationsImpl implements BulkOperations {
         if (index >= run.total || run.halted()) {
             return CompletableFuture.completedFuture(null);
         }
-        return run.awaitSlot()
-                .thenCompose(ignored -> {
+        CompletableFuture<Void> slot;
+        try {
+            slot = run.awaitSlot();
+        } catch (RuntimeException refused) {
+            slot = CompletableFuture.failedFuture(refused);
+        }
+        return slot.thenCompose(ignored -> {
                     // Re-checked after the wait: a run cancelled while this entry was queued must not
                     // then start it.
                     if (run.halted()) {
                         return CompletableFuture.completedFuture(null);
                     }
-                    run.progress.started(index, run.total, run.labeller.apply(index));
+                    if (!announce(run, index)) {
+                        return CompletableFuture.completedFuture(null);
+                    }
                     return attempt(run, index, 1).thenAccept(result -> run.record(index, result));
                 })
-                .thenCompose(ignored -> worker(run));
+                .thenCompose(ignored -> worker(run))
+                // The chain was cut short (the runtime closed under a wait, the executor refused a task):
+                // this entry and every one no worker has taken yet are reported as cancelled, so the
+                // report still holds every entry and says why the run ended where it did.
+                .exceptionally(failure -> {
+                    AltsFailure cut = FailureText.toFailure("Bulk run", failure);
+                    AltsFailure cancelled = cut.kind() == Kind.CANCELLED
+                            ? cut
+                            : AltsFailure.of(Kind.CANCELLED, "Bulk run: cut short (" + cut.message() + ")");
+                    run.cancelFrom(index, cancelled);
+                    return null;
+                });
+    }
+
+    /**
+     * Tells the host an entry is starting. A {@link BulkProgress#started} that throws is the host's own
+     * failure, not the run's: that entry fails with kind {@link Kind#UNKNOWN} and is not attempted, and
+     * the run goes on with the next entry.
+     *
+     * @param run the run
+     * @param index the entry
+     * @return true when the entry should be attempted
+     */
+    private static boolean announce(Run run, int index) {
+        try {
+            run.progress.started(index, run.total, run.labeller.apply(index));
+            return true;
+        } catch (RuntimeException hostFailure) {
+            run.record(
+                    index,
+                    BulkEntryResult.failure(
+                            index,
+                            BulkEntryResult.positionalLabel(index),
+                            AltsFailure.of(Kind.UNKNOWN, "Entry: the host's progress callback failed"),
+                            0));
+            return false;
+        }
     }
 
     /**
@@ -260,8 +303,14 @@ public final class BulkOperationsImpl implements BulkOperations {
      * @return the entry's result
      */
     private static CompletableFuture<BulkEntryResult> attempt(Run run, int index, int attempt) {
-        return run.attempts
-                .apply(index)
+        CompletableFuture<Attempt> started;
+        try {
+            started = run.attempts.apply(index);
+        } catch (RuntimeException refused) {
+            // An executor that refused the task throws here rather than failing the future.
+            started = CompletableFuture.failedFuture(refused);
+        }
+        return started
                 // An attempt that threw rather than returning a result failed somewhere the library did not
                 // classify (or the runtime closed under it), so it is classified here by type, never by text.
                 .exceptionally(failure -> Attempt.failed(FailureText.toFailure("Entry", failure)))
@@ -427,6 +476,42 @@ public final class BulkOperationsImpl implements BulkOperations {
         void record(int index, BulkEntryResult result) {
             results.set(index, result);
             progress.completed(index, total, result);
+        }
+
+        /**
+         * Records {@code from}, if it has no result yet, and every entry no worker has taken, as
+         * {@code failure}. Each is claimed through the shared cursor, so no entry another worker is
+         * running is overwritten.
+         *
+         * @param from the entry whose chain was cut short
+         * @param failure the failure to record, of kind {@link Kind#CANCELLED}
+         */
+        void cancelFrom(int from, AltsFailure failure) {
+            List<Integer> untaken = new ArrayList<>();
+            if (from < total) {
+                untaken.add(from);
+            }
+            for (int next = cursor.getAndIncrement(); next < total; next = cursor.getAndIncrement()) {
+                untaken.add(next);
+            }
+            for (int index : untaken) {
+                BulkEntryResult cancelled = BulkEntryResult.failure(index, labelOrPosition(index), failure, 0);
+                if (results.compareAndSet(index, null, cancelled)) {
+                    try {
+                        progress.completed(index, total, cancelled);
+                    } catch (RuntimeException hostFailure) {
+                        // The report is what matters here; a callback that throws does not stop it.
+                    }
+                }
+            }
+        }
+
+        private String labelOrPosition(int index) {
+            try {
+                return labeller.apply(index);
+            } catch (RuntimeException unlabelled) {
+                return BulkEntryResult.positionalLabel(index);
+            }
         }
 
         void finish() {

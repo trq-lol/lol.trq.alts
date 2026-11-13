@@ -302,7 +302,8 @@ class AltsRuntimeIsolationTest {
 
     /**
      * A paced run waiting between entries when its runtime closes must end, its report completing,
-     * rather than wait for good on a delay its stopped executor would never run.
+     * rather than wait for good on a delay its stopped executor would never run; the report still holds
+     * every entry, the ones the run never reached reported as cancelled.
      */
     @Test
     void aPacedImportInFlightWhenTheRuntimeClosesStillReports() throws Exception {
@@ -318,6 +319,15 @@ class AltsRuntimeIsolationTest {
         alts.close();
 
         BulkReport done = report.get(5, TimeUnit.SECONDS);
-        assertTrue(done.results().size() < 3, "the entries after close did not run: " + done.results());
+        assertEquals(3, done.results().size(), "every entry is in the report: " + done.results());
+        for (int index = 0; index < 3; index++) {
+            assertEquals(index, done.results().get(index).index());
+        }
+        for (int index = 1; index < 3; index++) {
+            assertEquals(
+                    AltsFailure.Kind.CANCELLED,
+                    done.results().get(index).failure().orElseThrow().kind(),
+                    "the entries after close never ran, and say why");
+        }
     }
 }

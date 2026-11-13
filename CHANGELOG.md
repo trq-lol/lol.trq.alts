@@ -132,7 +132,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CANCELLED` (it used to throw `RejectedExecutionException` on a runtime-created executor); a browser
   sign-in no longer binds a port or opens a browser once the runtime is closed. A scheduled name claim
   that the closing runtime ends completes with a `TERMINAL_FAILURE` result of kind `CANCELLED` instead
-  of an exception. An account-service call on a closed runtime throws `AltsException` of kind
+  of an exception. A bulk run cut short (the runtime closed under a wait, or its executor refused a
+  task) reports every entry it did not finish as a failure of kind `CANCELLED`, so its report holds
+  every entry; a `BulkProgress.started` that throws fails that entry with kind `UNKNOWN`, unattempted,
+  and the run goes on. An account-service call on a closed runtime throws `AltsException` of kind
   `CANCELLED`.
 
 ### Removed
