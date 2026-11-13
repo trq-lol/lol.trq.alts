@@ -79,6 +79,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   implementation has to add it; `BulkOptions` gains a sixth component, `Optional<String> routeTag`, and
   keeps its five-argument constructor. A blank tag is refused with `IllegalArgumentException` wherever
   it is given: by `routed`, by `withRouteTag`, or in a `NetworkScope` or `BulkOptions` built directly.
+- **Request headers.** Besides a header holding a control character (0.12.0), `HttpTransport`'s
+  header-taking methods now refuse a caller-supplied `Proxy-Authorization`, in any capitalisation, with
+  an `IllegalArgumentException` whose message quotes nothing, before anything is sent. The proxy
+  credential is placed only by the route: on the `CONNECT` of a tunnel, or on a plain request to the
+  proxy itself, never on a connection the JDK would send to the origin.
 
 ### Removed
 
