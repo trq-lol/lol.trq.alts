@@ -642,10 +642,11 @@ public final class AltsRuntime<H> implements AutoCloseable {
          * Validates the required seams, constructs the runtime, opens and locks its two store files in
          * the directory the {@link #vaultDirectory} provider names (asked once, here), and loads them —
          * so {@link AltsRuntime#store()} is populated as soon as this returns. A file that exists but
-         * cannot be read leaves the list alone and is reported on {@link AccountStore#loadError()}. When
-         * that is because the {@link #storeKeyProvider} could not supply its key, nothing is written to
-         * the store until {@link AccountStore#load()} (and {@link HostSecrets#load()}) is called again
-         * and succeeds.
+         * cannot be read leaves the list alone and is reported on {@link AccountStore#loadError()}.
+         * Whatever the reason (the {@link #storeKeyProvider} could not supply its key, the file is sealed
+         * under another key, or it is damaged), nothing is written over that file until a later
+         * {@link AccountStore#load()} succeeds or the host calls {@link AccountStore#discardUnreadable()}
+         * (and the same on {@link HostSecrets}).
          *
          * <p>Each store file is locked for the runtime's lifetime. When another runtime, in this process
          * or another, holds either file, this fails with an {@link IllegalStateException} saying the

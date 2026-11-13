@@ -25,10 +25,12 @@ package lol.trq.alts.spi;
  * key at the moment the host believed otherwise. A load that fails this way also holds every later
  * write back, even once the provider answers, until the store has been loaded successfully — the file
  * on disk is intact, and writing what is in memory would replace it. Call the store's {@code load()}
- * again when the secret becomes available.
+ * again when the secret becomes available, or its {@code discardUnreadable()} if it never will (the key
+ * was rotated or lost), which copies the file aside and starts a new store.
  *
- * <p>The provider is process-wide and is never removed once installed. A second runtime built without
- * one keeps using it.
+ * <p>The provider belongs to the runtime it is given to. Each of that runtime's stores asks it, and no
+ * other runtime's store ever does. A later runtime built without it, on the same directory, cannot open
+ * the files and does not write over them either: a file that did not open is never overwritten.
  *
  * @author trq
  * @since 0.12.0
@@ -45,8 +47,9 @@ public interface StoreKeyProvider {
 
     /**
      * Returns the key material. It must be the same bytes on every call for as long as the stored files
-     * are meant to stay readable; the library asks once per process and keeps the answer in memory. The
-     * material is stretched and bound to each store before use, so one secret serves both stores.
+     * are meant to stay readable; each store asks when it first needs the key and keeps the answer in
+     * memory for as long as it is open. The material is stretched and bound to each store before use, so
+     * one secret serves both stores.
      *
      * @return at least {@link #MIN_LENGTH} bytes of secret key material
      * @throws Exception if the material cannot be obtained; the store then reports itself unavailable
