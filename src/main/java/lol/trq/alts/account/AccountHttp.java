@@ -78,7 +78,7 @@ final class AccountHttp {
      * @param url the target URL
      * @param purpose the request purpose, for routing
      * @return the parsed body
-     * @ if the request was refused or failed
+     * @throws AltsException if the request was refused or failed
      */
     JsonObject get(String url, NetworkScope.Purpose purpose) {
         return body(send("GET", url, null, null, purpose));
@@ -92,7 +92,7 @@ final class AccountHttp {
      * @param json the JSON request body, or null for none
      * @param purpose the request purpose
      * @return the parsed response body, or null when there was none
-     * @ if the request was refused or failed
+     * @throws AltsException if the request was refused or failed
      */
     JsonObject sendJson(String method, String url, String json, NetworkScope.Purpose purpose) {
         return send(method, url, json == null ? null : "application/json", json == null ? null : bytes(json), purpose);
@@ -106,7 +106,7 @@ final class AccountHttp {
      * @param json the JSON request body
      * @param purpose the request purpose
      * @return the parsed response body, never null
-     * @ if the request was refused or failed, or answered with no JSON body
+     * @throws AltsException if the request was refused or failed, or answered with no JSON body
      */
     JsonObject exchangeJson(String method, String url, String json, NetworkScope.Purpose purpose) {
         return body(sendJson(method, url, json, purpose));
@@ -121,7 +121,7 @@ final class AccountHttp {
      * @param body the raw body
      * @param purpose the request purpose
      * @return the parsed response body, or null
-     * @ if the request was refused or failed
+     * @throws AltsException if the request was refused or failed
      */
     JsonObject sendRaw(String method, String url, String contentType, byte[] body, NetworkScope.Purpose purpose) {
         return send(method, url, contentType, body, purpose);
@@ -145,7 +145,7 @@ final class AccountHttp {
      * @param body the raw body, or null
      * @param purpose the request purpose
      * @return the response, successful or not
-     * @ only when the service could not be reached
+     * @throws AltsException only when the service could not be reached
      */
     HttpTransport.HttpResponse exchange(
             String method, String url, String contentType, byte[] body, NetworkScope.Purpose purpose) {
@@ -164,7 +164,7 @@ final class AccountHttp {
      * @param json the JSON request body
      * @param purpose the request purpose
      * @return the response, successful or not
-     * @ only when the service could not be reached
+     * @throws AltsException only when the service could not be reached
      */
     HttpTransport.JsonResponse exchangeElement(String url, String json, NetworkScope.Purpose purpose) {
         try {

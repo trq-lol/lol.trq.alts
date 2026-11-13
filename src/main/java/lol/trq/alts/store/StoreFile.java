@@ -1001,10 +1001,9 @@ final class StoreFile {
      */
     private record Pending(long order, Supplier<String> plaintext) {}
 
-    /** A write that did not reach the disk; the message is a fixed, path-free phrase. */
     /**
      * Wraps a store failure's description, built here from the file's name and a fixed phrase, as the
-     * {@link AltsFailure} of kind {@link AltsFailure.Kind#STORAGE} the stores report, recorded now.
+     * {@link AltsFailure} of kind {@link AltsFailure.Kind#STORAGE} the stores report.
      *
      * @param description the description; never a path
      * @return the failure
@@ -1013,6 +1012,7 @@ final class StoreFile {
         return AltsFailure.of(AltsFailure.Kind.STORAGE, description);
     }
 
+    /** A write that did not reach the disk; the message is a fixed, path-free phrase. */
     private static final class WriteFailure extends Exception {
 
         private static final long serialVersionUID = 1L;
