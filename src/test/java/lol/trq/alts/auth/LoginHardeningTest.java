@@ -89,10 +89,6 @@ class LoginHardeningTest {
         assertFalse(result.message().contains(vaultDir.toString()), "an absolute path leaked: " + result.message());
     }
 
-    /**
-     * The browser sign-in's callback listener gives up with the JDK's TimeoutException, wrapped by the
-     * stage it completes. That is the user not finishing the sign-in, not an outage.
-     */
     /** An offline name that is no name is input the caller gave, refused before anything happens. */
     @Test
     void anOfflineNameThatIsNoNameIsInvalidInput() throws Exception {
@@ -102,6 +98,10 @@ class LoginHardeningTest {
         }
     }
 
+    /**
+     * The browser sign-in's callback listener gives up with the JDK's TimeoutException, wrapped by the
+     * stage it completes. That is the user not finishing the sign-in, not an outage.
+     */
     @Test
     void aSignInThatWasNeverFinishedIsTimedOut() {
         LoginResult result = AltLoginServiceImpl.classifiedFailure(
