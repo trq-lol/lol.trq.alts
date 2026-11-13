@@ -22,6 +22,7 @@ import lol.trq.alts.net.NetTestHooks;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.net.ProxyRoute;
 import lol.trq.alts.spi.StoreKeyProvider;
+import lol.trq.alts.spi.ToastSink;
 import lol.trq.alts.store.AccountStore;
 import lol.trq.alts.store.HostSecrets;
 import lol.trq.alts.store.StoreTestHooks;
@@ -163,7 +164,7 @@ class AltsRuntimeStoresTest {
                     NetTestHooks.routeFor(NetworkScope.of(NetworkScope.Purpose.PROFILE)),
                     "the refused build must not have installed its proxy provider");
             assertSame(executorA, IoExecutor.executor(), "nor its executor");
-            AltsToasts.info("still mine", "");
+            first.toasts().toast(ToastSink.Level.INFO, "still mine", "", 0);
             assertEquals(List.of("still mine"), toastsA, "nor its toast sink");
             assertTrue(toastsB.isEmpty());
         }

@@ -49,6 +49,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AltStore.DEFAULT_WRITE_DELAY` has no public replacement. A store is reached only through its runtime:
   `AccountStore` and `HostSecrets` have no public factory and no public `close()`, so a store cannot be
   closed under a runtime that is still open; closing the runtime closes both.
+- **Breaking:** `AltsToasts`, with no deprecation bridge. `alts.toasts()` is the only route to the
+  host's `ToastSink`: `AltsToasts.success(name)` becomes
+  `alts.toasts().toast(ToastSink.Level.SUCCESS, "Logged In", "Logged in as " + name, 3000)`, and the
+  same for `failure` (`ERROR`, "Login Failed", 4000 ms), `info` (`INFO`, 2500 ms) and `removed`
+  (`INFO`, "Account Removed", 2500 ms).
 - The store test seam (`StoreTestHooks.reset()` and the package-private `resetForTests()` behind it);
   a test that owns its runtime or store needs no process-wide reset.
 

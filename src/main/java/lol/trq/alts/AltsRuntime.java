@@ -80,7 +80,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
 
         // The stores come first: opening one is the step that can be refused (another runtime holds the
         // file), and a refused build must leave nothing of its own behind, least of all the process-wide
-        // proxy provider, executor and toast sink of the runtime that holds the file.
+        // proxy provider and executor of the runtime that holds the file.
         //
         // Each store is opened with its key, its directory and its lock in one step, so nothing can be
         // written under another key, and a second runtime on the same files fails here rather than
@@ -159,7 +159,6 @@ public final class AltsRuntime<H> implements AutoCloseable {
             // executor while it is being built; each reads these when it first does work.
             HttpUtil.bind(builder.proxyProvider);
             IoExecutor.bind(builder.executor);
-            AltsToasts.bind(builder.toastSink);
         } catch (RuntimeException | Error failed) {
             stores.close(secrets);
             stores.close(store);
@@ -326,7 +325,8 @@ public final class AltsRuntime<H> implements AutoCloseable {
     }
 
     /**
-     * Returns the toast sink, for host UI to raise consistent notifications directly.
+     * Returns the toast sink the host supplied, the one route for raising a notification. The library
+     * keeps no static sink of its own.
      *
      * @return the toast sink
      */
