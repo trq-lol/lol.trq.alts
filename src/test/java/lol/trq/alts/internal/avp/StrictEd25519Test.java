@@ -72,6 +72,51 @@ class StrictEd25519Test {
         assertTrue(Ed25519Strict.verify(hex(c, "publicKeyHex"), hex(c, "messageHex"), fixed));
     }
 
+    /**
+     * The pre-checks pinned to the SPEC 2 text, independent of the vectors: each of the seven listed
+     * small-order encodings (and each with the sign bit set) is refused as {@code A} and as {@code R}, and
+     * so is a non-canonical {@code y} that is not on the list ({@code p + 2} up to {@code 2^255 - 1}).
+     */
+    @Test
+    void everySpecListedEncodingAndEveryNonCanonicalYIsRefusedAsAOrR() {
+        BigInteger p = BigInteger.ONE.shiftLeft(255).subtract(BigInteger.valueOf(19));
+        List<byte[]> listed = List.of(
+                new byte[32],
+                le(BigInteger.ONE),
+                Vectors.hex("26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05"),
+                Vectors.hex("c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a"),
+                le(p.subtract(BigInteger.ONE)),
+                le(p),
+                le(p.add(BigInteger.ONE)));
+        List<byte[]> nonCanonical = List.of(
+                le(p.add(BigInteger.TWO)),
+                le(p.add(BigInteger.valueOf(18))),
+                le(BigInteger.ONE.shiftLeft(255).subtract(BigInteger.ONE)));
+        byte[] honestKey = Vectors.hex("3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c");
+        byte[] honestSig = Vectors.hex("92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da"
+                + "085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00");
+        assertTrue(Ed25519Strict.strictInputsOk(honestKey, honestSig));
+        for (List<byte[]> group : List.of(listed, nonCanonical)) {
+            for (byte[] encoding : group) {
+                for (boolean signBit : new boolean[] {false, true}) {
+                    byte[] point = encoding.clone();
+                    if (signBit) {
+                        point[31] |= (byte) 0x80;
+                    }
+                    String what = Vectors.hex(point);
+                    assertFalse(Ed25519Strict.strictInputsOk(point, honestSig), what + " as A");
+                    byte[] sig = honestSig.clone();
+                    System.arraycopy(point, 0, sig, 0, 32);
+                    assertFalse(Ed25519Strict.strictInputsOk(honestKey, sig), what + " as R");
+                }
+            }
+        }
+    }
+
+    private static byte[] le(BigInteger v) {
+        return reverse(toFixed(v));
+    }
+
     private static byte[] reverse(byte[] b) {
         byte[] out = new byte[b.length];
         for (int k = 0; k < b.length; k++) {

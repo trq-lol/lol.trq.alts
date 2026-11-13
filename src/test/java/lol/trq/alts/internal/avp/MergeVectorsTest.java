@@ -192,6 +192,32 @@ class MergeVectorsTest {
         }
     }
 
+    /** SPEC 5 merge step 3: {@code deleted} is the greatest marker among the inputs, in either order. */
+    @Test
+    void theMergedMarkerIsTheGreatestInEitherOrder() {
+        Payload early = Payload.parse(("{\"v\":2,\"accounts\":{\"u\":{\"deleted\":{\"at\":10,\"n\":0,\"by\":\"a\"},"
+                        + "\"fields\":{},\"bans\":{}}}}")
+                .getBytes(StandardCharsets.UTF_8));
+        Payload late = Payload.parse(("{\"v\":2,\"accounts\":{\"u\":{\"deleted\":{\"at\":20,\"n\":0,\"by\":\"a\"},"
+                        + "\"fields\":{},\"bans\":{}}}}")
+                .getBytes(StandardCharsets.UTF_8));
+        Stamp want = new Stamp(20, 0, "a");
+        assertEquals(
+                want,
+                Payload.merge(List.of(early, late))
+                        .accounts()
+                        .get("u")
+                        .deleted()
+                        .orElseThrow());
+        assertEquals(
+                want,
+                Payload.merge(List.of(late, early))
+                        .accounts()
+                        .get("u")
+                        .deleted()
+                        .orElseThrow());
+    }
+
     @Test
     void stampsCompareByByAsUtf8BytesNotUtf16() {
         // U+FB01 is ef ac 81 in UTF-8 and U+1F600 is f0 9f 98 80: the emoji is greater by bytes, while a

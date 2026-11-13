@@ -236,6 +236,10 @@ class FederationVectorsTest {
             String other = str(c, "host").equals("a.vault.example") ? "b" : "a";
             assertFalse(Challenge.verify(b64(seedOf(other), "hostKey"), key, nonce, signature), name + " other host");
             assertFalse(Ed25519Strict.verify(key, nonce, signature), name + " is not a raw-nonce signature");
+            for (byte[] otherKey : new byte[][] {new byte[32], AvpCrypto.randomBytes(32)}) {
+                byte[] forOther = Challenge.sign(otherKey, seed, nonce);
+                assertFalse(Challenge.verify(hostKey, key, nonce, forOther), name + " made for another host key");
+            }
             byte[] rawNonce = Ed25519Strict.sign(seed, nonce);
             assertFalse(Challenge.verify(hostKey, key, nonce, rawNonce), name + " raw-nonce signature refused");
         }
