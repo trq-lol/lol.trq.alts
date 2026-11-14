@@ -17,6 +17,9 @@ import java.util.Set;
  * <ul>
  *   <li>A baseline line that is gone from the current dump (removed, or changed, which removes the old line)
  *       fails the gate, unless the build's major version is greater than the baseline's.
+ *   <li>A component added to a record the baseline already has counts as a removal, though no baseline line
+ *       disappears when a constructor of the old arity is kept: the canonical constructor changes and every
+ *       deconstruction pattern over the record breaks. A record does not grow within a major version.
  *   <li>A current line the baseline lacks fails the gate until the dump is regenerated ({@code apiDump}).
  *   <li>A problem with the surface itself (an exported internal package, an internal type in an exported
  *       signature) always fails it.
@@ -138,7 +141,45 @@ public final class ApiGate {
                     + "; only a new major version may remove API (or pass -PapiAllowBreaking=<reason>):\n"
                     + bulleted("- ", removed));
         }
+        List<String> grown = grownRecords(lines(existing), dump.lines());
+        if (!grown.isEmpty() && major(version) <= major(baselineVersion.get()) && !allowed) {
+            problems.add(grown.size() + " component(s) of the " + baselineVersion.get() + " API's records: a record"
+                    + " gained a component in a dump for " + version + ", which changes its canonical constructor;"
+                    + " only a new major version may grow a record (or pass -PapiAllowBreaking=<reason>):\n"
+                    + bulleted("+ ", grown));
+        }
         return problems;
+    }
+
+    /**
+     * The component lines a dump adds to a record the baseline already has. Keeping a constructor of the
+     * old arity keeps every old line, so this is the only trace of the break: the canonical constructor is a
+     * new one, and a deconstruction pattern written against the old components no longer compiles.
+     *
+     * @param base the baseline's API lines
+     * @param now the current dump's lines
+     * @return the added component lines of released records, sorted
+     */
+    static List<String> grownRecords(Set<String> base, List<String> now) {
+        Set<String> records = new LinkedHashSet<>();
+        for (String line : base) {
+            int space = line.indexOf(' ');
+            if (space > 0 && line.startsWith(" type ", space)) {
+                List<String> header =
+                        List.of(line.substring(space + " type ".length()).split(" "));
+                if (header.contains("record")) {
+                    records.add(line.substring(0, space));
+                }
+            }
+        }
+        return now.stream()
+                .filter(l -> !base.contains(l))
+                .filter(l -> {
+                    int space = l.indexOf(' ');
+                    return space > 0 && l.startsWith(" component ", space) && records.contains(l.substring(0, space));
+                })
+                .sorted()
+                .toList();
     }
 
     private static Optional<String> versionOf(List<String> baseline) {
@@ -190,6 +231,12 @@ public final class ApiGate {
             problems.add(removed.size() + " line(s) of the " + baselineVersion.get()
                     + " API were removed or changed, which only a new major version may do (building "
                     + buildVersion + "):\n" + bulleted("- ", removed));
+        }
+        List<String> grown = grownRecords(base, current.lines());
+        if (!grown.isEmpty() && major(buildVersion) <= major(baselineVersion.get())) {
+            problems.add(grown.size() + " component(s) of the " + baselineVersion.get() + " API's records: a record"
+                    + " gained a component, which changes its canonical constructor and only a new major version"
+                    + " may do (building " + buildVersion + "):\n" + bulleted("+ ", grown));
         }
         if (!added.isEmpty()) {
             problems.add(added.size() + " line(s) of API are not in the baseline (additions only: run ./gradlew"

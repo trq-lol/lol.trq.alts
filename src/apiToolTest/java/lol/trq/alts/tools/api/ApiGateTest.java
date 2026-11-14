@@ -394,6 +394,60 @@ class ApiGateTest {
                 problems::toString);
     }
 
+    private static final String RECORD_V1 = "package fx;\npublic record Point(int x, int y) {}\n";
+
+    /**
+     * A component added to a released record, even with a constructor of the old arity kept, changes the
+     * canonical constructor and breaks every deconstruction pattern over it, though no line of the old dump
+     * disappears. The gate treats it as a removal.
+     */
+    private static final String RECORD_V2 = """
+            package fx;
+            public record Point(int x, int y, int z) {
+                public Point(int x, int y) { this(x, y, 0); }
+            }
+            """;
+
+    @Test
+    void aComponentAddedToAReleasedRecordFailsInTheSameMajor() throws IOException {
+        List<String> baseline = ApiGate.baseline(dump(MODULE, Map.of("fx/Point.java", RECORD_V1)), "1.0.0");
+        ApiDump.Result grown = dump(MODULE, Map.of("fx/Point.java", RECORD_V2));
+        assertTrue(
+                grown.lines().containsAll(lines(baseline)),
+                "the fixture keeps every line of the old dump, so only the component rule can catch it");
+
+        List<String> problems = ApiGate.check(baseline, grown, "1.1.0");
+
+        assertTrue(
+                problems.stream()
+                        .anyMatch(p -> p.contains("gained a component") && p.contains("fx.Point component int z")),
+                problems::toString);
+        List<String> refusal = ApiGate.dumpRefusal(baseline, grown, "1.1.0", "1.1.0", null);
+        assertTrue(
+                refusal.stream()
+                        .anyMatch(p -> p.contains("gained a component") && p.contains("fx.Point component int z")),
+                refusal::toString);
+        // A new major may grow it, and a stated reason overrides the refusal as for any removal.
+        assertEquals(List.of(), ApiGate.dumpRefusal(baseline, grown, "2.0.0", "2.0.0", null));
+        assertTrue(ApiGate.check(baseline, grown, "2.0.0").stream().noneMatch(p -> p.contains("gained a component")));
+        assertEquals(List.of(), ApiGate.dumpRefusal(baseline, grown, "1.1.0", "1.1.0", "pre-release fix"));
+    }
+
+    @Test
+    void aNewRecordIsAnOrdinaryAddition() throws IOException {
+        List<String> baseline = baseline(API_V1, "1.0.0");
+        ApiDump.Result added = dump(MODULE, Map.of("fx/Api.java", API_V1, "fx/Point.java", RECORD_V2));
+
+        assertEquals(List.of(), ApiGate.dumpRefusal(baseline, added, "1.1.0", "1.1.0", null));
+        List<String> problems = ApiGate.check(baseline, added, "1.1.0");
+        assertEquals(1, problems.size(), problems::toString);
+        assertTrue(problems.get(0).contains("apiDump"), problems::toString);
+    }
+
+    private static List<String> lines(List<String> baseline) {
+        return baseline.stream().filter(l -> !l.startsWith("#")).toList();
+    }
+
     private List<String> baseline(String api, String version) throws IOException {
         return ApiGate.baseline(dump(MODULE, Map.of("fx/Api.java", api)), version);
     }

@@ -168,9 +168,12 @@ properties when touching `AltAccount`, `AccountStore`, the sign-in chain (`inter
 
 **DTOs are records with `@SerializedName` on every component**, so (de)serialization survives shrinking
 and obfuscation. Any record carrying a credential, a response body or a header value overrides
-`toString` to leave it out. Adding a component breaks deconstruction patterns, and after 1.0 it fails
-`apiCheck`: a public record does not grow components within a major version. `AltsFailure` is a value,
-not a wire DTO, and carries no annotations.
+`toString` to leave it out. A public record does not grow within a major version: an added component
+changes the canonical constructor and breaks every deconstruction pattern over it, so `apiCheck` fails
+on it, and `apiDump` refuses to record it, even when a constructor of the old arity is kept (the gate
+compares the components of every record the dump already lists). A type that is expected to grow is a
+final class with static factories and withers instead. `AltsFailure` is a value, not a wire DTO, and
+carries no annotations.
 
 **Logging in is one step more than operating on an account.** `AltAccountService.check`/`refresh` never
 touch the live session; `loginAccount` is `refresh` plus the injection. Keep it that way: anything that
