@@ -76,6 +76,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `INVALID_INPUT`, a document that is not the 0.4 shape or a member not listed is `PROTOCOL`, a key
   that does not unwrap or a payload that does not authenticate is `CRYPTO`. The owner then creates an
   AVP 0.5 repository with the accounts they choose.
+- **A module descriptor.** The jar is the named module `lol.trq.alts`. It exports `lol.trq.alts` and its
+  `account`, `auth`, `bulk`, `cache`, `model`, `net`, `skin`, `spi`, `store`, `time` and `vault`
+  packages, and nothing under `lol.trq.alts.internal`; it `requires transitive com.google.gson`, and
+  requires `java.desktop` and `jdk.httpserver`, which the browser sign-in and the default avatar source
+  already used. On the module path a host reads only the exported packages. On the class path nothing
+  changes for a host that kept to the API.
+- **A compatibility gate.** `api/lol.trq.alts.api` is the committed dump of the exported API, and the
+  build's `apiCheck` fails a change that removes or alters any of it outside a new major version, so the
+  1.x surface stays what 1.0.0 promises. Internal packages are outside it.
 
 ### Changed
 
@@ -209,6 +218,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RecoveryCode` were in `lol.trq.alts.crypto`; change the import. The JSON form of `WrappedIdentity` is
   unchanged, so a stored identity still opens. `VaultIdentity` is also the AVP 0.5 member identity: its
   Ed25519 key is the member key and its X25519 key the one data keys are wrapped to.
+- **Breaking: Gson is an ordinary dependency.** The library declared Gson `compileOnlyApi`, so a host had
+  to put Gson on its runtime class path itself. It is now an `api` dependency: the Gradle metadata and the
+  POM both carry `com.google.code.gson:gson:2.14.0` at compile scope, and a host receives it
+  transitively. A host that ships its own Gson resolves the version in its build as for any other
+  dependency.
+- **Breaking: the jar is sealed.** Its manifest says `Sealed: true`, so on the class path a class from
+  another jar cannot join one of the library's packages. It no longer carries `Automatic-Module-Name`;
+  the module descriptor names the module, still `lol.trq.alts`.
+- The `@since` tags name the release each type and member first shipped in (about seventy said 1.0.0
+  for API that shipped in 0.11.0 or earlier), and every exported declaration now has one.
 
 ### Removed
 
@@ -281,6 +300,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (a 0.5 host is reached by locator and matched by key over the runtime's transport, `alts.vault()`); and
   the 0.4 wrap types in `crypto`: `KeyWrapScheme`, `X25519HkdfAesGcmKeyWrap`, `RepoDataKey`, `WrappedKey`
   and `Hkdf`. The wrap scheme itself is unchanged in AVP 0.5, and the importer reads 0.4 wraps with it.
+- **Breaking: the implementation moved under `lol.trq.alts.internal`**, which the module does not export,
+  the Javadoc does not document and the compatibility gate does not cover. Each type and what a host
+  uses instead:
+
+  | Type (0.12) | Now | Use instead |
+  | --- | --- | --- |
+  | `net.HttpUtil` / `HttpTransport` and its `HttpResponse`, `JsonResponse`, `BytesResponse`, `HeaderResponse` | `internal.net` | no public replacement: the runtime owns its transport; set `proxyProvider` and `executor` on the builder |
+  | `net.Multipart`, `net.Backoff` | `internal.net` | no public replacement |
+  | `net.FailureText` | `internal.net` | `AltsFailure.message()` |
+  | `net.MicrosoftCallbackServer` | `internal.net` | `loginService().loginMicrosoft(...)` |
+  | `ProxyRoute.toProxy()`, `ProxyRoute.authorizationHeader()` | `internal.net.ProxyRoutes` | no public replacement: the transport builds the proxy and the header |
+  | `auth.MicrosoftAuthUtil` | `internal.auth` | the `loginService()` routes |
+  | `auth.CookieAuthUtil` | `internal.auth` | `loginService().loginCookie(...)` and `loginCookieFile(...)` |
+  | `auth.AccountNetworkUtil` (and `ProfileLookup`) | `internal.auth` | `accountServices(account).profile()`, or `profileLookup()` |
+  | `auth.TokenExpiry` | `internal.auth` | `AltAccount.expiresAt()`; `accountService().check(account)` for validity |
+  | `auth.MinecraftProfile` | `internal.auth` | `LoginResult` and `PlayerProfile` |
+  | `auth.AltLoginServiceImpl`, `auth.AltAccountServiceImpl` | `internal.auth` | `alts.loginService()`, `alts.accountService()` |
+  | `bulk.BulkOperationsImpl` | `internal.bulk` | `alts.bulk()` |
+  | `store.EncryptionUtil` | `internal.store` | no public replacement: the stores encrypt their files; key them with a `StoreKeyProvider` |
+  | `VaultIdentity.keyAgreementPrivateKey()` | package-private | no public replacement: the vault unwraps inside the library |
+
+- **Breaking:** `format.AltManagerFormatting` and the `format` package. Nothing in the library used it,
+  and its English labels are presentation a host should localize. To keep them, copy:
+
+  ```java
+  static String prettyType(AccountType type) {
+      return switch (type) {
+          case MICROSOFT -> "Microsoft";
+          case COOKIE -> "Cookie";
+          case SESSION -> "Session";
+          case OFFLINE -> "Offline";
+      };
+  }
+
+  static String relativeTime(long epochMillis) {
+      long delta = System.currentTimeMillis() - epochMillis;
+      if (epochMillis <= 0 || delta < 0) return "";
+      long minutes = delta / 60_000, hours = minutes / 60, days = hours / 24;
+      if (minutes < 1) return "just now";
+      if (hours < 1) return minutes + "m ago";
+      if (days < 1) return hours + "h ago";
+      if (days < 7) return days + "d ago";
+      if (days < 30) return (days / 7) + "w ago";
+      if (days < 365) return (days / 30) + "mo ago";
+      return (days / 365) + "y ago";
+  }
+
+  static int hsvToRgb(int hueDeg, float s, float v) {
+      float h = (hueDeg % 360) / 60f;
+      int i = (int) Math.floor(h);
+      float f = h - i;
+      float p = v * (1 - s), q = v * (1 - s * f), t = v * (1 - s * (1 - f));
+      float[] rgb = switch (i % 6) {
+          case 0 -> new float[] {v, t, p};
+          case 1 -> new float[] {q, v, p};
+          case 2 -> new float[] {p, v, t};
+          case 3 -> new float[] {p, q, v};
+          case 4 -> new float[] {t, p, v};
+          default -> new float[] {v, p, q};
+      };
+      return 0xff000000 | ((int) (rgb[0] * 255) & 0xff) << 16 | ((int) (rgb[1] * 255) & 0xff) << 8
+              | ((int) (rgb[2] * 255) & 0xff);
+  }
+  ```
 
 ### Error kinds
 
