@@ -945,7 +945,7 @@ What the shared vault does not protect against, and what the default store key i
 stated in [SECURITY.md](SECURITY.md). One limit of the proxy tunnel is stated there too: the JVM still
 resolves the origin host name through the local resolver.
 
-Of the [1.0.0 design](docs/specs/2026-08-06-account-management-1.0.md), this release ships device-code
+Of the 1.0.0 design, this release ships device-code
 login, the bulk entitlement sweep and the removal of the deprecated profile methods. Username and
 password login was not built, by decision.
 
@@ -966,7 +966,7 @@ password login was not built, by decision.
 
 The full post-login account surface — everything an account owner can do to their own account through
 the public Minecraft services. The bulk of the
-[1.0.0 design](docs/specs/2026-08-06-account-management-1.0.md), shipped ahead of the freeze so the
+1.0.0 design, shipped ahead of the freeze so the
 freeze itself, and the one sensitive route it holds back, are a decision made deliberately rather than
 in passing.
 
@@ -1013,7 +1013,7 @@ frozen and those are settled.
 ## [0.10.0] - 2026-08-06
 
 Identity that stays current — the third milestone of the
-[alt-management surface](docs/specs/2026-08-05-alt-management-surface.md).
+alt-management surface.
 
 ### Added
 
@@ -1051,7 +1051,7 @@ Identity that stays current — the third milestone of the
 ## [0.9.0] - 2026-08-05
 
 Bulk operations — the second milestone of the
-[alt-management surface](docs/specs/2026-08-05-alt-management-surface.md).
+alt-management surface.
 
 ### Added
 
@@ -1100,7 +1100,7 @@ beats one with a guess baked into it. It becomes 0.10.0, and device-code login 0
 
 ## [0.8.0] - 2026-08-05
 
-The first milestone of the [alt-management surface](docs/specs/2026-08-05-alt-management-surface.md):
+The first milestone of the alt-management surface:
 requests can be routed, accounts can be operated on without being logged into, and an account that owns
 no Minecraft says so.
 

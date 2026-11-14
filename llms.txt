@@ -34,12 +34,9 @@ Notes for implementers: the library never imports a host type, and it must never
 - [Changelog](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/CHANGELOG.md): Release history; the 1.0.0 section opens with the migration from 0.12 and the table from every former failure constant to its kind.
 - [Security policy](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/SECURITY.md): How to report a vulnerability, and the threat model for the stores, the transport, tokens in logs, sign-in, the AVP 0.5 vault, and the module boundary.
 
-## Design records
+## Public surface
 
-- [Refresh-token design](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/docs/specs/2026-07-28-refresh-token-auth.md): Shipped. Why renewal, the sharing policy, and the typed failure are shaped the way they are.
-- [Alt-management surface design](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/docs/specs/2026-08-05-alt-management-surface.md): Shipped across 0.8.0 to 0.12.0. Per-account proxies, operating on an account without logging into it, UUID-keyed avatars, entitlement as an outcome, bulk operations, and device-code login.
-- [Account management and the 1.0 surface](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/docs/specs/2026-08-06-account-management-1.0.md): The account services, shipped in 0.11.0 and 0.12.0 and finalized in 1.0.0.
-- [The 1.0 freeze](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/docs/specs/2026-11-12-1.0-freeze.md): Accepted. Runtime-owned state, one error model, the internal package with the module descriptor and the API gate, and the vault on AVP 0.5, with the decisions and the type inventory.
+- [API dump](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/api/lol.trq.alts.api): The frozen 1.0 public surface, every exported type and member, as checked by `apiCheck`.
 
 ## Core source
 

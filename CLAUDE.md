@@ -362,4 +362,4 @@ section, once the build and the no-leak scan of that commit have passed.
 [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for host integration,
 [llms.txt](llms.txt) for a structured index of everything,
 [SECURITY.md](SECURITY.md) for the threat model and its stated boundaries,
-[docs/specs/](docs/specs/) for the design records, the 1.0 freeze and its type inventory among them.
+[api/lol.trq.alts.api](api/lol.trq.alts.api) for the frozen public surface, every exported type and member.
