@@ -53,12 +53,15 @@ public record MicrosoftAuthConfig(
     public static final String DEFAULT_SCOPE = "XboxLive.signin XboxLive.offline_access";
 
     /**
-     * Default loopback callback path — intentionally long to reduce accidental screen-share exposure.
+     * Default loopback callback path — intentionally long to reduce accidental screen-share exposure. The
+     * browser sign-in redirects to {@code http://localhost:<port>} followed by this path, so the host's app
+     * registration lists it. Changed in 1.0.0: a registration that lists the 0.12 default keeps working by passing that
+     * path to {@link #withRedirectPath(String)}.
      *
      * @since 0.2.0
      */
     public static final String DEFAULT_REDIRECT_PATH =
-            "/in_game_account_switcher_long_enough_uri_to_prevent_accidental_leaks_on_screensharing_even_if_you_have_like_extremely_big_screen_though_it_might_not_mork_but_we_will_try_it_anyway_to_prevent_funny_things_from_happening_or_something";
+            "/lol_trq_alts_loopback_redirect_long_enough_to_avoid_accidental_leaks_on_screenshare";
 
     /**
      * Default OAuth authorize endpoint.

@@ -122,6 +122,10 @@ code to copy is under Removed). The implementation (`HttpUtil`'s successor `Http
 - **Headers.** A caller-supplied `Proxy-Authorization` header is refused before anything is sent.
 - **`VaultIdentity.signChallenge`** refuses input that begins with `avp/` or is shorter than 16 or
   longer than 1024 bytes.
+- **The default loopback redirect path is new.** `MicrosoftAuthConfig.DEFAULT_REDIRECT_PATH` names no
+  product. A host whose Azure app registration lists the 0.12 default path, and relied on the default,
+  passes that path explicitly with `withRedirectPath(path)` (read it from the registration's redirect
+  URIs), or adds the new default to the registration.
 
 ### Error kinds
 
@@ -293,6 +297,10 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
 
 ### Changed
 
+- **Breaking: the default loopback redirect path changed.** `MicrosoftAuthConfig.DEFAULT_REDIRECT_PATH`
+  is now `/lol_trq_alts_loopback_redirect_long_enough_to_avoid_accidental_leaks_on_screenshare`, a neutral
+  path, still long to reduce accidental exposure on a shared screen. The
+  browser sign-in listens on it unless `withRedirectPath` says otherwise; see Migrating from 0.12.
 - **Breaking: each runtime owns its stores.** `AltsRuntime` now constructs and owns an
   `AccountStore` (`alts.store()`) and a `HostSecrets` (`alts.secrets()`) of its own, instead of binding
   process-wide statics. Every operation keeps its name and its rules: `AltStore.accounts()` becomes

@@ -23,6 +23,21 @@ class MicrosoftAuthConfigTest {
         assertEquals(MicrosoftAuthConfig.DEFAULT_MINECRAFT_PROFILE_URL, config.minecraftProfileUrl());
     }
 
+    /**
+     * The default loopback path is pinned literally: an Azure app registration lists it as a redirect, so a
+     * change breaks every host that relies on the default, and it names no product or tool.
+     */
+    @Test
+    void theDefaultRedirectPathIsTheNeutralOne() {
+        assertEquals(
+                "/lol_trq_alts_loopback_redirect_long_enough_to_avoid_accidental_leaks_on_screenshare",
+                MicrosoftAuthConfig.DEFAULT_REDIRECT_PATH);
+        assertEquals(
+                MicrosoftAuthConfig.DEFAULT_REDIRECT_PATH,
+                MicrosoftAuthConfig.of("app").redirectPath(),
+                "of() listens on the default path");
+    }
+
     @Test
     void requiresClientId() {
         assertThrows(IllegalArgumentException.class, () -> MicrosoftAuthConfig.of(null));
