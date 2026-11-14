@@ -466,7 +466,7 @@ public final class BulkOperationsImpl implements BulkOperations {
                 long now = System.currentTimeMillis();
                 long earliest = Math.max(now, nextStartMillis);
                 waitMillis = earliest - now;
-                nextStartMillis = earliest + options.minSpacing().toMillis();
+                nextStartMillis = saturatedSum(earliest, HttpTransport.saturatedMillis(options.minSpacing()));
             }
             return delay(transport, Duration.ofMillis(waitMillis));
         }
@@ -479,8 +479,15 @@ public final class BulkOperationsImpl implements BulkOperations {
          */
         void holdBack(Duration wait) {
             synchronized (spacingLock) {
-                nextStartMillis = Math.max(nextStartMillis, System.currentTimeMillis() + wait.toMillis());
+                nextStartMillis = Math.max(
+                        nextStartMillis, saturatedSum(System.currentTimeMillis(), HttpTransport.saturatedMillis(wait)));
             }
+        }
+
+        /** Adds two non-negative millisecond counts, held to {@link Long#MAX_VALUE}. */
+        private static long saturatedSum(long a, long b) {
+            long sum = a + b;
+            return sum < 0 ? Long.MAX_VALUE : sum;
         }
 
         void record(int index, BulkEntryResult result) {

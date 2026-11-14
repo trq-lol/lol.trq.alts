@@ -147,4 +147,17 @@ class HttpTransportWaitTest {
         assertSame(caller, ranOn.get(), "it ran synchronously, on the registering thread");
         assertEquals(0, transport.closerCount(), "and left nothing registered");
     }
+
+    /** A wait too long to count in milliseconds is a very long wait, not an arithmetic failure. */
+    @Test
+    void aWaitTooLongForMillisecondsStillWaitsAndStillEndsOnClose() throws Exception {
+        HttpTransport transport = TestTransports.direct();
+
+        CompletableFuture<Void> wait = transport.delay(Duration.ofSeconds(Long.MAX_VALUE));
+
+        assertFalse(wait.isDone(), "the wait is pending, not failed");
+        transport.close();
+        ExecutionException failed = assertThrows(ExecutionException.class, () -> wait.get(2, TimeUnit.SECONDS));
+        assertInstanceOf(IOException.class, failed.getCause());
+    }
 }

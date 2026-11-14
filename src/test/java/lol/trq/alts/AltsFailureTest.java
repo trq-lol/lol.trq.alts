@@ -171,4 +171,14 @@ class AltsFailureTest {
                         "UNKNOWN"),
                 java.util.Arrays.stream(Kind.values()).map(Kind::name).toList());
     }
+
+    /** A wait ending past the last instant there is ends at that instant rather than failing to build. */
+    @Test
+    void aStatedWaitBeyondTheLastInstantEndsAtIt() {
+        AltsFailure failure = AltsFailure.rateLimited("slow down", Duration.ofSeconds(Long.MAX_VALUE));
+
+        assertEquals(Optional.of(Duration.ofSeconds(Long.MAX_VALUE)), failure.retryAfter());
+        assertEquals(Optional.of(Instant.MAX), failure.retryAt());
+        assertFalse(failure.retryable());
+    }
 }

@@ -235,12 +235,22 @@ public record AltsFailure(
      */
     private static AltsFailure made(Kind kind, String message, Duration retryAfter, XstsError xstsError) {
         Optional<Duration> wait = Optional.ofNullable(retryAfter);
-        return new AltsFailure(
-                kind,
-                message,
-                wait,
-                Optional.ofNullable(xstsError),
-                wait.map(stated -> Instant.now().plus(stated)));
+        return new AltsFailure(kind, message, wait, Optional.ofNullable(xstsError), wait.map(AltsFailure::endOf));
+    }
+
+    /**
+     * Returns when a wait starting now ends, held to {@link Instant#MAX} for one that would end after it.
+     *
+     * @param stated the stated wait
+     * @return its end
+     */
+    private static Instant endOf(Duration stated) {
+        Instant now = Instant.now();
+        try {
+            return now.plus(stated);
+        } catch (ArithmeticException | java.time.DateTimeException beyondTheLastInstant) {
+            return Instant.MAX;
+        }
     }
 
     /**

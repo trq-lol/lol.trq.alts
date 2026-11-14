@@ -557,6 +557,10 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
 
 - A bulk run's report completed before its `BulkProgress.finished` callback ran, so a caller woken by
   the report could miss it. The report now completes after `finished` has returned (or thrown).
+- A stated `Retry-After` is held to one day. A service naming an absurd wait (`100000000000000000`
+  seconds, or a date in the year 9999) overflowed the millisecond conversions downstream: a failure
+  could not be built, and a paced bulk run was cut short instead of waiting. `AltsFailure.retryAt()`
+  is held to `Instant.MAX`, and every wait saturates, as a backstop for a wait a host builds itself.
 
 ## [0.12.0] - 2026-11-12
 

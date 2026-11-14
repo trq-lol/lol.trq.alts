@@ -1018,4 +1018,45 @@ class BulkOperationsTest {
             return unused();
         }
     }
+
+    /**
+     * A stated wait too long to count in milliseconds holds the run back rather than cutting it short
+     * with an arithmetic failure: the run waits, and ends when the runtime closes.
+     */
+    @Test
+    void aWaitTooLongForMillisecondsHoldsTheRunUntilTheRuntimeCloses() throws Exception {
+        HttpTransport transport = TestTransports.direct();
+        AltAccountService throttled = new AltAccountService() {
+            @Override
+            public CompletableFuture<AccountStatus> check(AltAccount account) {
+                return refresh(account);
+            }
+
+            @Override
+            public CompletableFuture<AccountStatus> refresh(AltAccount account) {
+                return CompletableFuture.completedFuture(AccountStatus.failure(
+                        account,
+                        AccountStatus.State.UNREACHABLE,
+                        AltsFailure.rateLimited("slow down", Duration.ofSeconds(Long.MAX_VALUE))));
+            }
+        };
+        BulkOperations bulk = new BulkOperationsImpl(
+                store,
+                new UnusedLoginService(),
+                throttled,
+                account -> {
+                    throw new AssertionError("this run reads no entitlements");
+                },
+                transport);
+
+        CompletableFuture<BulkReport> report = bulk.refreshAll(
+                        accounts(2), FAST.withConcurrency(1).withoutStoppingOnRateLimit(), BulkProgress.NONE)
+                .report();
+
+        Thread.sleep(300);
+        assertFalse(report.isDone(), "the run is waiting the limit out, not cut short");
+        transport.close();
+        BulkReport ended = report.get(10, TimeUnit.SECONDS);
+        assertEquals(2, ended.results().size(), "every entry is still reported");
+    }
 }

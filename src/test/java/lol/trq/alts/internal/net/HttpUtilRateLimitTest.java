@@ -142,4 +142,29 @@ class HttpUtilRateLimitTest {
         assertEquals(Duration.ofSeconds(7), response.retryAfter());
         assertNull(http.getBytes(url, null, 1024, null), "the collapsing form still reports nothing");
     }
+
+    /**
+     * A stated wait is the service's to name, but not without limit: a hundred-quadrillion-second wait
+     * overflows every millisecond conversion downstream and would park a run for good. A day is longer
+     * than any real throttle and still a wait a host can honour.
+     */
+    @Test
+    void anAbsurdStatedWaitIsHeldToADay() {
+        assertEquals(Duration.ofDays(1), HttpTransport.parseRetryAfter("100000000000000000", null, NOW));
+        assertEquals(Duration.ofDays(1), HttpTransport.parseRetryAfter("99999999999999999999999", null, NOW));
+        assertEquals(
+                Duration.ofDays(1), HttpTransport.parseRetryAfter("Fri, 31 Dec 9999 23:59:59 GMT", NOW_HEADER, NOW));
+        assertEquals(Duration.ofDays(1), HttpTransport.parseRetryAfter("86400", null, NOW));
+        assertEquals(Duration.ofSeconds(86_399), HttpTransport.parseRetryAfter("86399", null, NOW));
+    }
+
+    @Test
+    void anAbsurdStatedWaitOnARealResponseIsHeldToADay() throws Exception {
+        String url = startThrottlingServer("100000000000000000");
+
+        HttpTransport.HttpResponse response = http.postFormForStatus(url, null, "grant_type=refresh_token");
+
+        assertTrue(response.rateLimited());
+        assertEquals(Duration.ofDays(1), response.retryAfter());
+    }
 }

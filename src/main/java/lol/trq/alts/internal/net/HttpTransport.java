@@ -111,6 +111,12 @@ public final class HttpTransport implements AutoCloseable {
     /** How many proxy identities keep a tunnel factory, and with it a set of reusable connections. */
     static final int MAX_TUNNEL_FACTORIES = 64;
 
+    /**
+     * The longest stated wait taken at its word. Longer than any real throttle, and short enough that
+     * every conversion downstream (to milliseconds, onto an instant) stays in range.
+     */
+    static final Duration MAX_RETRY_AFTER = Duration.ofDays(1);
+
     private final ProxyProvider proxyProvider;
     private final Executor executor;
     private final SSLSocketFactory tlsOverride;
@@ -283,18 +289,38 @@ public final class HttpTransport implements AutoCloseable {
      * exceptionally with an {@link IOException} as soon as the transport closes or the executor refuses
      * to run it; see {@link #schedule(long, Runnable, Consumer)}.
      *
-     * @param duration how long to wait; null or not positive completes at once
+     * @param duration how long to wait; null or not positive completes at once, and one too long to
+     *     count in milliseconds waits {@link Long#MAX_VALUE} of them
      * @return the wait
      * @since 1.0.0
      */
     public CompletableFuture<Void> delay(Duration duration) {
-        long millis = duration == null ? 0L : duration.toMillis();
+        long millis = saturatedMillis(duration);
         if (millis <= 0L) {
             return CompletableFuture.completedFuture(null);
         }
         CompletableFuture<Void> waited = new CompletableFuture<>();
         schedule(millis, () -> waited.complete(null), waited::completeExceptionally);
         return waited;
+    }
+
+    /**
+     * Returns a duration in milliseconds, held to {@link Long#MAX_VALUE} where {@link Duration#toMillis()}
+     * would overflow.
+     *
+     * @param duration the duration, or null
+     * @return its length in milliseconds; zero for null
+     * @since 1.0.0
+     */
+    public static long saturatedMillis(Duration duration) {
+        if (duration == null) {
+            return 0L;
+        }
+        try {
+            return duration.toMillis();
+        } catch (ArithmeticException tooLong) {
+            return duration.isNegative() ? Long.MIN_VALUE : Long.MAX_VALUE;
+        }
     }
 
     /**
@@ -1572,6 +1598,10 @@ public final class HttpTransport implements AutoCloseable {
      * already in the past is a delay of zero rather than no delay at all — the service still said to
      * wait, and that it is a rate limit is the part worth keeping.
      *
+     * <p>A wait longer than {@link #MAX_RETRY_AFTER} (a day) is held to it, a number too large to parse
+     * included: the service asked for a very long wait, and that is what the caller is told, in a form
+     * no later arithmetic overflows on.
+     *
      * @param retryAfter the {@code Retry-After} header value, or null
      * @param date the response's {@code Date} header value, or null
      * @param now the local time, used when the response carries no usable {@code Date}
@@ -1582,11 +1612,13 @@ public final class HttpTransport implements AutoCloseable {
             return null;
         }
         String value = retryAfter.trim();
-        try {
-            long seconds = Long.parseLong(value);
-            return seconds >= 0 ? Duration.ofSeconds(seconds) : null;
-        } catch (NumberFormatException notSeconds) {
-            // Fall through: the other legal form is a date.
+        if (!value.isEmpty() && value.chars().allMatch(c -> c >= '0' && c <= '9')) {
+            try {
+                return atMostADay(Duration.ofSeconds(Long.parseLong(value)));
+            } catch (NumberFormatException tooManyDigits) {
+                // Digits only, so a number of seconds, just one past what a long holds.
+                return MAX_RETRY_AFTER;
+            }
         }
         Instant at = parseHttpDate(value);
         if (at == null) {
@@ -1594,7 +1626,11 @@ public final class HttpTransport implements AutoCloseable {
         }
         Instant reference = parseHttpDate(date);
         Duration delay = Duration.between(reference != null ? reference : now, at);
-        return delay.isNegative() ? Duration.ZERO : delay;
+        return delay.isNegative() ? Duration.ZERO : atMostADay(delay);
+    }
+
+    private static Duration atMostADay(Duration delay) {
+        return delay.compareTo(MAX_RETRY_AFTER) > 0 ? MAX_RETRY_AFTER : delay;
     }
 
     /**
