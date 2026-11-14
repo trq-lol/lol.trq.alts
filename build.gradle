@@ -62,6 +62,84 @@ tasks.named('test') {
     inputs.file('CHANGELOG.md').withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
+// The whole suite again, with the library as a named module on the module path: the jar is the module,
+// the test classes are patched into it, and Gson, JUnit and the JDK modules resolve as modules. This is
+// what proves the descriptor: a missing `requires` or `opens` (Gson building a private record by
+// reflection) fails here and not on the class path, where a descriptor restricts nothing.
+configurations {
+    moduleTestRuntime {
+        canBeConsumed = false
+        canBeResolved = true
+        extendsFrom configurations.testImplementation, configurations.testRuntimeOnly
+        attributes {
+            attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.JAVA_RUNTIME))
+            attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category, Category.LIBRARY))
+            attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements, LibraryElements.JAR))
+            attribute(Bundling.BUNDLING_ATTRIBUTE, objects.named(Bundling, Bundling.EXTERNAL))
+        }
+    }
+}
+
+dependencies {
+    moduleTestRuntime 'org.junit.platform:junit-platform-console'
+}
+
+def moduleTest = tasks.register('moduleTest', JavaExec) {
+    group = 'verification'
+    description = 'Runs the test suite with the library as a named module on the module path.'
+    dependsOn tasks.named('jar'), tasks.named('testClasses')
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(targetJavaVersion) }
+    def libraryJar = tasks.named('jar').flatMap { it.archiveFile }
+    def modules = configurations.moduleTestRuntime
+    def testOutput = sourceSets.test.output
+    inputs.files(libraryJar, modules, testOutput).withPropertyName('modulePath')
+    inputs.file('CHANGELOG.md').withPathSensitivity(PathSensitivity.RELATIVE)
+    def report = layout.buildDirectory.dir('test-results/moduleTest')
+    outputs.dir(report).withPropertyName('reports')
+    classpath = files()
+    mainModule = 'org.junit.platform.console'
+    mainClass = 'org.junit.platform.console.ConsoleLauncher'
+    doFirst {
+        def testDirs = testOutput.files.findAll { it.exists() }
+        def mainPackages = new TreeSet<String>()
+        def testPackages = new TreeSet<String>()
+        [sourceSets.main, sourceSets.test].each { set ->
+            set.java.srcDirs.each { dir ->
+                if (dir.exists()) {
+                    dir.eachFileRecurse(groovy.io.FileType.FILES) { f ->
+                        if (f.name.endsWith('.java') && f.name != 'module-info.java') {
+                            def rel = dir.toPath().relativize(f.parentFile.toPath()).toString()
+                            (set == sourceSets.main ? mainPackages : testPackages) << rel.replace(File.separator, '.')
+                        }
+                    }
+                }
+            }
+        }
+        def opens = (mainPackages + testPackages).collect { "--add-opens=lol.trq.alts/${it}=org.junit.platform.commons" }
+        jvmArgs = [
+                '--module-path', ([libraryJar.get().asFile] + modules.files).join(File.pathSeparator),
+                '--add-modules', 'ALL-MODULE-PATH',
+                '--patch-module', 'lol.trq.alts=' + testDirs.join(File.pathSeparator),
+                '--add-reads', 'lol.trq.alts=org.junit.jupiter.api',
+                '-Dlol.trq.alts.expectModule=true',
+        ] + opens
+        args = [
+                'execute',
+                '--select-module', 'lol.trq.alts',
+                // Compiles and runs its own consumer module against the jar; it is a module-path test already.
+                '--exclude-classname', '.*ModulePathConsumerTest',
+                '--fail-if-no-tests',
+                '--disable-banner',
+                '--details', 'summary',
+                '--reports-dir', report.get().asFile.path,
+        ]
+    }
+}
+
+tasks.named('check') {
+    dependsOn moduleTest
+}
+
 tasks.named('jar') {
     manifest {
         // module-info.java names the module, so no Automatic-Module-Name. Sealed, so on the class path a

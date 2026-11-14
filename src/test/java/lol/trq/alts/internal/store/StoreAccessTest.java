@@ -77,10 +77,15 @@ class StoreAccessTest {
 
         // Initializing the copy runs its static initializer, which offers a bridge of the library's own
         // class name to the library's StoreAccess; only the defining loader tells it apart.
-        ExceptionInInitializerError refused =
-                assertThrows(ExceptionInInitializerError.class, () -> Class.forName(bridgeName, true, foreign));
-
-        assertInstanceOf(IllegalArgumentException.class, refused.getCause());
+        if (StoreAccess.class.getModule().isNamed()) {
+            // On the module path the copy sits in an unnamed module, to which the library does not export
+            // its internal packages: it cannot even implement the bridge interface, let alone install it.
+            assertThrows(IllegalAccessError.class, () -> Class.forName(bridgeName, true, foreign));
+        } else {
+            ExceptionInInitializerError refused =
+                    assertThrows(ExceptionInInitializerError.class, () -> Class.forName(bridgeName, true, foreign));
+            assertInstanceOf(IllegalArgumentException.class, refused.getCause());
+        }
         assertNotSame(foreign, StoreAccess.bridge().getClass().getClassLoader());
     }
 

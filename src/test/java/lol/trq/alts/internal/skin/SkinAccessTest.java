@@ -46,10 +46,15 @@ class SkinAccessTest {
         String bridgeName = "lol.trq.alts.skin.SkinBridge";
         ClassLoader foreign = new ChildFirstLoader(SkinAccessTest.class.getClassLoader(), bridgeName);
 
-        ExceptionInInitializerError refused =
-                assertThrows(ExceptionInInitializerError.class, () -> Class.forName(bridgeName, true, foreign));
-
-        assertInstanceOf(IllegalArgumentException.class, refused.getCause());
+        if (SkinAccess.class.getModule().isNamed()) {
+            // On the module path the copy sits in an unnamed module, to which the library does not export
+            // its internal packages: it cannot even implement the bridge interface, let alone install it.
+            assertThrows(IllegalAccessError.class, () -> Class.forName(bridgeName, true, foreign));
+        } else {
+            ExceptionInInitializerError refused =
+                    assertThrows(ExceptionInInitializerError.class, () -> Class.forName(bridgeName, true, foreign));
+            assertInstanceOf(IllegalArgumentException.class, refused.getCause());
+        }
         assertNotSame(foreign, SkinAccess.bridge().getClass().getClassLoader());
     }
 

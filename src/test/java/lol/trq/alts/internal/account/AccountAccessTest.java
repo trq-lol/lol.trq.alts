@@ -49,10 +49,15 @@ class AccountAccessTest {
         String bridgeName = "lol.trq.alts.account.AccountBridge";
         ClassLoader foreign = new ChildFirstLoader(AccountAccessTest.class.getClassLoader(), bridgeName);
 
-        ExceptionInInitializerError refused =
-                assertThrows(ExceptionInInitializerError.class, () -> Class.forName(bridgeName, true, foreign));
-
-        assertInstanceOf(IllegalArgumentException.class, refused.getCause());
+        if (AccountAccess.class.getModule().isNamed()) {
+            // On the module path the copy sits in an unnamed module, to which the library does not export
+            // its internal packages: it cannot even implement the bridge interface, let alone install it.
+            assertThrows(IllegalAccessError.class, () -> Class.forName(bridgeName, true, foreign));
+        } else {
+            ExceptionInInitializerError refused =
+                    assertThrows(ExceptionInInitializerError.class, () -> Class.forName(bridgeName, true, foreign));
+            assertInstanceOf(IllegalArgumentException.class, refused.getCause());
+        }
         assertNotSame(foreign, AccountAccess.bridge().getClass().getClassLoader());
     }
 
