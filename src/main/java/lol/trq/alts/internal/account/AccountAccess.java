@@ -13,8 +13,9 @@ import lol.trq.alts.internal.net.HttpTransport;
  * loader, and only once. Not part of the library's API: a host reaches the services through
  * {@code AltsRuntime#accountServices} and {@code AltsRuntime#profileLookup}.
  *
- * <p>Known limit until the module descriptor stops exporting this package: code on the classpath can
- * call {@link #bridge()} and build services of its own over a token it already holds.
+ * <p>Known limit, on the class path only: the module does not export this package, so on the module path
+ * nothing outside the library can reach it, but on the class path a descriptor restricts nothing, and code
+ * there can call {@link #bridge()} and build services of its own over a token it already holds.
  *
  * @author trq
  * @since 1.0.0

@@ -13,10 +13,11 @@ import lol.trq.alts.store.HostSecrets;
  * once. Not part of the library's API: a host gets its stores from {@code AltsRuntime#store()} and
  * {@code AltsRuntime#secrets()}, and closes them by closing the runtime.
  *
- * <p>Known limit until the module descriptor stops exporting this package: code on the classpath can
- * still call {@link #bridge()} and close or open a store through it. It cannot substitute a bridge of
- * its own without deep reflection or a split package, so it never sees a key provider or a store the
- * library did not open; the module descriptor and a sealed jar close those two as well.
+ * <p>Known limit, on the class path only: the module does not export this package, so on the module path
+ * nothing outside the library can reach it, but on the class path a descriptor restricts nothing, and code
+ * there can still call {@link #bridge()} and close or open a store through it. It cannot substitute a bridge
+ * of its own: the sealed jar refuses a split package, and only the library's own bridge class from the
+ * library's class loader installs, so it never sees a key provider or a store the library did not open.
  *
  * @author trq
  * @since 1.0.0
