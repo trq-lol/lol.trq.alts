@@ -1,6 +1,5 @@
 package lol.trq.alts.auth;
 
-import com.google.gson.annotations.SerializedName;
 import java.util.Objects;
 
 /**
@@ -128,43 +127,18 @@ public final class MicrosoftAuthConfig {
     public static final String DEFAULT_DEVICE_TOKEN_URL =
             "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
 
-    @SerializedName("clientId")
     private final String clientId;
-
-    @SerializedName("scope")
     private final String scope;
-
-    @SerializedName("redirectPath")
     private final String redirectPath;
-
-    @SerializedName("authorizeUrl")
     private final String authorizeUrl;
-
-    @SerializedName("tokenUrl")
     private final String tokenUrl;
-
-    @SerializedName("xboxLiveAuthUrl")
     private final String xboxLiveAuthUrl;
-
-    @SerializedName("xstsAuthUrl")
     private final String xstsAuthUrl;
-
-    @SerializedName("minecraftLoginUrl")
     private final String minecraftLoginUrl;
-
-    @SerializedName("minecraftProfileUrl")
     private final String minecraftProfileUrl;
-
-    @SerializedName("redirectUri")
     private final String redirectUri;
-
-    @SerializedName("rpsTicketPrefix")
     private final String rpsTicketPrefix;
-
-    @SerializedName("deviceCodeUrl")
     private final String deviceCodeUrl;
-
-    @SerializedName("deviceTokenUrl")
     private final String deviceTokenUrl;
 
     private MicrosoftAuthConfig(
