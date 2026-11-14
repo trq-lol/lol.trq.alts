@@ -178,8 +178,25 @@ class ApiGateTest {
         assertEquals(
                 List.of(),
                 ApiGate.dumpRefusal(baseline, dump(MODULE, Map.of("fx/Api.java", v2)), "1.1.0", "1.1.0", null));
-        assertEquals(
-                List.of(), ApiGate.dumpRefusal(null, dump(MODULE, Map.of("fx/Api.java", v2)), "1.1.0", "1.1.0", null));
+    }
+
+    @Test
+    void aDumpWithoutABaselineNeedsAReason() throws IOException {
+        ApiDump.Result current = dump(MODULE, Map.of("fx/Api.java", API_V1));
+
+        List<String> missing = ApiGate.dumpRefusal(null, current, "1.0.0", "1.0.0", null);
+        List<String> headerless = ApiGate.dumpRefusal(
+                baseline(API_V1, "1.0.0").stream()
+                        .filter(l -> !l.startsWith(ApiGate.VERSION_PREFIX))
+                        .toList(),
+                current,
+                "1.0.0",
+                "1.0.0",
+                null);
+
+        assertTrue(missing.stream().anyMatch(p -> p.contains("no baseline")), missing::toString);
+        assertTrue(headerless.stream().anyMatch(p -> p.contains("no '# version' header")), headerless::toString);
+        assertEquals(List.of(), ApiGate.dumpRefusal(null, current, "1.0.0", "1.0.0", "first dump"));
     }
 
     @Test

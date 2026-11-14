@@ -92,7 +92,8 @@ public final class ApiGate {
      * baseline's API in the same major version, which is exactly what {@link #check} refuses. Regenerating
      * the dump records additions; it never launders a removal.
      *
-     * @param existing the current baseline file's lines, or {@code null} when there is none yet
+     * @param existing the current baseline file's lines, or {@code null} when there is none (refused without a
+     *     reason)
      * @param dump the new dump
      * @param version the version the new dump is written for
      * @param projectVersion the version the build is for ({@code project.version})
@@ -103,11 +104,21 @@ public final class ApiGate {
             List<String> existing, ApiDump.Result dump, String version, String projectVersion, String breakingReason) {
         List<String> problems = new ArrayList<>(dump.problems());
         boolean allowed = breakingReason != null && !breakingReason.isBlank();
+        // Without a baseline there is nothing to compare against, so a missing or headerless file would let any
+        // removal through: writing one needs a stated reason (the first dump of a library, or a repair).
         if (existing == null) {
+            if (!allowed) {
+                problems.add("there is no baseline to compare against; the first dump needs"
+                        + " -PapiAllowBreaking=<reason> (restore the committed file otherwise)");
+            }
             return problems;
         }
         Optional<String> baselineVersion = versionOf(existing);
         if (baselineVersion.isEmpty()) {
+            if (!allowed) {
+                problems.add("the baseline has no '" + VERSION_PREFIX.trim() + "' header line, so a removal could"
+                        + " not be detected; restore it, or pass -PapiAllowBreaking=<reason>");
+            }
             return problems;
         }
         // A dump may not claim a major the build has not reached, or the removal rule below could be met by
