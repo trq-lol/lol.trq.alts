@@ -288,8 +288,8 @@ public final class VaultEngine {
      * @param repoId the repository
      * @param clock epoch milliseconds
      * @return the vault; fails with {@code PROTOCOL} if the chain does not verify, is another repository, or
-     *     does not list {@code host} among its hosts, and {@code INVALID_INPUT} if its tip does not list this
-     *     member
+     *     does not name {@code host} as this member's home host, and {@code INVALID_INPUT} if its tip does not
+     *     list this member
      */
     public static CompletableFuture<VaultEngine> open(
             HostClient host, MemberKeys me, String repoId, LongSupplier clock) {
@@ -327,9 +327,7 @@ public final class VaultEngine {
         if (ownerFingerprint != null && !AvpBytes.same(Tokens.ownerFingerprint(chain.ownerKey()), ownerFingerprint)) {
             throw VaultFailures.protocol("the repository's owner key does not match the locator's owner fingerprint");
         }
-        if (!chain.tip().state().hasMember(me.ed25519Public())) {
-            throw VaultFailures.invalid("this device is not a member of the repository");
-        }
+        requireHome(chain, me, host);
         VaultEngine v = new VaultEngine(host, me, chain, clock, new Hlc(0, 0));
         v.adoptKeys(0);
         v.digest(answer, 0, OptionalLong.empty(), false);
@@ -372,13 +370,7 @@ public final class VaultEngine {
             throw rollback();
         }
         requireListed(chain, host);
-        Optional<MemberEntry> mine = chain.tip().state().member(me.ed25519Public());
-        if (mine.isEmpty()) {
-            throw VaultFailures.invalid("this device is not a member of the repository");
-        }
-        if (!AvpBytes.same(mine.get().homeHostKey(), host.key())) {
-            throw VaultFailures.protocol("the host is not this member's home host in the verified state");
-        }
+        requireHome(chain, me, host);
         VaultEngine v = new VaultEngine(host, me, chain, clock, new Hlc(state.hlcAt(), state.hlcN()));
         state.retainedKeys().forEach(v.retained::put);
         int fork = VerifiedChain.fork(pinned, chain.hashes());
@@ -398,6 +390,21 @@ public final class VaultEngine {
     private static void requireListed(VerifiedChain chain, HostClient host) {
         if (!chain.tip().state().hasHost(host.key())) {
             throw VaultFailures.protocol("the repository's verified state does not list the host it was opened from");
+        }
+    }
+
+    /**
+     * A member syncs through its home host (SPEC 1, 8.1): the verified tip must list this device, and the
+     * host must be the {@code homeHostKey} the owner signed for it, which for a joiner is the home host of its
+     * invite token.
+     */
+    private static void requireHome(VerifiedChain chain, MemberKeys me, HostClient host) {
+        Optional<MemberEntry> mine = chain.tip().state().member(me.ed25519Public());
+        if (mine.isEmpty()) {
+            throw VaultFailures.invalid("this device is not a member of the repository");
+        }
+        if (!AvpBytes.same(mine.get().homeHostKey(), host.key())) {
+            throw VaultFailures.protocol("the host is not this member's home host in the verified state");
         }
     }
 

@@ -921,17 +921,27 @@ class VaultHostileHostTest {
     }
 
     @Test
-    void aVaultIsResumedOnlyFromTheMembersHomeHost() throws Exception {
+    void aVaultIsOpenedJoinedAndResumedOnlyFromTheMembersHomeHost() throws Exception {
         VaultEngine owner = fx.create(newOwner());
         TestAvpHost home = fx.anotherHost();
         MemberKeys bobKeys = MemberKeys.generate();
         await(owner.invite(await(VaultEngine.prepareJoin(fx.connect(home), bobKeys, owner.repoId()))));
-        // Bob's home host is the other one; the owner's host is listed too, so it may serve an open.
-        VaultEngine bob = await(VaultEngine.open(fx.connect(), bobKeys, owner.repoId(), fx.clock));
+        // Bob's home host is the other one. The owner's host is listed too, but it is not his to sync through.
         assertEquals(
                 Kind.PROTOCOL,
-                failure(VaultEngine.resume(fx.connect(), bobKeys, bob.state(), fx.clock))
+                failure(VaultEngine.open(fx.connect(), bobKeys, owner.repoId(), fx.clock))
                         .kind());
+        assertEquals(
+                Kind.PROTOCOL,
+                failure(VaultEngine.join(fx.connect(), bobKeys, owner.locator(), fx.clock))
+                        .kind());
+        EngineState state = new EngineState(
+                owner.repoId(), owner.state().chainHashes(), new java.util.TreeMap<>(), 0, 0, Payload.EMPTY, false);
+        assertEquals(
+                Kind.PROTOCOL,
+                failure(VaultEngine.resume(fx.connect(), bobKeys, state, fx.clock))
+                        .kind());
+        await(VaultEngine.open(fx.connect(), owner.member(), owner.repoId(), fx.clock));
         await(VaultEngine.resume(fx.connect(), owner.member(), owner.state(), fx.clock));
     }
 
