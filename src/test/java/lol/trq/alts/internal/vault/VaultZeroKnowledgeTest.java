@@ -95,7 +95,8 @@ class VaultZeroKnowledgeTest {
                 secret,
                 AvpBytes.base64(secret).replace("=", "").getBytes(StandardCharsets.UTF_8),
                 AvpBytes.base64Url(secret).getBytes(StandardCharsets.UTF_8),
-                AvpBytes.hex(secret).getBytes(StandardCharsets.UTF_8));
+                AvpBytes.hex(secret).getBytes(StandardCharsets.UTF_8),
+                AvpBytes.hex(secret).toUpperCase(java.util.Locale.ROOT).getBytes(StandardCharsets.UTF_8));
     }
 
     private static boolean contains(byte[] haystack, byte[] needle) {
