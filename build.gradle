@@ -114,6 +114,69 @@ tasks.named('test') {
     } as CommandLineArgumentProvider)
 }
 
+// The compatibility gate. api/lol.trq.alts.api is the committed dump of the exported API (every public or
+// protected type, member and signature), generated from the built jar by the JDK-only tool in src/apiTool.
+// apiCheck, part of check, fails when a line of it is removed or changed, unless this build's major version
+// is greater than the dump's, and when the jar has API the dump lacks (run apiDump). Internal packages are
+// ignored; exporting one, or naming an internal type in an exported signature, fails it outright.
+sourceSets {
+    apiTool {
+        java.srcDirs = ['src/apiTool/java']
+    }
+    apiToolTest {
+        java.srcDirs = ['src/apiToolTest/java']
+        compileClasspath += sourceSets.apiTool.output
+        runtimeClasspath += sourceSets.apiTool.output
+    }
+}
+
+dependencies {
+    apiToolTestImplementation platform('org.junit:junit-bom:6.1.2')
+    apiToolTestImplementation 'org.junit.jupiter:junit-jupiter'
+    apiToolTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+def apiTool = { JavaExec task, String mode, String dumpVersion ->
+    def libraryJar = tasks.named('jar').flatMap { it.archiveFile }
+    def dependencyJars = configurations.runtimeClasspath
+    task.group = 'verification'
+    task.dependsOn tasks.named('jar')
+    task.javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(targetJavaVersion) }
+    task.classpath = sourceSets.apiTool.runtimeClasspath
+    task.mainClass = 'lol.trq.alts.tools.api.ApiGate'
+    task.inputs.file(libraryJar).withPropertyName('libraryJar').withNormalizer(ClasspathNormalizer)
+    task.argumentProviders.add({
+        [mode, libraryJar.get().asFile.path, file('api/lol.trq.alts.api').path, dumpVersion] +
+                dependencyJars.files.collect { it.path }
+    } as CommandLineArgumentProvider)
+}
+
+tasks.register('apiDump', JavaExec) {
+    description = 'Writes api/lol.trq.alts.api from the built jar (-PapiVersion=X.Y.Z names its version).'
+    apiTool(it, 'dump', (findProperty('apiVersion') ?: project.version).toString())
+}
+
+def apiCheck = tasks.register('apiCheck', JavaExec) {
+    description = 'Fails if the built jar breaks or outgrows the committed API dump.'
+    apiTool(it, 'check', project.version.toString())
+    inputs.file('api/lol.trq.alts.api').withPropertyName('baseline').withPathSensitivity(PathSensitivity.RELATIVE)
+    def marker = layout.buildDirectory.file('apiCheck/ok')
+    outputs.file(marker)
+    doLast { marker.get().asFile.text = 'ok\n' }
+}
+
+def apiToolTest = tasks.register('apiToolTest', Test) {
+    group = 'verification'
+    description = 'Tests the compatibility gate itself.'
+    testClassesDirs = sourceSets.apiToolTest.output.classesDirs
+    classpath = sourceSets.apiToolTest.runtimeClasspath
+    useJUnitPlatform()
+}
+
+tasks.named('check') {
+    dependsOn apiCheck, apiToolTest
+}
+
 // The whole suite again, with the library as a named module on the module path: the jar is the module,
 // the test classes are patched into it, and Gson, JUnit and the JDK modules resolve as modules. This is
 // what proves the descriptor: a missing `requires` or `opens` (Gson building a private record by
