@@ -21,6 +21,7 @@ import java.util.Objects;
 import java.util.function.Consumer;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure.Kind;
+import lol.trq.alts.internal.store.AltAccountJson;
 import lol.trq.alts.model.AltAccount;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -310,8 +311,8 @@ class LegacyVaultReaderTest {
     }
 
     private static List<AltAccount> expected(String repo) throws IOException {
-        List<AltAccount> list =
-                new Gson().fromJson(text(repo + "-expected.json"), new TypeToken<List<AltAccount>>() {}.getType());
+        List<AltAccount> list = AltAccountJson.gson()
+                .fromJson(text(repo + "-expected.json"), new TypeToken<List<AltAccount>>() {}.getType());
         assertNotNull(list);
         return list;
     }
