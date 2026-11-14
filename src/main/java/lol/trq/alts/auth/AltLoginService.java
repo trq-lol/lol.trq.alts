@@ -28,7 +28,7 @@ public interface AltLoginService {
      *
      * @param mode the login mode (whether to add the account to storage)
      * @return a future containing the result of the login attempt
-     * @since 0.2.0
+     * @since 0.1.0
      */
     CompletableFuture<LoginResult> loginMicrosoft(LoginMode mode);
 
@@ -66,7 +66,7 @@ public interface AltLoginService {
      * @param cookieData the cookie string in Netscape or mangled format
      * @param mode the login mode
      * @return a future containing the result of the login attempt
-     * @since 0.2.0
+     * @since 0.1.0
      */
     CompletableFuture<LoginResult> loginCookie(String cookieData, LoginMode mode);
 
@@ -88,7 +88,7 @@ public interface AltLoginService {
      * @param sessionToken the raw access token or session string
      * @param mode the login mode
      * @return a future containing the result of the login attempt
-     * @since 0.2.0
+     * @since 0.1.0
      */
     CompletableFuture<LoginResult> loginSession(String sessionToken, LoginMode mode);
 
@@ -109,7 +109,7 @@ public interface AltLoginService {
      * @param username the desired offline username
      * @param mode the login mode
      * @return a future containing the result of the login attempt
-     * @since 0.2.0
+     * @since 0.1.0
      */
     CompletableFuture<LoginResult> loginOffline(String username, LoginMode mode);
 
@@ -118,7 +118,7 @@ public interface AltLoginService {
      *
      * @param account the account data to authenticate with
      * @return a future containing the result of the login attempt
-     * @since 0.2.0
+     * @since 0.1.0
      */
     CompletableFuture<LoginResult> loginAccount(AltAccount account);
 

@@ -22,7 +22,7 @@ public interface TextureUploader<H> {
      *
      * @param imageBytes a stream over a complete encoded image (PNG)
      * @return the host texture handle, or {@code null} if the upload failed
-     * @since 0.2.0
+     * @since 0.1.0
      */
     H upload(InputStream imageBytes);
 }

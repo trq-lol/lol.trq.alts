@@ -70,7 +70,7 @@ public record AltAccount(
      * @param accessToken the authentication token
      * @param type the authentication protocol used
      * @return a new account with {@code lastUsed} set to now
-     * @since 0.2.0
+     * @since 0.1.0
      */
     public static AltAccount of(String uuid, String username, String accessToken, AccountType type) {
         return new AltAccount(
@@ -82,7 +82,7 @@ public record AltAccount(
      * attribution.
      *
      * @return a copy stamped as used now
-     * @since 0.2.0
+     * @since 0.1.0
      */
     public AltAccount usedNow() {
         return new AltAccount(
@@ -105,7 +105,7 @@ public record AltAccount(
      *
      * @param byMember the member id (Ed25519 identity) that used the account, or {@code null}
      * @return a copy stamped as used now by {@code byMember}
-     * @since 0.2.0
+     * @since 0.1.0
      */
     public AltAccount usedNow(String byMember) {
         return new AltAccount(
@@ -281,7 +281,7 @@ public record AltAccount(
      * Returns whether this account is considered banned on any server.
      *
      * @return {@code true} if any server's ban record flags the account banned
-     * @since 0.2.0
+     * @since 0.1.0
      */
     public boolean banned() {
         return bans != null && bans.values().stream().anyMatch(b -> b != null && b.banned());

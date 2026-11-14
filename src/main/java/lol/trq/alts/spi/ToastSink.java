@@ -19,21 +19,21 @@ public interface ToastSink {
         /**
          * A flow completed successfully.
          *
-         * @since 0.2.0
+         * @since 0.1.0
          */
         SUCCESS,
 
         /**
          * A flow failed.
          *
-         * @since 0.2.0
+         * @since 0.1.0
          */
         ERROR,
 
         /**
          * Neutral progress or status information.
          *
-         * @since 0.2.0
+         * @since 0.1.0
          */
         INFO
     }
@@ -45,7 +45,7 @@ public interface ToastSink {
      * @param title the heading
      * @param description the body text
      * @param durationMs how long to show it, in milliseconds
-     * @since 0.2.0
+     * @since 0.1.0
      */
     void toast(Level level, String title, String description, int durationMs);
 }

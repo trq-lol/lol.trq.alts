@@ -127,7 +127,7 @@ public final class AsyncCache<K, V> {
      * @param key the lookup key
      * @return the value if ready (possibly stale), or {@code null} while pending, failed, or just
      *     requested
-     * @since 0.2.0
+     * @since 0.1.0
      */
     @SuppressWarnings("unchecked")
     public V get(K key) {
@@ -237,7 +237,7 @@ public final class AsyncCache<K, V> {
      * refresh, or to retry a failed key without waiting out its backoff.
      *
      * @param key the key to evict
-     * @since 0.2.0
+     * @since 0.1.0
      */
     public void invalidate(K key) {
         entries.remove(key);
@@ -246,7 +246,7 @@ public final class AsyncCache<K, V> {
     /**
      * Drops every entry.
      *
-     * @since 0.2.0
+     * @since 0.1.0
      */
     public void clear() {
         entries.clear();
