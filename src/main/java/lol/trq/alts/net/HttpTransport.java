@@ -954,6 +954,7 @@ public final class HttpTransport implements AutoCloseable {
      * @param maxBytes the largest body to read
      * @param scope what is being fetched, and on whose behalf
      * @return the status, the body and any stated wait
+     * @throws IllegalArgumentException if {@code maxBytes} is not positive, or a header is refused
      * @throws IOException if the body runs past {@code maxBytes}, or the request fails
      * @throws Exception if a network or protocol error occurs
      * @since 1.0.0
@@ -967,6 +968,9 @@ public final class HttpTransport implements AutoCloseable {
             long maxBytes,
             NetworkScope scope)
             throws Exception {
+        if (maxBytes <= 0) {
+            throw new IllegalArgumentException("a body cap is positive");
+        }
         HttpURLConnection conn = open(urlString, scope);
         conn.setRequestMethod(method);
         applyHeaders(conn, contentType, headers);
