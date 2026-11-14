@@ -164,10 +164,10 @@ public final class HostClient {
         try {
             return transport.exchange(
                     method, url, body == null ? null : "application/json", headers, body, MAX_BODY_BYTES, SCOPE);
-        } catch (IllegalArgumentException badHeader) {
-            // The transport refuses a header holding a control character without quoting it: the only header
-            // here a host chose is the bearer token it minted.
-            throw VaultFailures.protocol("the host minted a token that is not a header value");
+        } catch (IllegalArgumentException unbuildable) {
+            // A minted token is checked before it is ever sent (see token()), so what is left is a request the
+            // transport could not build from this client's own parts. The transport's text is never quoted.
+            throw VaultFailures.invalid("the request to the vault host could not be built");
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw VaultFailures.cancelled("interrupted", interrupted);
@@ -226,12 +226,29 @@ public final class HostClient {
             redeem.addProperty("signature", AvpBytes.base64(signature));
             JsonObject minted = postOpen("/api/auth/keypair/token", redeem, "the sign-in");
             String value = AvpJson.string(minted, "token");
+            if (!headerSafe(value)) {
+                throw VaultFailures.protocol("the host minted a token that is not a header value");
+            }
             long expiresAt = AvpJson.int64(minted, "expiresAt");
             tokens.put(key, origin, subject, value, expiresAt);
             return value;
         } finally {
             tokenLock.unlock();
         }
+    }
+
+    /** Whether a host-minted token can travel in a header: not empty, printable ASCII without spaces. */
+    static boolean headerSafe(String token) {
+        if (token.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < token.length(); i++) {
+            char c = token.charAt(i);
+            if (c <= 0x20 || c >= 0x7f) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

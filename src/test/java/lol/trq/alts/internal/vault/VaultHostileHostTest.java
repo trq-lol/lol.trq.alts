@@ -868,6 +868,22 @@ class VaultHostileHostTest {
     }
 
     @Test
+    void aMintedTokenThatIsNotAHeaderValueIsRefusedBeforeItIsSent() {
+        fx.host.interceptor = (req, honest) -> {
+            TestAvpHost.Response r = honest.apply(req);
+            if (req.path().equals("/api/auth/keypair/token") && r.status() == 200) {
+                JsonObject o = r.json();
+                o.addProperty("token", "abc\r\nX-Injected: 1");
+                return TestAvpHost.Response.json(200, o);
+            }
+            return r;
+        };
+        AltsException e = failure(VaultEngine.create(fx.connect(), newOwner().keys(), fx.clock));
+        assertEquals(Kind.PROTOCOL, e.kind());
+        assertEquals(0, fx.host.count("/v1/repos"), "nothing was sent with it");
+    }
+
+    @Test
     void aRefusedTokenIsReplacedOnceAndASecondRefusalIsTheFailure() {
         VaultEngine owner = fx.create(newOwner());
         AtomicInteger refusals = new AtomicInteger(1);
