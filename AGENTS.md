@@ -41,8 +41,8 @@ version for any agent working here:
   `TestTransports` and the vault's `TestAvpHost`. `check` runs the suite on the class path and again on
   the module path.
 - **Style:** palantir-java-format (4-space, 120-col), records for DTOs with `@SerializedName` on every
-  component (a value type expected to grow is a final class with factories instead), full Javadoc with one `@since` per exported declaration. Run `./gradlew spotlessApply`, then
-  `./gradlew check`.
+  component (a value type expected to grow is a final class with factories instead), full Javadoc with
+  one `@since` per exported declaration. Run `./gradlew spotlessApply`, then `./gradlew check`.
 - **Docs snippets are compiled.** Change the method in `examples/` first, then the guide that inlines it.
 - **Commits:** Conventional Commits, one logical change each, and never a `Co-Authored-By` or any other
   AI-attribution trailer. You own what you ship.
