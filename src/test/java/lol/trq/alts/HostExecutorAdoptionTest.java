@@ -132,7 +132,6 @@ class HostExecutorAdoptionTest {
     void aBulkSweepRunsItsEntriesOnTheHostExecutor() throws Exception {
         AltLoginServiceImpl logins = new AltLoginServiceImpl(store, session -> {}, null, transport);
         BulkOperationsImpl bulk = new BulkOperationsImpl(
-                store,
                 logins,
                 new AltAccountServiceImpl(store, null, transport),
                 account -> () -> {

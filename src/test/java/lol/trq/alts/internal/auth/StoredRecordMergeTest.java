@@ -77,7 +77,6 @@ class StoredRecordMergeTest {
         AltAccount snapshot = expired("stored-refresh");
         local.seed(snapshot);
         BulkOperationsImpl bulk = new BulkOperationsImpl(
-                local.store(),
                 new AltLoginServiceImpl(local.store(), session -> {}, chain.config(), http),
                 service(),
                 account -> {

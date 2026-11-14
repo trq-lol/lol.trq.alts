@@ -32,7 +32,6 @@ import lol.trq.alts.internal.net.FailureText;
 import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
-import lol.trq.alts.store.AccountStore;
 
 /**
  * Concrete {@link BulkOperations}.
@@ -53,7 +52,6 @@ public final class BulkOperationsImpl implements BulkOperations {
      */
     private static final Duration UNSTATED_RATE_LIMIT_WAIT = Duration.ofSeconds(1);
 
-    private final AccountStore store;
     private final AltLoginService importService;
     private final AltAccountService accountService;
     private final Function<AltAccount, EntitlementService> entitlementServices;
@@ -63,9 +61,8 @@ public final class BulkOperationsImpl implements BulkOperations {
      * Creates the bulk surface with a given source of per-account entitlement services: the runtime's
      * own account services, so the sweep reaches the same endpoints and transport as everything else.
      *
-     * @param store the runtime's account store, whose current account an import puts back when it ends
-     * @param importService a login service whose session injector does nothing, so importing resolves
-     *     and stores without moving the live session
+     * @param importService the runtime's import login service, which resolves and stores without
+     *     installing a session, making an account current, or stamping one as used
      * @param accountService the account service the refresh and check runs are built on
      * @param entitlementServices builds the entitlement service for one account, over its access token
      * @param transport the runtime's transport, on whose executor the reads and the waits between entries
@@ -73,12 +70,10 @@ public final class BulkOperationsImpl implements BulkOperations {
      * @since 1.0.0
      */
     public BulkOperationsImpl(
-            AccountStore store,
             AltLoginService importService,
             AltAccountService accountService,
             Function<AltAccount, EntitlementService> entitlementServices,
             HttpTransport transport) {
-        this.store = Objects.requireNonNull(store, "store");
         this.importService = Objects.requireNonNull(importService, "importService");
         this.accountService = Objects.requireNonNull(accountService, "accountService");
         this.entitlementServices = Objects.requireNonNull(entitlementServices, "entitlementServices");
@@ -90,11 +85,9 @@ public final class BulkOperationsImpl implements BulkOperations {
             List<String> entries, LoginMode mode, BulkOptions options, BulkProgress progress) {
         List<String> items = List.copyOf(entries == null ? List.of() : entries);
 
-        // Resolving an account stamps it as the store's current one, which a host may well be rendering
-        // as "the account you are on". Importing fifty must not leave the fiftieth sitting there, so the
-        // pointer is put back where the run found it.
-        Optional<AltAccount> before = store.currentAccount();
-
+        // The import service never touches the store's current account, which a host renders as "the
+        // account you are on" and which the user may change while the run goes on. There is nothing to
+        // put back when it ends, and putting something back would undo the user's own sign-in.
         // A route tag makes every sign-in of the run go through a tagged view, so each request it makes,
         // on every hop, reaches the provider with the tag.
         BulkOptions paced = options == null ? BulkOptions.defaults() : options;
@@ -106,7 +99,6 @@ public final class BulkOperationsImpl implements BulkOperations {
                 progress,
                 index -> BulkEntryResult.positionalLabel(index),
                 index -> importOne(logins, items.get(index), mode));
-        run.report.whenComplete((report, failure) -> store.useAccount(before.orElse(null)));
         return start(run);
     }
 

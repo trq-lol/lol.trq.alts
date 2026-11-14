@@ -24,7 +24,8 @@ public interface BulkOperations {
      * <p>Each line is classified by {@link CredentialKind#detect} and sent to the route that fits it. A
      * line that cannot be placed fails as that entry rather than being guessed at. With
      * {@link LoginMode#ADD} the resolved accounts are stored; the live session is not touched either
-     * way, so the host chooses afterwards what to log into.
+     * way, so the host chooses afterwards what to log into. Neither is the store's current account, and
+     * no account is stamped as used: a sign-in the user makes while the import runs stays current.
      *
      * @param entries the credential lines, one per account
      * @param mode whether to store what is resolved

@@ -59,6 +59,12 @@ public class AltLoginServiceImpl implements AltLoginService {
     private final MicrosoftAuthUtil microsoft;
     private final CookieAuthUtil cookies;
 
+    /**
+     * Whether this is the runtime's import service: it resolves and stores, but installs no session,
+     * never makes an account current, and never stamps one as used.
+     */
+    private final boolean importing;
+
     // Replaced in tests so a device-code login's polling does not wait out real intervals.
     DeviceCodeTiming deviceCodeTiming = DeviceCodeTiming.STANDARD;
 
@@ -93,6 +99,17 @@ public class AltLoginServiceImpl implements AltLoginService {
             MicrosoftAuthConfig microsoftAuth,
             HttpTransport http,
             Clock clock) {
+        this(store, sessionInjector, microsoftAuth, http, clock, false);
+    }
+
+    private AltLoginServiceImpl(
+            AccountStore store,
+            SessionInjector sessionInjector,
+            MicrosoftAuthConfig microsoftAuth,
+            HttpTransport http,
+            Clock clock,
+            boolean importing) {
+        this.importing = importing;
         this.store = Objects.requireNonNull(store, "store");
         this.sessionInjector = Objects.requireNonNull(sessionInjector, "sessionInjector");
         this.microsoftAuth = microsoftAuth;
@@ -102,6 +119,24 @@ public class AltLoginServiceImpl implements AltLoginService {
         this.profiles = new AccountNetworkUtil(http);
         this.microsoft = new MicrosoftAuthUtil(http);
         this.cookies = new CookieAuthUtil(http);
+    }
+
+    /**
+     * Creates the login service a bulk import signs in through. It resolves each credential and, in
+     * {@link LoginMode#ADD}, stores it, merged onto a record the store already holds, exactly as an
+     * ordinary sign-in does; but it installs no session, never makes an account the store's current
+     * one, and never stamps an account as used, since nobody played on it. The current account stays
+     * whatever the host's own sign-ins made it, one the user makes while the import runs included.
+     *
+     * @param store the runtime's account store
+     * @param microsoftAuth the host's Microsoft authentication configuration, or {@code null}
+     * @param http the runtime's transport
+     * @return the import service
+     * @since 1.0.0
+     */
+    public static AltLoginServiceImpl forImport(
+            AccountStore store, MicrosoftAuthConfig microsoftAuth, HttpTransport http) {
+        return new AltLoginServiceImpl(store, session -> {}, microsoftAuth, http, Clock.systemUTC(), true);
     }
 
     /**
@@ -116,7 +151,7 @@ public class AltLoginServiceImpl implements AltLoginService {
     @Override
     public AltLoginServiceImpl routed(String tag) {
         AltLoginServiceImpl view =
-                new AltLoginServiceImpl(store, sessionInjector, microsoftAuth, http.routed(tag), clock);
+                new AltLoginServiceImpl(store, sessionInjector, microsoftAuth, http.routed(tag), clock, importing);
         view.deviceCodeTiming = deviceCodeTiming;
         view.browser = browser;
         return view;
@@ -457,6 +492,10 @@ public class AltLoginServiceImpl implements AltLoginService {
      * @return the login result
      */
     private LoginResult inject(AltAccount account) {
+        if (importing) {
+            // An import resolves and stores; the live session and the current account are the host's.
+            return LoginResult.success(account);
+        }
         try {
             sessionInjector.inject(
                     new SessionData(account.username(), account.uuid(), account.accessToken(), account.type()));
@@ -497,10 +536,37 @@ public class AltLoginServiceImpl implements AltLoginService {
                 .withTokens(profile.accessToken(), profile.refreshToken(), profile.expiresAt());
 
         if (mode == LoginMode.ADD) {
-            account = account.mergedOnto(storedRecord(account.uuid()));
+            account = merged(account);
             store.addAccount(account);
         }
         return inject(account);
+    }
+
+    /**
+     * Merges a freshly authenticated account onto the record the store holds for it, if any. An import
+     * keeps the stored record's last-used time: resolving a credential again is not playing on it.
+     *
+     * @param account the freshly authenticated account
+     * @return the account to store
+     */
+    private AltAccount merged(AltAccount account) {
+        AltAccount existing = storedRecord(account.uuid());
+        AltAccount merged = account.mergedOnto(existing);
+        if (!importing || existing == null) {
+            return merged;
+        }
+        return new AltAccount(
+                merged.uuid(),
+                merged.username(),
+                merged.accessToken(),
+                merged.type(),
+                existing.lastUsed(),
+                merged.lastUsedBy(),
+                merged.bans(),
+                merged.sourceClient(),
+                merged.sourceUser(),
+                merged.refreshToken(),
+                merged.expiresAt());
     }
 
     /**
@@ -534,14 +600,16 @@ public class AltLoginServiceImpl implements AltLoginService {
             String fmtUuid = AuthFormats.dashedUuid(uuid);
             AltAccount account = AltAccount.of(fmtUuid, username, token, type);
             if (mode == LoginMode.ADD) {
-                account = account.mergedOnto(storedRecord(fmtUuid));
+                account = merged(account);
             }
 
-            sessionInjector.inject(
-                    new SessionData(account.username(), account.uuid(), account.accessToken(), account.type()));
+            if (!importing) {
+                sessionInjector.inject(
+                        new SessionData(account.username(), account.uuid(), account.accessToken(), account.type()));
+            }
 
             if (mode == LoginMode.ADD) store.addAccount(account);
-            store.useAccount(account);
+            if (!importing) store.useAccount(account);
 
             return LoginResult.success(account);
         } catch (Exception e) {

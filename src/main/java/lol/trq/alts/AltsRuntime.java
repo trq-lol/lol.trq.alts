@@ -150,11 +150,11 @@ public final class AltsRuntime<H> implements AutoCloseable {
             this.accountAccess = AccountAccess.bridge();
             this.profileLookup = accountAccess.profileLookup(transport, accountEndpoints);
 
-            // The import runs resolve and store through a login service whose injector does nothing, which
-            // is what keeps importing fifty credentials from switching session fifty times.
+            // The import runs resolve and store through a login service that installs no session and never
+            // moves the current account, which is what keeps importing fifty credentials from switching
+            // session fifty times, or undoing a sign-in the user makes while the import runs.
             this.bulk = new BulkOperationsImpl(
-                    store,
-                    new AltLoginServiceImpl(store, session -> {}, builder.microsoftAuth, transport),
+                    AltLoginServiceImpl.forImport(store, builder.microsoftAuth, transport),
                     loginService.accountService(),
                     account -> accountServices(account).entitlements(),
                     transport);

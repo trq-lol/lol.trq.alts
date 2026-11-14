@@ -581,6 +581,10 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   `ResponseCache` was offered every response, a token-bearing sign-in answer included. Caches are now
   off for every library connection. SECURITY.md states the limit that remains: a host-installed
   default `CookieHandler` still sees library requests, which `HttpURLConnection` gives no way to stop.
+- A bulk import made each resolved account the store's current one and, when the run ended, put back
+  whatever was current when it started, so a sign-in the user made while the import ran was undone.
+  It also stamped every imported account as used. An import now never touches the current account
+  and leaves a stored account's `lastUsed` as it was.
 
 ## [0.12.0] - 2026-11-12
 
