@@ -66,6 +66,7 @@ constructors are gone, and so are deconstruction patterns over them.
 | `new MicrosoftAuthConfig(...)` (thirteen or eleven arguments) | `MicrosoftAuthConfig.of(clientId)` or `legacyMsa(clientId)`, then `withScope`, `withRedirectPath`, `withEndpoints`, `withDeviceCodeEndpoints`, and the new `withRedirectUri` and `withRpsTicketPrefix` |
 | `new NetworkScope(purpose, uuid, username)`, `new NetworkScope(purpose, uuid, username, routeTag)` | `NetworkScope.of(purpose)` or `NetworkScope.forAccount(purpose, uuid, username)`, then `withRouteTag(tag)` |
 | `new BulkOptions(concurrency, minSpacing, maxRetries, retryBaseDelay, stopOnRateLimit)` | `BulkOptions.of(concurrency, minSpacing, maxRetries, retryBaseDelay, stopOnRateLimit)`, or `BulkOptions.defaults()` and the `withX` methods; a route tag with `withRouteTag(tag)` |
+| `new ClaimOptions(leadTime, window, attemptSpacing, concurrency, timeSource)` | `ClaimOptions.of(leadTime, window, attemptSpacing, concurrency, timeSource)`, or `ClaimOptions.defaults()` and `withTimeSource` |
 
 **The shared vault: 0.4 to AVP 0.5.** 1.0 writes AVP 0.5 only, which is not wire compatible with 0.4
 and specifies no upgrade. A repository moves in five steps:

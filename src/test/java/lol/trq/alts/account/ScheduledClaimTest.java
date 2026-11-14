@@ -105,7 +105,7 @@ class ScheduledClaimTest {
         status.set(200); // succeeds once it fires, so the run ends promptly
 
         ClaimOptions options =
-                new ClaimOptions(Duration.ofMillis(100), Duration.ofMillis(500), Duration.ofMillis(5), 1, null);
+                ClaimOptions.of(Duration.ofMillis(100), Duration.ofMillis(500), Duration.ofMillis(5), 1, null);
         ClaimResult result = name().claimAt("Wanted", target, options).get();
 
         assertTrue(result.claimed(), "the change succeeds once the window opens");
@@ -118,7 +118,7 @@ class ScheduledClaimTest {
         Instant target = Instant.now(); // already due: fire immediately
         status.set(200);
 
-        ClaimOptions options = new ClaimOptions(Duration.ZERO, Duration.ofSeconds(2), Duration.ofMillis(5), 3, null);
+        ClaimOptions options = ClaimOptions.of(Duration.ZERO, Duration.ofSeconds(2), Duration.ofMillis(5), 3, null);
         long start = System.currentTimeMillis();
         ClaimResult result = name().claimAt("Wanted", target, options).get();
         long elapsed = System.currentTimeMillis() - start;
@@ -135,7 +135,7 @@ class ScheduledClaimTest {
         Instant target = Instant.now();
         status.set(401); // unauthorized: terminal, can never succeed
 
-        ClaimOptions options = new ClaimOptions(Duration.ZERO, Duration.ofSeconds(5), Duration.ofMillis(2), 1, null);
+        ClaimOptions options = ClaimOptions.of(Duration.ZERO, Duration.ofSeconds(5), Duration.ofMillis(2), 1, null);
         long start = System.currentTimeMillis();
         ClaimResult result = name().claimAt("Wanted", target, options).get();
         long elapsed = System.currentTimeMillis() - start;
@@ -156,7 +156,7 @@ class ScheduledClaimTest {
         Instant target = Instant.now();
         status.set(429);
 
-        ClaimOptions options = new ClaimOptions(Duration.ZERO, Duration.ofSeconds(5), Duration.ofMillis(2), 3, null);
+        ClaimOptions options = ClaimOptions.of(Duration.ZERO, Duration.ofSeconds(5), Duration.ofMillis(2), 3, null);
         long start = System.currentTimeMillis();
         ClaimResult result = name().claimAt("Wanted", target, options).get();
         long elapsed = System.currentTimeMillis() - start;
@@ -180,7 +180,7 @@ class ScheduledClaimTest {
         Instant target = Instant.now();
         status.set(403); // unavailable: worth retrying until the window closes
 
-        ClaimOptions options = new ClaimOptions(Duration.ZERO, Duration.ofMillis(150), Duration.ofMillis(10), 1, null);
+        ClaimOptions options = ClaimOptions.of(Duration.ZERO, Duration.ofMillis(150), Duration.ofMillis(10), 1, null);
         ClaimResult result = name().claimAt("Wanted", target, options).get();
 
         assertFalse(result.claimed());
@@ -196,7 +196,7 @@ class ScheduledClaimTest {
         ClaimResult result = name().claimAt(
                         "Wanted",
                         Instant.now(),
-                        new ClaimOptions(Duration.ZERO, Duration.ofSeconds(2), Duration.ofMillis(5), 1, null))
+                        ClaimOptions.of(Duration.ZERO, Duration.ofSeconds(2), Duration.ofMillis(5), 1, null))
                 .get();
 
         assertTrue(result.claimed());
@@ -208,7 +208,7 @@ class ScheduledClaimTest {
         status.set(200);
         Instant target = Instant.now().plusMillis(300);
 
-        ClaimOptions options = new ClaimOptions(Duration.ZERO, Duration.ofSeconds(2), Duration.ofMillis(5), 3, null);
+        ClaimOptions options = ClaimOptions.of(Duration.ZERO, Duration.ofSeconds(2), Duration.ofMillis(5), 3, null);
         CompletableFuture<ClaimResult> claim = name().claimAt("Wanted", target, options);
         Thread.sleep(50);
         assertTrue(claim.cancel(true));
@@ -222,7 +222,7 @@ class ScheduledClaimTest {
     void cancellingMidBurstStopsTheWorkers() throws Exception {
         status.set(403); // keeps every worker retrying until told to stop
 
-        ClaimOptions options = new ClaimOptions(Duration.ZERO, Duration.ofSeconds(10), Duration.ofMillis(5), 3, null);
+        ClaimOptions options = ClaimOptions.of(Duration.ZERO, Duration.ofSeconds(10), Duration.ofMillis(5), 3, null);
         CompletableFuture<ClaimResult> claim = name().claimAt("Wanted", Instant.now(), options);
         for (int i = 0; i < 200 && changeCalls.get() < 3; i++) {
             Thread.sleep(5);
