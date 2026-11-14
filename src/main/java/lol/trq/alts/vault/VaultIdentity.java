@@ -258,7 +258,7 @@ public final class VaultIdentity {
     /**
      * Signs a challenge nonce from a 0.4 vault server with the Ed25519 identity key, as 0.4 authentication
      * asks: over the raw nonce bytes. It exists so a host can still authenticate to its 0.4 server to
-     * export a repository.
+     * fetch a repository's manifest and envelope for {@link LegacyVaultReader}.
      *
      * <p>The same key is a 0.5 member key, and a 0.5 member signs only the canonical-encoding structures
      * of AVP SPEC 4.1, never raw bytes a server chose. So that a server cannot pass one of those off as a
