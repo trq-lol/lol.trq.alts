@@ -825,6 +825,48 @@ class VaultHostileHostTest {
     }
 
     @Test
+    void aLostCreationIsNotTakenForAnotherRepositorysGenesis() {
+        VaultEngine foreign = fx.create(newOwner());
+        SignedManifest foreignGenesis = fx.host.tip(foreign.repoId());
+        fx.host.interceptor = (req, honest) -> {
+            if (req.path().equals("/v1/repos")) {
+                return TestAvpHost.Response.error(502, "bad_gateway", "lost before the host stored it");
+            }
+            if (req.path().endsWith("/pull")) {
+                JsonObject a = new JsonObject();
+                JsonArray ms = new JsonArray();
+                ms.add(Manifest.toJson(foreignGenesis));
+                a.add("manifests", ms);
+                a.add("heads", new JsonArray());
+                a.add("leaves", new JsonArray());
+                return TestAvpHost.Response.json(200, a);
+            }
+            return honest.apply(req);
+        };
+        assertEquals(
+                Kind.NETWORK,
+                failure(VaultEngine.create(fx.connect(), newOwner().keys(), fx.clock))
+                        .kind());
+    }
+
+    @Test
+    void aHostThatLiesOnTheCheckAfterALostCreationFailsItWithProtocol() {
+        fx.host.interceptor = (req, honest) -> {
+            if (req.path().equals("/v1/repos")) {
+                return TestAvpHost.Response.error(502, "bad_gateway", "lost");
+            }
+            if (req.path().endsWith("/pull")) {
+                return new TestAvpHost.Response(200, "{\"manifests\":".getBytes(), Map.of());
+            }
+            return honest.apply(req);
+        };
+        assertEquals(
+                Kind.PROTOCOL,
+                failure(VaultEngine.create(fx.connect(), newOwner().keys(), fx.clock))
+                        .kind());
+    }
+
+    @Test
     void missingParentsAreRetriedWhileTheHostFetchesThem() {
         VaultEngine owner = fx.create(newOwner());
         AtomicInteger pushes = new AtomicInteger();

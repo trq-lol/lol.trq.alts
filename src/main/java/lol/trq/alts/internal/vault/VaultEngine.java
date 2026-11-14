@@ -269,12 +269,20 @@ public final class VaultEngine {
         }
     }
 
-    /** Whether the host serves {@code genesisHash} as the repository's first state; false when it cannot say. */
+    /**
+     * Whether the host serves {@code genesisHash} as the repository's first state, after a creation whose
+     * answer was lost. A host that answers that pull with something that is not the protocol fails the
+     * creation with {@code PROTOCOL}, as {@link #landed} does for a publication; one that cannot be asked
+     * leaves the original failure standing.
+     */
     private static boolean servesGenesis(HostClient host, MemberKeys me, String repoId, byte[] genesisHash) {
         try {
             List<SignedManifest> served = host.pull(me, repoId, 0).manifests();
             return !served.isEmpty() && AvpBytes.same(Manifest.hash(served.get(0)), genesisHash);
         } catch (AltsException unknown) {
+            if (unknown.kind() == Kind.PROTOCOL) {
+                throw unknown;
+            }
             return false;
         }
     }
