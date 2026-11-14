@@ -559,6 +559,17 @@ class SharedVaultAvp05Test {
     }
 
     @Test
+    void closingTheRuntimeDropsTheVaultsHostTokens() throws Exception {
+        try (VaultWorld w = new VaultWorld(dir)) {
+            pair(w);
+            VaultHosts hosts = w.alts.vault();
+            assertFalse(hosts.toString().contains("[0 tokens]"), "the pair signed in: " + hosts);
+            w.alts.close();
+            assertTrue(hosts.toString().contains("[0 tokens]"), "close() drops every bearer token: " + hosts);
+        }
+    }
+
+    @Test
     void aLocatorIsReachedOverHttpsByDefault(@TempDir Path other) throws Exception {
         assertEquals(java.net.URI.create("https://vault.example:8443"), VaultHosts.https("vault.example:8443"));
         try (TestAvpHost plain = new TestAvpHost();
