@@ -150,6 +150,16 @@ browser login to fix an outage or retries into a ban. `AccountStatus.State` maps
 in `internal.auth.AltAccountServiceImpl.stateFor`, so a new kind has to be placed there. `ErrorKindMigrationTableTest` pins every 0.12 constant's kind against
 the CHANGELOG table, row for row.
 
+**Absence is an `Optional`; the nulls that remain are listed.** A public method that may find nothing
+returns `Optional` and never `null`: `HostSecrets.find`, `AccountStore.currentAccount()`, `loadError()`,
+`failure()`, `retryAfter()`, `xstsError()`. New API follows that. The `null`-returners kept as they are
+fall in four groups, and none grows: `HostSecrets.get` (prefer `find`); the cache reads polled every
+frame, `AsyncCache.get` and `SkinAvatarCache.get`, where `null` means "not ready yet"; accessors of an
+optional field on a wire record (`PlayerProfile.activeSkin()`, `NameEligibility.ageAt(now)`, a
+mutation that returns no profile); and the `spi` seams a host implements (`AvatarSource`,
+`GameStatsSource`, `TextureUploader`), whose `null` means "nothing", so a host need not build an
+`Optional` on its hot path.
+
 **A refresh token is a durable credential, not another access token.** It renews a session for as long as
 it is valid, so it is redacted from every `toString`, never persisted for an account the store does not
 already hold, discarded only on a *stated* `invalid_grant` (never on a 429, a 408, or a 5xx), and

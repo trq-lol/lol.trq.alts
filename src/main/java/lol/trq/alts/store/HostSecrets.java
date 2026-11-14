@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import lol.trq.alts.AltsFailure;
@@ -121,7 +122,8 @@ public final class HostSecrets {
     }
 
     /**
-     * Returns the stored secret for {@code key}, or {@code null} if absent.
+     * Returns the stored secret for {@code key}, or {@code null} if absent. Prefer {@link #find(String)},
+     * which says the same without a null.
      *
      * @param key the secret key
      * @return the stored value, or null if absent
@@ -129,6 +131,18 @@ public final class HostSecrets {
      */
     public String get(String key) {
         return secrets.get(key);
+    }
+
+    /**
+     * Returns the stored secret for {@code key}, if there is one.
+     *
+     * @param key the secret key
+     * @return the stored value, or empty if absent
+     * @throws NullPointerException if {@code key} is null
+     * @since 1.0.0
+     */
+    public Optional<String> find(String key) {
+        return Optional.ofNullable(secrets.get(Objects.requireNonNull(key, "key")));
     }
 
     /**

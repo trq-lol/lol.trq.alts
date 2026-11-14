@@ -56,6 +56,17 @@ class HostSecretsPersistenceTest {
     }
 
     @Test
+    void findSaysWhetherASecretIsThereWithoutANull() {
+        secrets.put("feature.api-key", "value");
+
+        assertEquals(java.util.Optional.of("value"), secrets.find("feature.api-key"));
+        assertEquals(java.util.Optional.empty(), secrets.find("feature.other"));
+
+        secrets.clear("feature.api-key");
+        assertEquals(java.util.Optional.empty(), secrets.find("feature.api-key"), "a cleared secret is gone");
+    }
+
+    @Test
     void concurrentPutsAllReachTheFile() throws Exception {
         List<Thread> threads = new ArrayList<>();
         for (int t = 0; t < 4; t++) {

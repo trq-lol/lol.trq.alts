@@ -2,7 +2,6 @@
 # package the module exports. Generated from the built jar by ./gradlew apiDump and checked by
 # ./gradlew apiCheck (part of check); do not edit by hand. Packages under internal are not listed.
 # version 1.0.0
-# breaking: 1.0.0 unreleased: B2 PlayerCertificate key decoding throws AltsException
 lol.trq.alts.AltsException ctor public lol.trq.alts.AltsException(lol.trq.alts.AltsFailure$Kind,java.lang.String)
 lol.trq.alts.AltsException ctor public lol.trq.alts.AltsException(lol.trq.alts.AltsFailure)
 lol.trq.alts.AltsException ctor public lol.trq.alts.AltsException(lol.trq.alts.AltsFailure,java.lang.Throwable)
@@ -849,6 +848,7 @@ lol.trq.alts.store.AccountStore type public final class AccountStore
 lol.trq.alts.store.HostSecrets method public boolean lol.trq.alts.store.HostSecrets.discardUnreadable()
 lol.trq.alts.store.HostSecrets method public boolean lol.trq.alts.store.HostSecrets.has(java.lang.String)
 lol.trq.alts.store.HostSecrets method public java.lang.String lol.trq.alts.store.HostSecrets.get(java.lang.String)
+lol.trq.alts.store.HostSecrets method public java.util.Optional<java.lang.String> lol.trq.alts.store.HostSecrets.find(java.lang.String)
 lol.trq.alts.store.HostSecrets method public java.util.Optional<lol.trq.alts.AltsFailure> lol.trq.alts.store.HostSecrets.loadError()
 lol.trq.alts.store.HostSecrets method public java.util.Optional<lol.trq.alts.AltsFailure> lol.trq.alts.store.HostSecrets.saveError()
 lol.trq.alts.store.HostSecrets method public void lol.trq.alts.store.HostSecrets.clear(java.lang.String)

@@ -277,6 +277,8 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   `ACCOUNT_RESTRICTED` (2148916229) and `TERMS_NOT_ACCEPTED` (2148916234). Each still arrives as
   `XBOX_DENIED`; before, they were `XstsError.UNKNOWN`. A host switching over `XstsError` without a
   `default` places them.
+- **`HostSecrets.find(key)`** returns the secret as an `Optional<String>`, empty when there is none.
+  `get(key)` still returns it or `null`.
 
 ### Changed
 
