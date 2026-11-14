@@ -67,6 +67,7 @@ constructors are gone, and so are deconstruction patterns over them.
 | `new NetworkScope(purpose, uuid, username)`, `new NetworkScope(purpose, uuid, username, routeTag)` | `NetworkScope.of(purpose)` or `NetworkScope.forAccount(purpose, uuid, username)`, then `withRouteTag(tag)` |
 | `new BulkOptions(concurrency, minSpacing, maxRetries, retryBaseDelay, stopOnRateLimit)` | `BulkOptions.of(concurrency, minSpacing, maxRetries, retryBaseDelay, stopOnRateLimit)`, or `BulkOptions.defaults()` and the `withX` methods; a route tag with `withRouteTag(tag)` |
 | `new ClaimOptions(leadTime, window, attemptSpacing, concurrency, timeSource)` | `ClaimOptions.of(leadTime, window, attemptSpacing, concurrency, timeSource)`, or `ClaimOptions.defaults()` and `withTimeSource` |
+| `new BulkEntryResult(...)` | `BulkEntryResult.success(index, account, message, attempts)`, `success(index, account, entitlements, message, attempts)` or `failure(index, label, failure, attempts)` |
 
 **The shared vault: 0.4 to AVP 0.5.** 1.0 writes AVP 0.5 only, which is not wire compatible with 0.4
 and specifies no upgrade. A repository moves in five steps:
@@ -400,8 +401,8 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   `auth.LoginResult(account, failure)` (`success()` and `message()` remain as methods); `AccountStatus`
   is `(account, state, failure)` and keeps its `State`, whose exhaustive mapping from the kind is
   unchanged (`RATE_LIMITED` and `NETWORK` are `UNREACHABLE`, `XBOX_DENIED` is `NOT_ENTITLED`);
-  `BulkEntryResult` is `(index, label, account, failure, message, attempts, entitlements)` with
-  `success()` a method. `NameChangeResult` and `ProfileCreationResult` keep the outcomes a host shows
+  `BulkEntryResult` carries `failure()` in place of the success flag and reason, with `success()` a
+  method. `NameChangeResult` and `ProfileCreationResult` keep the outcomes a host shows
   (a name changed, invalid, unavailable, taken, blocked) and fold every failure into `FAILED`, which
   carries the failure and its wait; an unreachable service is a `FAILED` result, no longer an
   exception. `ClaimResult` gains `failure()`, present exactly on `TERMINAL_FAILURE`, which now also

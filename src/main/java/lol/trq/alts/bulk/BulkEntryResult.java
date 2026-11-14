@@ -13,51 +13,47 @@ import lol.trq.alts.model.AltAccount;
  * It is deliberately never the input line: for an import that line is a credential, and results are
  * exactly what a host renders into a list and writes to a log.
  *
- * @param index the entry's position in the list it was given, counting from 0
- * @param label a name safe to display and log
- * @param account the resolved or refreshed account, or {@code null} when the entry failed
- * @param failure why the entry failed, or empty when it succeeded; carried since 1.0.0 in place of the
- *     former success flag and reason
- * @param message a short human-readable description; on a failure, the failure's message
- * @param attempts how many times this entry was tried, counting the first
- * @param entitlements what the account owns, on a successful entry of an entitlement sweep; {@code null}
- *     for every other kind of run and for a failed entry; added in 0.12.0
+ * <p>A result is exactly one of a success with an account or a failure without one. A final class rather
+ * than a record since 1.0.0, so a later field is an addition and not a break: the library builds results
+ * with {@link #success} and {@link #failure}, and a host's test can too. Two results are equal when every
+ * field is.
+ *
  * @author trq
  * @since 0.9.0
  */
-public record BulkEntryResult(
-        int index,
-        String label,
-        AltAccount account,
-        Optional<AltsFailure> failure,
-        String message,
-        int attempts,
-        Entitlements entitlements) {
+public final class BulkEntryResult {
+
+    private final int index;
+    private final String label;
+    private final AltAccount account;
+    private final Optional<AltsFailure> failure;
+    private final String message;
+    private final int attempts;
+    private final Entitlements entitlements;
 
     /**
      * Checks that a result is exactly one of a success with an account or a failure without one.
      *
-     * @throws NullPointerException if {@code failure} is null, or a success carries no account
-     * @throws IllegalArgumentException if a failure carries an account or entitlements
-     * @since 1.0.0
+     * @throws NullPointerException if a success carries no account
      */
-    public BulkEntryResult {
-        Objects.requireNonNull(failure, "failure");
+    private BulkEntryResult(
+            int index,
+            String label,
+            AltAccount account,
+            Optional<AltsFailure> failure,
+            String message,
+            int attempts,
+            Entitlements entitlements) {
         if (failure.isEmpty()) {
             Objects.requireNonNull(account, "a successful entry carries its account");
-        } else if (account != null || entitlements != null) {
-            throw new IllegalArgumentException("a failed entry carries no account and no entitlements");
         }
-    }
-
-    /**
-     * Returns whether the entry succeeded.
-     *
-     * @return true when there is no failure
-     * @since 0.9.0
-     */
-    public boolean success() {
-        return failure.isEmpty();
+        this.index = index;
+        this.label = label;
+        this.account = account;
+        this.failure = failure;
+        this.message = message;
+        this.attempts = attempts;
+        this.entitlements = entitlements;
     }
 
     /**
@@ -68,6 +64,7 @@ public record BulkEntryResult(
      * @param message a short description
      * @param attempts how many times it was tried
      * @return a successful result labelled with the account's username
+     * @throws NullPointerException if {@code account} is null
      * @since 0.9.0
      */
     public static BulkEntryResult success(int index, AltAccount account, String message, int attempts) {
@@ -83,6 +80,7 @@ public record BulkEntryResult(
      * @param message a short description
      * @param attempts how many times it was tried
      * @return a successful result carrying the entitlements
+     * @throws NullPointerException if {@code account} is null
      * @since 0.12.0
      */
     public static BulkEntryResult success(
@@ -99,6 +97,7 @@ public record BulkEntryResult(
      * @param failure why the entry failed
      * @param attempts how many times it was tried
      * @return a failed result
+     * @throws NullPointerException if {@code failure} is null
      * @since 1.0.0
      */
     public static BulkEntryResult failure(int index, String label, AltsFailure failure, int attempts) {
@@ -114,5 +113,129 @@ public record BulkEntryResult(
      */
     public static String positionalLabel(int index) {
         return "entry " + (index + 1);
+    }
+
+    /**
+     * Returns the entry's position in the list it was given, counting from 0.
+     *
+     * @return the index
+     * @since 0.9.0
+     */
+    public int index() {
+        return index;
+    }
+
+    /**
+     * Returns a name safe to display and log: the resolved username, or a positional label.
+     *
+     * @return the label
+     * @since 0.9.0
+     */
+    public String label() {
+        return label;
+    }
+
+    /**
+     * Returns the resolved or refreshed account.
+     *
+     * @return the account, or {@code null} when the entry failed
+     * @since 0.9.0
+     */
+    public AltAccount account() {
+        return account;
+    }
+
+    /**
+     * Returns why the entry failed; carried since 1.0.0 in place of the former success flag and reason.
+     *
+     * @return the failure, or empty when the entry succeeded
+     * @since 1.0.0
+     */
+    public Optional<AltsFailure> failure() {
+        return failure;
+    }
+
+    /**
+     * Returns a short human-readable description; on a failure, the failure's message.
+     *
+     * @return the message
+     * @since 0.9.0
+     */
+    public String message() {
+        return message;
+    }
+
+    /**
+     * Returns how many times this entry was tried, counting the first.
+     *
+     * @return the attempt count
+     * @since 0.9.0
+     */
+    public int attempts() {
+        return attempts;
+    }
+
+    /**
+     * Returns what the account owns, on a successful entry of an entitlement sweep.
+     *
+     * @return the entitlements, or {@code null} for every other kind of run and for a failed entry
+     * @since 0.12.0
+     */
+    public Entitlements entitlements() {
+        return entitlements;
+    }
+
+    /**
+     * Returns whether the entry succeeded.
+     *
+     * @return true when there is no failure
+     * @since 0.9.0
+     */
+    public boolean success() {
+        return failure.isEmpty();
+    }
+
+    /**
+     * Returns whether {@code o} is a result with every field equal to this one's.
+     *
+     * @param o the object to compare
+     * @return true when every field is equal
+     * @since 0.9.0
+     */
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof BulkEntryResult other
+                && index == other.index
+                && attempts == other.attempts
+                && Objects.equals(label, other.label)
+                && Objects.equals(account, other.account)
+                && failure.equals(other.failure)
+                && Objects.equals(message, other.message)
+                && Objects.equals(entitlements, other.entitlements);
+    }
+
+    /**
+     * Returns a hash over every field, consistent with {@link #equals(Object)}.
+     *
+     * @return the hash
+     * @since 0.9.0
+     */
+    @Override
+    public int hashCode() {
+        return Objects.hash(index, label, account, failure, message, attempts, entitlements);
+    }
+
+    /**
+     * Returns every field, in the form the record printed them; the account describes itself with its
+     * credentials redacted.
+     *
+     * @return a description
+     * @since 0.9.0
+     */
+    @Override
+    public String toString() {
+        return "BulkEntryResult[index=" + index + ", label=" + label + ", account=" + account + ", failure="
+                + failure + ", message=" + message + ", attempts=" + attempts + ", entitlements=" + entitlements
+                + "]";
     }
 }
