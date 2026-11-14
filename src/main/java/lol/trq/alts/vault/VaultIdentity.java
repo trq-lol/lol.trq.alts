@@ -265,16 +265,6 @@ public final class VaultIdentity {
     }
 
     /**
-     * Returns the X25519 private key, used to unwrap repository data keys wrapped to this member. Not
-     * public: the vault reaches the private keys inside the library and never hands them to a host.
-     *
-     * @return the key-agreement private key
-     */
-    PrivateKey keyAgreementPrivateKey() {
-        return xPrivate;
-    }
-
-    /**
      * Signs a challenge nonce from a 0.4 vault server with the Ed25519 identity key, as 0.4 authentication
      * asks: over the raw nonce bytes. It exists so a host can still authenticate to its 0.4 server to
      * fetch a repository's manifest and envelope for {@link LegacyVaultReader}.

@@ -42,7 +42,7 @@ class VaultIdentityTest {
         byte[] dataKey = AvpCrypto.randomBytes(32);
         WrappedKey blob = AvpCrypto.wrap(
                 X25519.encodePublicKey(created.keyAgreementPublicKey()), dataKey, AvpCrypto.WrapLabel.DATA_KEY);
-        byte[] scalar = X25519.encodePrivateKey(unlocked.keyAgreementPrivateKey());
+        byte[] scalar = unlocked.keyAgreementScalar();
         assertArrayEquals(dataKey, AvpCrypto.unwrap(scalar, blob, AvpCrypto.WrapLabel.DATA_KEY));
     }
 

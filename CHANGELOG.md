@@ -319,7 +319,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   | `auth.AltLoginServiceImpl`, `auth.AltAccountServiceImpl` | `internal.auth` | `alts.loginService()`, `alts.accountService()` |
   | `bulk.BulkOperationsImpl` | `internal.bulk` | `alts.bulk()` |
   | `store.EncryptionUtil` | `internal.store` | no public replacement: the stores encrypt their files; key them with a `StoreKeyProvider` |
-  | `VaultIdentity.keyAgreementPrivateKey()` | package-private | no public replacement: the vault unwraps inside the library |
+  | `VaultIdentity.keyAgreementPrivateKey()` | removed | no public replacement: the vault unwraps inside the library |
 
 - **Breaking:** `format.AltManagerFormatting` and the `format` package. Nothing in the library used it,
   and its English labels are presentation a host should localize. To keep them, copy:
