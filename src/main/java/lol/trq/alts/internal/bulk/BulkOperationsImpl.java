@@ -1,4 +1,4 @@
-package lol.trq.alts.bulk;
+package lol.trq.alts.internal.bulk;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -26,6 +26,13 @@ import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
 import lol.trq.alts.store.AccountStore;
+import lol.trq.alts.bulk.BulkEntryResult;
+import lol.trq.alts.bulk.BulkHandle;
+import lol.trq.alts.bulk.BulkOperations;
+import lol.trq.alts.bulk.BulkOptions;
+import lol.trq.alts.bulk.BulkProgress;
+import lol.trq.alts.bulk.BulkReport;
+import lol.trq.alts.bulk.CredentialKind;
 
 /**
  * Concrete {@link BulkOperations}.

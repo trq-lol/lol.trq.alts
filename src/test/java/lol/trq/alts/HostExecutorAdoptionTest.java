@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import lol.trq.alts.account.Entitlements;
 import lol.trq.alts.auth.LoginResult;
-import lol.trq.alts.bulk.BulkOperationsImpl;
+import lol.trq.alts.internal.bulk.BulkOperationsImpl;
 import lol.trq.alts.bulk.BulkOptions;
 import lol.trq.alts.bulk.BulkProgress;
 import lol.trq.alts.bulk.BulkReport;

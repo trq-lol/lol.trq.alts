@@ -28,6 +28,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import lol.trq.alts.internal.bulk.BulkOperationsImpl;
 
 /**
  * The pacing and stopping rules, exercised against a stub account service so no network is involved.
