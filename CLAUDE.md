@@ -248,12 +248,14 @@ once. After `close()` a mutator changes memory only and records "the store is cl
 
 **The vault verifies everything, trusts no host.** It speaks AVP 0.5: an owner-signed manifest chain
 (members, wrapped keys, epoch, policy, hosts), member-signed commits, strict Ed25519, the pin and the
-tie rule, wraps only to invite-token keys. A forged state, a forged commit or a rollback fails the whole
-operation with `PROTOCOL` and leaves the copy as it was (a deliberate departure from the reference
-client, which keeps the valid prefix). `VaultHosts.connect` passes the expected host key wherever one is
-known; `connectFirstContact` is for a first contact only. The library never sends a host the owner
-phrase, its entropy or seed, a private key, a data key or a plaintext. `VaultSnapshot` and the
-`OwnerIdentity` entropy are secrets the host persists encrypted, recommended in `HostSecrets`.
+tie rule, wraps only to invite-token keys. A forged state or a rollback fails the whole operation with
+`PROTOCOL`, and the pull that met it adopts nothing of what the host served (a deliberate departure
+from the reference client, which keeps the valid prefix). A forged commit is not a failure: it is
+neither merged nor a parent, and it is counted in the report (`SyncReport.discardedCommits()`).
+`VaultHosts.connect` passes the expected host key wherever one is known; `connectFirstContact` is for a
+first contact only. The library never sends a host the owner phrase, its entropy or seed, a private
+key, a data key or a plaintext. `VaultSnapshot` and the `OwnerIdentity` entropy are secrets the host
+persists encrypted, recommended in `HostSecrets`.
 `LegacyVaultReader` reads a 0.4 repository once and writes nothing. [SECURITY.md](SECURITY.md) says
 exactly what the protocol does and does not resist.
 

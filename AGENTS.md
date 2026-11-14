@@ -32,9 +32,10 @@ version for any agent working here:
   `discardUnreadable()`, and each store file is locked to one runtime.
 - **One way out, one executor, per runtime.** Requests go through the runtime's `HttpTransport`;
   blocking work runs on its executor, never the common pool. Proxy resolution fails closed.
-- **The vault trusts no host.** AVP 0.5: verify every state and commit, wrap only to invite-token keys,
-  fail the whole operation with `PROTOCOL` on a forgery or rollback. Constructions are gated by the
-  vendored vectors; do not change one casually.
+- **The vault trusts no host.** AVP 0.5: verify every state and commit, wrap only to invite-token keys.
+  A forged state or a rollback fails the whole operation with `PROTOCOL`; a forged commit is discarded
+  (neither merged nor a parent) and counted in the report. Constructions are gated by the vendored
+  vectors; do not change one casually.
 - **Test seams** are package-private and need no system property. A test builds and closes its own
   runtime, store or transport; from other packages use `StoreTestHooks`, `StoreFileSeams`,
   `TestTransports` and the vault's `TestAvpHost`. `check` runs the suite on the class path and again on
