@@ -251,6 +251,10 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
     `PROTOCOL` and changes nothing (the reference client keeps the valid prefix instead). Every vault
     future fails only with an `AltsException`. No request carries the phrase, its entropy or seed, a
     private key, a data key or a plaintext account field.
+  - A member that signs a stamp at the largest value there is (`at` and `n` both `Long.MAX_VALUE`)
+    leaves no greater stamp to write: every account write of a member that merged it fails with
+    `PROTOCOL`, and the message says that the protocol cannot undo it and that the only way out is a
+    new repository (SECURITY.md).
 - `VaultIdentity.fingerprint()`, the member fingerprint an owner compares with an invite token's.
 - `vault.LegacyVaultReader`, the one way to read a repository of the 0.4 vault, which 1.0 no longer
   speaks: `read(manifestJson, envelopeJson, identity)` takes the manifest and envelope as the 0.4 host

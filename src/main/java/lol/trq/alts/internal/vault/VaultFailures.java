@@ -50,10 +50,15 @@ public final class VaultFailures {
             "quota_exceeded",
             "too_large");
 
-    /** The message of a refused write because the clock cannot advance (an impossible member timestamp). */
+    /**
+     * The message of a refused write because the clock cannot advance: a member signed the largest stamp
+     * there is. Merge keeps it and every clock that observed it stays there, so no removal, rotation or
+     * edit undoes it within the protocol (SECURITY.md).
+     */
     static final String IMPOSSIBLE_TIMESTAMP = PREFIX
             + "the vault holds an impossible timestamp from a member, so no later write can be stamped; a member"
-            + " wrote the largest stamp there is, and writes stay refused until the owner removes the entry";
+            + " wrote the largest stamp there is, which the protocol cannot undo, and the only way out is a new"
+            + " repository";
 
     private VaultFailures() {}
 
