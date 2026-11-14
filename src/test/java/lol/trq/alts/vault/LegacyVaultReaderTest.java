@@ -338,11 +338,7 @@ class LegacyVaultReaderTest {
     }
 
     private static String identityId(VaultIdentity id) {
-        try {
-            return id.identityId();
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
+        return id.identityId();
     }
 
     /** Changes the first base64 character, so the bytes differ and the string stays base64. */

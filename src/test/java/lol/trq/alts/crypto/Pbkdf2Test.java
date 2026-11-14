@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure;
 import org.junit.jupiter.api.Test;
 
 /** PBKDF2 derivation: accepted range, argument failures as checked exceptions, and determinism. */
@@ -40,14 +42,26 @@ class Pbkdf2Test {
         for (int iterations : new int[] {
             Integer.MIN_VALUE, -1, 0, 1, Pbkdf2.MIN_ITERATIONS - 1, Pbkdf2.MAX_ITERATIONS + 1, Integer.MAX_VALUE
         }) {
-            assertThrows(CryptoException.class, () -> Pbkdf2.deriveKey(passphrase, SALT, iterations));
+            assertEquals(
+                    AltsFailure.Kind.INVALID_INPUT,
+                    assertThrows(AltsException.class, () -> Pbkdf2.deriveKey(passphrase, SALT, iterations))
+                            .kind());
         }
     }
 
     @Test
     void rejectsAMissingSaltOrPassphrase() {
-        assertThrows(CryptoException.class, () -> Pbkdf2.deriveKey("pw".toCharArray(), new byte[0], 600_000));
-        assertThrows(CryptoException.class, () -> Pbkdf2.deriveKey("pw".toCharArray(), null, 600_000));
-        assertThrows(CryptoException.class, () -> Pbkdf2.deriveKey(null, SALT, 600_000));
+        assertEquals(
+                AltsFailure.Kind.INVALID_INPUT,
+                assertThrows(AltsException.class, () -> Pbkdf2.deriveKey("pw".toCharArray(), new byte[0], 600_000))
+                        .kind());
+        assertEquals(
+                AltsFailure.Kind.INVALID_INPUT,
+                assertThrows(AltsException.class, () -> Pbkdf2.deriveKey("pw".toCharArray(), null, 600_000))
+                        .kind());
+        assertEquals(
+                AltsFailure.Kind.INVALID_INPUT,
+                assertThrows(AltsException.class, () -> Pbkdf2.deriveKey(null, SALT, 600_000))
+                        .kind());
     }
 }

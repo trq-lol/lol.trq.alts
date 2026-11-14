@@ -9,7 +9,6 @@ import java.util.Base64;
 import javax.crypto.SecretKey;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure;
-import lol.trq.alts.crypto.CryptoException;
 import lol.trq.alts.crypto.Ed25519;
 import lol.trq.alts.crypto.PayloadCipher;
 import lol.trq.alts.crypto.Pbkdf2;
@@ -18,9 +17,11 @@ import lol.trq.alts.internal.avp.Tokens;
 import lol.trq.alts.internal.vault.MemberKeys;
 
 /**
- * A member's cryptographic identity: an Ed25519 key pair (the stable public identity used to
- * authenticate to the server and to sign key bindings) plus an X25519 key pair (used only to wrap and
- * unwrap repository data keys). Both private keys are held in memory only while unlocked.
+ * A member's cryptographic identity: an Ed25519 key pair (the member key, which signs the member's AVP 0.5
+ * commits and leave requests and authenticates it to hosts) plus an X25519 key pair (used only to unwrap
+ * repository data keys wrapped to this member). Both private keys are held in memory only while unlocked.
+ * Every failure is an {@link AltsException}: {@code INVALID_INPUT} for a stored record that is malformed,
+ * {@code CRYPTO} for a wrong passphrase or recovery code, a tampered record, or a key operation that fails.
  *
  * <p>The two private keys are concatenated into 64 bytes of "private material" and sealed under a
  * passphrase-derived master key for storage as a {@link WrappedIdentity}. There is no account: the
@@ -75,9 +76,10 @@ public final class VaultIdentity {
      *
      * @param passphrase the passphrase protecting the private material
      * @return the unlocked identity
-     * @throws CryptoException if key generation or sealing fails
+     * @throws AltsException of kind {@link AltsFailure.Kind#INVALID_INPUT} if {@code passphrase} is null, and of
+     *     kind {@link AltsFailure.Kind#CRYPTO} if key generation or sealing fails
      */
-    public static VaultIdentity create(char[] passphrase) throws CryptoException {
+    public static VaultIdentity create(char[] passphrase) {
         var ed = Ed25519.newKeyPair();
         var x = X25519.newKeyPair();
         byte[] salt = Pbkdf2.newSalt();
@@ -112,10 +114,12 @@ public final class VaultIdentity {
      * @param stored the stored identity
      * @param passphrase the passphrase used at creation
      * @return the unlocked identity
-     * @throws CryptoException if the passphrase is wrong, the record is malformed or out of range, or its
-     *     public keys do not match the private material
+     * @throws AltsException of kind {@link AltsFailure.Kind#CRYPTO} if the passphrase is wrong, the sealing was
+     *     tampered with, or the record's public keys do not match the private material, and of kind {@link
+     *     AltsFailure.Kind#INVALID_INPUT} if the record is malformed or its iteration count out of range, or
+     *     {@code passphrase} is null
      */
-    public static VaultIdentity unlock(WrappedIdentity stored, char[] passphrase) throws CryptoException {
+    public static VaultIdentity unlock(WrappedIdentity stored, char[] passphrase) {
         SecretKey mk = Pbkdf2.deriveKey(passphrase, decode(stored.kdfSalt(), "kdf salt"), stored.kdfIterations());
         byte[] material = open(mk, PASSPHRASE_AAD, stored.wrappedPrivateMaterial());
         return fromMaterial(material, stored);
@@ -127,12 +131,13 @@ public final class VaultIdentity {
      * @param stored the stored identity (must carry a recovery sealing)
      * @param recoveryCode the recovery code shown at recovery setup
      * @return the unlocked identity
-     * @throws CryptoException if no recovery sealing exists, the code is wrong, the record is malformed,
-     *     or its public keys do not match the private material
+     * @throws AltsException of kind {@link AltsFailure.Kind#CRYPTO} if the code is wrong, the sealing was
+     *     tampered with, or the record's public keys do not match the private material, and of kind {@link
+     *     AltsFailure.Kind#INVALID_INPUT} if the record carries no recovery sealing or is malformed
      */
-    public static VaultIdentity unlockWithRecovery(WrappedIdentity stored, String recoveryCode) throws CryptoException {
+    public static VaultIdentity unlockWithRecovery(WrappedIdentity stored, String recoveryCode) {
         if (!stored.hasRecovery()) {
-            throw new CryptoException("identity has no recovery sealing");
+            throw invalid("the stored identity has no recovery sealing");
         }
         SecretKey rk = RecoveryCode.deriveKey(recoveryCode, decode(stored.recoverySalt(), "recovery salt"));
         byte[] material = open(rk, RECOVERY_AAD, stored.recoveryWrappedPrivateMaterial());
@@ -145,9 +150,9 @@ public final class VaultIdentity {
      *
      * @param recoveryCode the recovery code (see {@link RecoveryCode#newCode()})
      * @return the stored form including the recovery sealing
-     * @throws CryptoException if sealing fails
+     * @throws AltsException of kind {@link AltsFailure.Kind#CRYPTO} if sealing fails
      */
-    public WrappedIdentity withRecovery(String recoveryCode) throws CryptoException {
+    public WrappedIdentity withRecovery(String recoveryCode) {
         byte[] salt = Pbkdf2.newSalt();
         SecretKey rk = RecoveryCode.deriveKey(recoveryCode, salt);
         byte[] material = material(edPrivate, xPrivate);
@@ -190,9 +195,9 @@ public final class VaultIdentity {
      * wire and to key membership server-side.
      *
      * @return the Base64 identity public key
-     * @throws CryptoException if encoding fails
+     * @throws AltsException of kind {@link AltsFailure.Kind#CRYPTO} if the key cannot be encoded
      */
-    public String identityId() throws CryptoException {
+    public String identityId() {
         return Base64.getEncoder().encodeToString(Ed25519.encodePublicKey(edPublic));
     }
 
@@ -206,12 +211,7 @@ public final class VaultIdentity {
      * @since 1.0.0
      */
     public String fingerprint() {
-        try {
-            return Tokens.memberFingerprint(Ed25519.encodePublicKey(edPublic), X25519.encodePublicKey(xPublic));
-        } catch (CryptoException e) {
-            throw new AltsException(
-                    AltsFailure.of(AltsFailure.Kind.CRYPTO, "Vault identity: a key cannot be encoded"), e);
-        }
+        return Tokens.memberFingerprint(Ed25519.encodePublicKey(edPublic), X25519.encodePublicKey(xPublic));
     }
 
     /**
@@ -227,9 +227,6 @@ public final class VaultIdentity {
             seed = Ed25519.encodePrivateKey(edPrivate);
             scalar = X25519.encodePrivateKey(xPrivate);
             return MemberKeys.of(seed, scalar);
-        } catch (CryptoException e) {
-            throw new AltsException(
-                    AltsFailure.of(AltsFailure.Kind.CRYPTO, "Vault identity: a key cannot be encoded"), e);
         } finally {
             if (seed != null) {
                 Arrays.fill(seed, (byte) 0);
@@ -271,11 +268,10 @@ public final class VaultIdentity {
      *
      * @param nonce the challenge bytes
      * @return the signature
-     * @throws lol.trq.alts.AltsException of kind {@link lol.trq.alts.AltsFailure.Kind#INVALID_INPUT} if the
-     *     input is refused; nothing is signed
-     * @throws CryptoException if signing fails
+     * @throws AltsException of kind {@link AltsFailure.Kind#INVALID_INPUT} if the input is refused; nothing is
+     *     signed. Of kind {@link AltsFailure.Kind#CRYPTO} if signing fails
      */
-    public byte[] signChallenge(byte[] nonce) throws CryptoException {
+    public byte[] signChallenge(byte[] nonce) {
         if (nonce == null
                 || nonce.length < MIN_CHALLENGE_BYTES
                 || nonce.length > MAX_CHALLENGE_BYTES
@@ -291,18 +287,18 @@ public final class VaultIdentity {
         return data.length >= prefix.length && Arrays.equals(data, 0, prefix.length, prefix, 0, prefix.length);
     }
 
-    private static VaultIdentity fromMaterial(byte[] material, WrappedIdentity stored) throws CryptoException {
+    private static VaultIdentity fromMaterial(byte[] material, WrappedIdentity stored) {
         byte[] edSeed = null;
         byte[] xScalar = null;
         try {
             if (material.length != MATERIAL_BYTES) {
-                throw new CryptoException("identity material must be " + MATERIAL_BYTES + " bytes");
+                throw invalid("the stored identity's private material is not " + MATERIAL_BYTES + " bytes");
             }
             edSeed = Arrays.copyOfRange(material, 0, Ed25519.KEY_BYTES);
             xScalar = Arrays.copyOfRange(material, Ed25519.KEY_BYTES, MATERIAL_BYTES);
-            PublicKey edPublic = Ed25519.decodePublicKey(decode(stored.ed25519PublicKey(), "Ed25519 public key"));
+            PublicKey edPublic = Ed25519.decodePublicKey(key(stored.ed25519PublicKey(), "Ed25519 public key"));
             PrivateKey edPrivate = Ed25519.decodePrivateKey(edSeed);
-            PublicKey xPublic = X25519.decodePublicKey(decode(stored.x25519PublicKey(), "X25519 public key"));
+            PublicKey xPublic = X25519.decodePublicKey(key(stored.x25519PublicKey(), "X25519 public key"));
             PrivateKey xPrivate = X25519.decodePrivateKey(xScalar);
             requireConsistent(edPublic, edPrivate, xPublic, xPrivate);
             return new VaultIdentity(edPublic, edPrivate, xPublic, xPrivate, stored);
@@ -322,17 +318,17 @@ public final class VaultIdentity {
      * them. Check each against the private key it claims to pair with before anything trusts it.
      */
     private static void requireConsistent(
-            PublicKey edPublic, PrivateKey edPrivate, PublicKey xPublic, PrivateKey xPrivate) throws CryptoException {
+            PublicKey edPublic, PrivateKey edPrivate, PublicKey xPublic, PrivateKey xPrivate) {
         if (!Ed25519.verify(edPublic, CONSISTENCY_PROBE, Ed25519.sign(edPrivate, CONSISTENCY_PROBE))) {
-            throw new CryptoException("stored Ed25519 public key does not match the private identity key");
+            throw mismatch("Ed25519");
         }
         byte[] derived = X25519.encodePublicKey(X25519.derivePublicKey(xPrivate));
         if (!MessageDigest.isEqual(derived, X25519.encodePublicKey(xPublic))) {
-            throw new CryptoException("stored X25519 public key does not match the private key-agreement key");
+            throw mismatch("X25519");
         }
     }
 
-    private static byte[] material(PrivateKey edPrivate, PrivateKey xPrivate) throws CryptoException {
+    private static byte[] material(PrivateKey edPrivate, PrivateKey xPrivate) {
         byte[] edSeed = Ed25519.encodePrivateKey(edPrivate);
         byte[] xScalar = null;
         try {
@@ -346,27 +342,50 @@ public final class VaultIdentity {
         }
     }
 
-    private static byte[] decode(String base64, String what) throws CryptoException {
+    private static byte[] decode(String base64, String what) {
         if (base64 == null) {
-            throw new CryptoException("stored identity " + what + " is missing");
+            throw invalid("the stored identity's " + what + " is missing");
         }
         try {
             return Base64.getDecoder().decode(base64);
         } catch (IllegalArgumentException e) {
-            throw new CryptoException("stored identity " + what + " is not Base64", e);
+            throw invalid("the stored identity's " + what + " is not Base64");
         }
     }
 
-    private static String seal(SecretKey key, byte[] aad, byte[] plaintext) throws CryptoException {
+    /** A stored public key: Base64 of exactly 32 bytes, or the record is malformed. */
+    private static byte[] key(String base64, String what) {
+        byte[] raw = decode(base64, what);
+        if (raw.length != Ed25519.KEY_BYTES) {
+            throw invalid("the stored identity's " + what + " is not " + Ed25519.KEY_BYTES + " bytes");
+        }
+        return raw;
+    }
+
+    private static AltsException invalid(String what) {
+        return new AltsException(AltsFailure.Kind.INVALID_INPUT, "Vault identity: " + what);
+    }
+
+    /**
+     * A record whose public key does not pair with its private material was tampered with after sealing: a
+     * failed check of the keys, not of the record's shape.
+     */
+    private static AltsException mismatch(String which) {
+        return new AltsException(
+                AltsFailure.Kind.CRYPTO,
+                "Vault identity: the stored " + which + " public key does not match the private key");
+    }
+
+    private static String seal(SecretKey key, byte[] aad, byte[] plaintext) {
         byte[] iv = PayloadCipher.newIv();
         byte[] ct = PayloadCipher.encrypt(key, iv, aad, plaintext);
         return Base64.getEncoder().encodeToString(concat(iv, ct));
     }
 
-    private static byte[] open(SecretKey key, byte[] aad, String sealedB64) throws CryptoException {
+    private static byte[] open(SecretKey key, byte[] aad, String sealedB64) {
         byte[] sealed = decode(sealedB64, "sealed private material");
         if (sealed.length <= PayloadCipher.IV_BYTES) {
-            throw new CryptoException("sealed material too short");
+            throw invalid("the sealed private material is too short");
         }
         byte[] iv = Arrays.copyOfRange(sealed, 0, PayloadCipher.IV_BYTES);
         byte[] ct = Arrays.copyOfRange(sealed, PayloadCipher.IV_BYTES, sealed.length);

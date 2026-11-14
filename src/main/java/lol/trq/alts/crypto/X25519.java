@@ -12,6 +12,8 @@ import java.security.spec.NamedParameterSpec;
 import java.security.spec.XECPrivateKeySpec;
 import java.security.spec.XECPublicKeySpec;
 import javax.crypto.KeyAgreement;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure;
 
 /**
  * X25519 (Curve25519 ECDH) key generation, agreement, and raw 32-byte key encoding via the JDK's
@@ -32,13 +34,13 @@ public final class X25519 {
      * Generates a fresh X25519 key pair.
      *
      * @return a new key pair
-     * @throws CryptoException if key generation fails
+     * @throws AltsException of kind {@code CRYPTO} if key generation fails
      */
-    public static KeyPair newKeyPair() throws CryptoException {
+    public static KeyPair newKeyPair() {
         try {
             return KeyPairGenerator.getInstance("X25519").generateKeyPair();
         } catch (Exception e) {
-            throw new CryptoException("X25519 keygen failed", e);
+            throw failure("X25519 keygen failed", e);
         }
     }
 
@@ -48,16 +50,16 @@ public final class X25519 {
      * @param ownPrivate this party's private key
      * @param peerPublic the peer's public key
      * @return the 32-byte shared secret
-     * @throws CryptoException if agreement fails
+     * @throws AltsException of kind {@code CRYPTO} if agreement fails
      */
-    public static byte[] agree(PrivateKey ownPrivate, PublicKey peerPublic) throws CryptoException {
+    public static byte[] agree(PrivateKey ownPrivate, PublicKey peerPublic) {
         try {
             KeyAgreement ka = KeyAgreement.getInstance("XDH");
             ka.init(ownPrivate);
             ka.doPhase(peerPublic, true);
             return ka.generateSecret();
         } catch (Exception e) {
-            throw new CryptoException("X25519 agreement failed", e);
+            throw failure("X25519 agreement failed", e);
         }
     }
 
@@ -66,11 +68,11 @@ public final class X25519 {
      *
      * @param publicKey the X25519 public key
      * @return the raw 32-byte encoding
-     * @throws CryptoException if the key is not an X25519 key
+     * @throws AltsException of kind {@code CRYPTO} if the key is not an X25519 key
      */
-    public static byte[] encodePublicKey(PublicKey publicKey) throws CryptoException {
+    public static byte[] encodePublicKey(PublicKey publicKey) {
         if (!(publicKey instanceof XECPublicKey xec)) {
-            throw new CryptoException("not an X25519 public key: " + publicKey.getClass());
+            throw failure("not an X25519 public key", null);
         }
         return bigIntToLe(xec.getU(), KEY_BYTES);
     }
@@ -80,16 +82,16 @@ public final class X25519 {
      *
      * @param raw the raw 32-byte encoding
      * @return the X25519 public key
-     * @throws CryptoException if decoding fails
+     * @throws AltsException of kind {@code CRYPTO} if decoding fails
      */
-    public static PublicKey decodePublicKey(byte[] raw) throws CryptoException {
+    public static PublicKey decodePublicKey(byte[] raw) {
         requireLen(raw, "public key");
         try {
             BigInteger u = leToBigInt(raw);
             KeyFactory kf = KeyFactory.getInstance("XDH");
             return kf.generatePublic(new XECPublicKeySpec(NamedParameterSpec.X25519, u));
         } catch (Exception e) {
-            throw new CryptoException("X25519 public key decode failed", e);
+            throw failure("X25519 public key decode failed", e);
         }
     }
 
@@ -98,13 +100,13 @@ public final class X25519 {
      *
      * @param privateKey the X25519 private key
      * @return the raw 32-byte scalar
-     * @throws CryptoException if the scalar is unavailable
+     * @throws AltsException of kind {@code CRYPTO} if the scalar is unavailable
      */
-    public static byte[] encodePrivateKey(PrivateKey privateKey) throws CryptoException {
+    public static byte[] encodePrivateKey(PrivateKey privateKey) {
         if (!(privateKey instanceof XECPrivateKey xec)) {
-            throw new CryptoException("not an X25519 private key: " + privateKey.getClass());
+            throw failure("not an X25519 private key", null);
         }
-        return xec.getScalar().orElseThrow(() -> new CryptoException("X25519 scalar not extractable"));
+        return xec.getScalar().orElseThrow(() -> failure("X25519 scalar not extractable", null));
     }
 
     /**
@@ -112,15 +114,15 @@ public final class X25519 {
      *
      * @param raw the raw 32-byte scalar
      * @return the X25519 private key
-     * @throws CryptoException if decoding fails
+     * @throws AltsException of kind {@code CRYPTO} if decoding fails
      */
-    public static PrivateKey decodePrivateKey(byte[] raw) throws CryptoException {
+    public static PrivateKey decodePrivateKey(byte[] raw) {
         requireLen(raw, "private key");
         try {
             KeyFactory kf = KeyFactory.getInstance("XDH");
             return kf.generatePrivate(new XECPrivateKeySpec(NamedParameterSpec.X25519, raw.clone()));
         } catch (Exception e) {
-            throw new CryptoException("X25519 private key decode failed", e);
+            throw failure("X25519 private key decode failed", e);
         }
     }
 
@@ -131,18 +133,18 @@ public final class X25519 {
      *
      * @param privateKey the X25519 private key
      * @return the matching X25519 public key
-     * @throws CryptoException if the derivation fails
+     * @throws AltsException of kind {@code CRYPTO} if the derivation fails
      * @since 0.12.0
      */
-    public static PublicKey derivePublicKey(PrivateKey privateKey) throws CryptoException {
+    public static PublicKey derivePublicKey(PrivateKey privateKey) {
         byte[] basePoint = new byte[KEY_BYTES];
         basePoint[0] = 9;
         return decodePublicKey(agree(privateKey, decodePublicKey(basePoint)));
     }
 
-    private static void requireLen(byte[] raw, String what) throws CryptoException {
+    private static void requireLen(byte[] raw, String what) {
         if (raw == null || raw.length != KEY_BYTES) {
-            throw new CryptoException("X25519 " + what + " must be " + KEY_BYTES + " bytes");
+            throw failure("X25519 " + what + " must be " + KEY_BYTES + " bytes", null);
         }
     }
 
@@ -161,5 +163,9 @@ public final class X25519 {
             be[i] = le[le.length - 1 - i];
         }
         return new BigInteger(1, be);
+    }
+
+    private static AltsException failure(String what, Throwable cause) {
+        return new AltsException(AltsFailure.of(AltsFailure.Kind.CRYPTO, "Vault crypto: " + what), cause);
     }
 }

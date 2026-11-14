@@ -2,7 +2,6 @@ package lol.trq.alts.vault;
 
 import java.security.SecureRandom;
 import javax.crypto.SecretKey;
-import lol.trq.alts.crypto.CryptoException;
 import lol.trq.alts.crypto.Pbkdf2;
 
 /**
@@ -56,9 +55,9 @@ public final class RecoveryCode {
      * @param code the recovery code as entered by the user
      * @param salt the PBKDF2 salt stored alongside the recovery sealing
      * @return the derived AES key
-     * @throws CryptoException if derivation fails
+     * @throws lol.trq.alts.AltsException of kind {@code CRYPTO} if derivation fails
      */
-    public static SecretKey deriveKey(String code, byte[] salt) throws CryptoException {
+    static SecretKey deriveKey(String code, byte[] salt) {
         char[] normalized = normalize(code);
         try {
             return Pbkdf2.deriveKey(normalized, salt, Pbkdf2.VAULT_ITERATIONS);

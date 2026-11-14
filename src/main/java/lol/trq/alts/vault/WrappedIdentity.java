@@ -1,7 +1,8 @@
 package lol.trq.alts.vault;
 
 import com.google.gson.annotations.SerializedName;
-import java.util.Objects;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure;
 
 /**
  * The server-storable, passphrase-protected form of a {@link VaultIdentity}. Holds the two public keys
@@ -30,12 +31,25 @@ public record WrappedIdentity(
         @SerializedName("recoverySalt") String recoverySalt,
         @SerializedName("recoveryWrappedPrivateMaterial") String recoveryWrappedPrivateMaterial) {
 
-    /** Validates that the always-present components are non-null. */
+    /**
+     * Validates that the always-present components are non-null.
+     *
+     * @throws AltsException of kind {@link AltsFailure.Kind#INVALID_INPUT} if {@code ed25519PublicKey}, {@code
+     *     x25519PublicKey}, {@code kdfSalt} or {@code wrappedPrivateMaterial} is null, as in a stored record
+     *     that lost a field
+     */
     public WrappedIdentity {
-        Objects.requireNonNull(ed25519PublicKey, "ed25519PublicKey");
-        Objects.requireNonNull(x25519PublicKey, "x25519PublicKey");
-        Objects.requireNonNull(kdfSalt, "kdfSalt");
-        Objects.requireNonNull(wrappedPrivateMaterial, "wrappedPrivateMaterial");
+        required(ed25519PublicKey, "ed25519PublicKey");
+        required(x25519PublicKey, "x25519PublicKey");
+        required(kdfSalt, "kdfSalt");
+        required(wrappedPrivateMaterial, "wrappedPrivateMaterial");
+    }
+
+    private static void required(String value, String field) {
+        if (value == null) {
+            throw new AltsException(
+                    AltsFailure.Kind.INVALID_INPUT, "Vault identity: the stored identity has no " + field);
+        }
     }
 
     /**

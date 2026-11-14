@@ -7,6 +7,8 @@ import javax.crypto.SecretKey;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure;
 
 /**
  * PBKDF2-HMAC-SHA256 key derivation. Used to stretch a low-entropy passphrase into the 256-bit master
@@ -57,18 +59,18 @@ public final class Pbkdf2 {
      * @param iterations the PBKDF2 iteration count, within {@link #MIN_ITERATIONS} and
      *     {@link #MAX_ITERATIONS} (use {@link #VAULT_ITERATIONS})
      * @return an AES secret key
-     * @throws CryptoException if an argument is out of range or key derivation fails
+     * @throws AltsException of kind {@code INVALID_INPUT} if the passphrase is missing, the salt empty or the
+     *     iteration count out of range, and of kind {@code CRYPTO} if the derivation fails
      */
-    public static SecretKey deriveKey(char[] passphrase, byte[] salt, int iterations) throws CryptoException {
+    public static SecretKey deriveKey(char[] passphrase, byte[] salt, int iterations) {
         if (passphrase == null) {
-            throw new CryptoException("PBKDF2 passphrase is missing");
+            throw invalid("PBKDF2 passphrase is missing");
         }
         if (salt == null || salt.length == 0) {
-            throw new CryptoException("PBKDF2 salt is empty");
+            throw invalid("PBKDF2 salt is empty");
         }
         if (iterations < MIN_ITERATIONS || iterations > MAX_ITERATIONS) {
-            throw new CryptoException("PBKDF2 iteration count out of range [" + MIN_ITERATIONS + ", " + MAX_ITERATIONS
-                    + "]: " + iterations);
+            throw invalid("PBKDF2 iteration count out of range [" + MIN_ITERATIONS + ", " + MAX_ITERATIONS + "]");
         }
         PBEKeySpec spec = new PBEKeySpec(passphrase, salt, iterations, KEY_BITS);
         byte[] derived = null;
@@ -77,7 +79,7 @@ public final class Pbkdf2 {
             derived = factory.generateSecret(spec).getEncoded();
             return new SecretKeySpec(derived, "AES");
         } catch (java.security.NoSuchAlgorithmException | InvalidKeySpecException e) {
-            throw new CryptoException("PBKDF2 derivation failed", e);
+            throw failure("PBKDF2 derivation failed", e);
         } finally {
             spec.clearPassword();
             if (derived != null) {
@@ -95,5 +97,13 @@ public final class Pbkdf2 {
         byte[] salt = new byte[SALT_BYTES];
         RANDOM.nextBytes(salt);
         return salt;
+    }
+
+    private static AltsException invalid(String what) {
+        return new AltsException(AltsFailure.Kind.INVALID_INPUT, "Vault crypto: " + what);
+    }
+
+    private static AltsException failure(String what, Throwable cause) {
+        return new AltsException(AltsFailure.of(AltsFailure.Kind.CRYPTO, "Vault crypto: " + what), cause);
     }
 }

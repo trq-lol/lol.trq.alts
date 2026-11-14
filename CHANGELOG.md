@@ -197,6 +197,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server cannot have the key sign an AVP 0.5 leave request or commit signature passed off as a nonce. It
   stays the raw-nonce signature a host uses to authenticate to a 0.4 server; AVP 0.5 authentication signs
   a domain-separated challenge transcript instead.
+- **Breaking: the vault identity throws `AltsException`.** `VaultIdentity.create`, `unlock`,
+  `unlockWithRecovery`, `withRecovery`, `identityId` and `signChallenge` declare no checked exception:
+  a wrong passphrase or recovery code, or a tampered record, is kind `CRYPTO`, and a malformed stored
+  record (a missing or non-Base64 field, a key of the wrong length, an iteration count out of range, no
+  recovery sealing, a null passphrase) is kind `INVALID_INPUT`. `WrappedIdentity`'s constructor refuses
+  a missing required field with `INVALID_INPUT` instead of `NullPointerException`.
+  `RecoveryCode.deriveKey` is no longer public; `RecoveryCode.newCode()` and
+  `VaultIdentity.unlockWithRecovery` are the recovery route.
 - **Breaking: the identity types moved to `lol.trq.alts.vault`.** `VaultIdentity`, `WrappedIdentity` and
   `RecoveryCode` were in `lol.trq.alts.crypto`; change the import. The JSON form of `WrappedIdentity` is
   unchanged, so a stored identity still opens. `VaultIdentity` is also the AVP 0.5 member identity: its
@@ -209,6 +217,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   constructors with three to six arguments, `failure(String)`, `failure(String, FailureReason, ...)`
   and `rateLimited()` go, replaced by `LoginResult.failure(AltsFailure)` and
   `LoginResult.failure(Kind, String)`.
+- **Breaking:** `crypto.CryptoException` and `vault.VaultException`; every failure is an
+  `AltsException` (the table below maps them).
 - **Breaking:** `AccountException` and `SkinValidationException` (with `SkinValidationException.Reason`,
   replaced by `SkinProblem` constant for constant). Their `status()`, `tokenRefused()`, `rateLimited()`,
   `notFound()` and `retryAfter()` become `failure().kind()` and `failure().retryAfter()`.
@@ -332,10 +342,12 @@ says the kind); *none* means success, so `failure()` is empty.
 | `build()`'s `IllegalStateException`, store file in use | `CONFLICT` | |
 | `build()`'s `IllegalStateException`, store not lockable | `STORAGE` | |
 | `CookieFile.read`'s `IOException` | `INVALID_INPUT` | A sign-in from the file still reports `UNAUTHORIZED`. |
+| `CryptoException`, a wrong passphrase or recovery code | `CRYPTO` | From `VaultIdentity.unlock` and `unlockWithRecovery`; also a tampered sealing, or stored public keys that do not match the private material. |
+| `CryptoException`, a malformed stored identity | `INVALID_INPUT` | A missing or non-Base64 field, a key or sealing of the wrong length, an iteration count out of range, a missing passphrase, no recovery sealing. `WrappedIdentity`'s constructor reports a missing field the same way, where it threw `NullPointerException`. |
+| `CryptoException`, another failed key operation | `CRYPTO` | Key generation, sealing, signing. A 0.4 data key that does not unwrap or a payload that does not authenticate, now from `LegacyVaultReader`. |
+| `VaultException` | `PROTOCOL` | Only the 0.4 vault threw it; `LegacyVaultReader` makes the same checks and reports them as `PROTOCOL`. |
 
 An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in the rows above.
-`CryptoException` and `VaultException` stay until the shared vault moves to AVP 0.5; their failures
-will be kinds `CRYPTO`, `PROTOCOL` and the transport kinds.
 
 ### Fixed
 

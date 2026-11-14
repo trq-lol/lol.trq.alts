@@ -14,6 +14,8 @@ import java.security.spec.EdECPrivateKeySpec;
 import java.security.spec.EdECPublicKeySpec;
 import java.security.spec.NamedParameterSpec;
 import java.util.Arrays;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure;
 
 /**
  * Ed25519 signing, verification, and raw 32-byte key encoding (RFC 8032) via the JDK's built-in
@@ -35,13 +37,13 @@ public final class Ed25519 {
      * Generates a fresh Ed25519 key pair.
      *
      * @return a new key pair
-     * @throws CryptoException if key generation fails
+     * @throws AltsException of kind {@code CRYPTO} if key generation fails
      */
-    public static KeyPair newKeyPair() throws CryptoException {
+    public static KeyPair newKeyPair() {
         try {
             return KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
         } catch (Exception e) {
-            throw new CryptoException("Ed25519 keygen failed", e);
+            throw failure("Ed25519 keygen failed", e);
         }
     }
 
@@ -51,16 +53,16 @@ public final class Ed25519 {
      * @param privateKey the signing key
      * @param message the message bytes
      * @return the 64-byte signature
-     * @throws CryptoException if signing fails
+     * @throws AltsException of kind {@code CRYPTO} if signing fails
      */
-    public static byte[] sign(PrivateKey privateKey, byte[] message) throws CryptoException {
+    public static byte[] sign(PrivateKey privateKey, byte[] message) {
         try {
             Signature sig = Signature.getInstance("Ed25519");
             sig.initSign(privateKey);
             sig.update(message);
             return sig.sign();
         } catch (Exception e) {
-            throw new CryptoException("Ed25519 sign failed", e);
+            throw failure("Ed25519 sign failed", e);
         }
     }
 
@@ -89,11 +91,11 @@ public final class Ed25519 {
      *
      * @param publicKey the Ed25519 public key
      * @return the raw 32-byte encoding
-     * @throws CryptoException if the key is not an Ed25519 key
+     * @throws AltsException of kind {@code CRYPTO} if the key is not an Ed25519 key
      */
-    public static byte[] encodePublicKey(PublicKey publicKey) throws CryptoException {
+    public static byte[] encodePublicKey(PublicKey publicKey) {
         if (!(publicKey instanceof EdECPublicKey ed)) {
-            throw new CryptoException("not an Ed25519 public key: " + publicKey.getClass());
+            throw failure("not an Ed25519 public key", null);
         }
         EdECPoint point = ed.getPoint();
         byte[] raw = bigIntToLe(point.getY(), KEY_BYTES);
@@ -108,9 +110,9 @@ public final class Ed25519 {
      *
      * @param raw the raw 32-byte encoding
      * @return the Ed25519 public key
-     * @throws CryptoException if decoding fails
+     * @throws AltsException of kind {@code CRYPTO} if decoding fails
      */
-    public static PublicKey decodePublicKey(byte[] raw) throws CryptoException {
+    public static PublicKey decodePublicKey(byte[] raw) {
         requireLen(raw, "public key");
         try {
             byte[] copy = raw.clone();
@@ -120,7 +122,7 @@ public final class Ed25519 {
             KeyFactory kf = KeyFactory.getInstance("Ed25519");
             return kf.generatePublic(new EdECPublicKeySpec(NamedParameterSpec.ED25519, new EdECPoint(xOdd, y)));
         } catch (Exception e) {
-            throw new CryptoException("Ed25519 public key decode failed", e);
+            throw failure("Ed25519 public key decode failed", e);
         }
     }
 
@@ -129,13 +131,13 @@ public final class Ed25519 {
      *
      * @param privateKey the Ed25519 private key
      * @return the raw 32-byte seed
-     * @throws CryptoException if the seed is unavailable
+     * @throws AltsException of kind {@code CRYPTO} if the seed is unavailable
      */
-    public static byte[] encodePrivateKey(PrivateKey privateKey) throws CryptoException {
+    public static byte[] encodePrivateKey(PrivateKey privateKey) {
         if (!(privateKey instanceof EdECPrivateKey ed)) {
-            throw new CryptoException("not an Ed25519 private key: " + privateKey.getClass());
+            throw failure("not an Ed25519 private key", null);
         }
-        return ed.getBytes().orElseThrow(() -> new CryptoException("Ed25519 seed not extractable"));
+        return ed.getBytes().orElseThrow(() -> failure("Ed25519 seed not extractable", null));
     }
 
     /**
@@ -143,21 +145,21 @@ public final class Ed25519 {
      *
      * @param raw the raw 32-byte seed
      * @return the Ed25519 private key
-     * @throws CryptoException if decoding fails
+     * @throws AltsException of kind {@code CRYPTO} if decoding fails
      */
-    public static PrivateKey decodePrivateKey(byte[] raw) throws CryptoException {
+    public static PrivateKey decodePrivateKey(byte[] raw) {
         requireLen(raw, "private key");
         try {
             KeyFactory kf = KeyFactory.getInstance("Ed25519");
             return kf.generatePrivate(new EdECPrivateKeySpec(NamedParameterSpec.ED25519, raw.clone()));
         } catch (Exception e) {
-            throw new CryptoException("Ed25519 private key decode failed", e);
+            throw failure("Ed25519 private key decode failed", e);
         }
     }
 
-    private static void requireLen(byte[] raw, String what) throws CryptoException {
+    private static void requireLen(byte[] raw, String what) {
         if (raw == null || raw.length != KEY_BYTES) {
-            throw new CryptoException("Ed25519 " + what + " must be " + KEY_BYTES + " bytes");
+            throw failure("Ed25519 " + what + " must be " + KEY_BYTES + " bytes", null);
         }
     }
 
@@ -176,5 +178,9 @@ public final class Ed25519 {
             be[i] = le[le.length - 1 - i];
         }
         return new BigInteger(1, Arrays.copyOf(be, be.length));
+    }
+
+    private static AltsException failure(String what, Throwable cause) {
+        return new AltsException(AltsFailure.of(AltsFailure.Kind.CRYPTO, "Vault crypto: " + what), cause);
     }
 }

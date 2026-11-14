@@ -10,7 +10,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure;
-import lol.trq.alts.crypto.CryptoException;
 import lol.trq.alts.crypto.Ed25519;
 import lol.trq.alts.crypto.Pbkdf2;
 import lol.trq.alts.crypto.X25519;
@@ -20,6 +19,7 @@ import lol.trq.alts.internal.avp.Commits;
 import lol.trq.alts.internal.avp.Tokens;
 import lol.trq.alts.internal.avp.WrappedKey;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 
 /** Create / unlock / recovery round-trips for the vault identity. */
 class VaultIdentityTest {
@@ -49,7 +49,7 @@ class VaultIdentityTest {
     @Test
     void unlockFailsWithWrongPassphrase() throws Exception {
         WrappedIdentity stored = VaultIdentity.create("right".toCharArray()).export();
-        assertThrows(CryptoException.class, () -> VaultIdentity.unlock(stored, "wrong".toCharArray()));
+        assertKind(AltsFailure.Kind.CRYPTO, () -> VaultIdentity.unlock(stored, "wrong".toCharArray()));
     }
 
     @Test
@@ -78,10 +78,10 @@ class VaultIdentityTest {
     void recoveryFailsWithWrongCodeAndWhenAbsent() throws Exception {
         VaultIdentity id = VaultIdentity.create("pw".toCharArray());
         WrappedIdentity withRecovery = id.withRecovery(RecoveryCode.newCode());
-        assertThrows(
-                CryptoException.class, () -> VaultIdentity.unlockWithRecovery(withRecovery, RecoveryCode.newCode()));
+        assertKind(
+                AltsFailure.Kind.CRYPTO, () -> VaultIdentity.unlockWithRecovery(withRecovery, RecoveryCode.newCode()));
         // No recovery sealing present.
-        assertThrows(CryptoException.class, () -> VaultIdentity.unlockWithRecovery(id.export(), "anything"));
+        assertKind(AltsFailure.Kind.INVALID_INPUT, () -> VaultIdentity.unlockWithRecovery(id.export(), "anything"));
     }
 
     @Test
@@ -118,8 +118,8 @@ class VaultIdentityTest {
         WrappedIdentity tampered =
                 with(stored, stored.ed25519PublicKey(), attackerKey, stored.kdfSalt(), stored.kdfIterations());
 
-        assertThrows(CryptoException.class, () -> VaultIdentity.unlock(tampered, "pw".toCharArray()));
-        assertThrows(CryptoException.class, () -> VaultIdentity.unlockWithRecovery(tampered, "recovery-code"));
+        assertKind(AltsFailure.Kind.CRYPTO, () -> VaultIdentity.unlock(tampered, "pw".toCharArray()));
+        assertKind(AltsFailure.Kind.CRYPTO, () -> VaultIdentity.unlockWithRecovery(tampered, "recovery-code"));
     }
 
     @Test
@@ -130,7 +130,7 @@ class VaultIdentityTest {
         WrappedIdentity tampered =
                 with(stored, otherIdentity, stored.x25519PublicKey(), stored.kdfSalt(), stored.kdfIterations());
 
-        assertThrows(CryptoException.class, () -> VaultIdentity.unlock(tampered, "pw".toCharArray()));
+        assertKind(AltsFailure.Kind.CRYPTO, () -> VaultIdentity.unlock(tampered, "pw".toCharArray()));
     }
 
     @Test
@@ -141,35 +141,36 @@ class VaultIdentityTest {
                 new int[] {0, -1, 1, Pbkdf2.MIN_ITERATIONS - 1, Pbkdf2.MAX_ITERATIONS + 1, Integer.MAX_VALUE}) {
             WrappedIdentity tampered =
                     with(stored, stored.ed25519PublicKey(), stored.x25519PublicKey(), stored.kdfSalt(), iterations);
-            assertThrows(CryptoException.class, () -> VaultIdentity.unlock(tampered, "pw".toCharArray()));
+            assertKind(AltsFailure.Kind.INVALID_INPUT, () -> VaultIdentity.unlock(tampered, "pw".toCharArray()));
         }
     }
 
     @Test
-    void unlockReportsMalformedBase64AsACryptoException() throws Exception {
+    void unlockReportsAMalformedRecordAsInvalidInput() throws Exception {
         WrappedIdentity s = VaultIdentity.create("pw".toCharArray()).withRecovery("recovery-code");
         char[] pw = "pw".toCharArray();
 
-        assertThrows(
-                CryptoException.class,
+        assertKind(
+                AltsFailure.Kind.INVALID_INPUT,
                 () -> VaultIdentity.unlock(
                         with(s, s.ed25519PublicKey(), s.x25519PublicKey(), "not base64!", s.kdfIterations()), pw));
-        assertThrows(
-                CryptoException.class,
+        assertKind(
+                AltsFailure.Kind.INVALID_INPUT,
                 () -> VaultIdentity.unlock(
                         with(s, s.ed25519PublicKey(), s.x25519PublicKey(), "", s.kdfIterations()), pw));
-        assertThrows(
-                CryptoException.class,
+        assertKind(
+                AltsFailure.Kind.INVALID_INPUT,
                 () -> VaultIdentity.unlock(
                         with(s, "not base64!", s.x25519PublicKey(), s.kdfSalt(), s.kdfIterations()), pw));
-        assertThrows(
-                CryptoException.class,
+        assertKind(
+                AltsFailure.Kind.INVALID_INPUT,
                 () -> VaultIdentity.unlock(
                         with(s, s.ed25519PublicKey(), "not base64!", s.kdfSalt(), s.kdfIterations()), pw));
         WrappedIdentity badMaterial = new WrappedIdentity(
                 s.ed25519PublicKey(), s.x25519PublicKey(), s.kdfSalt(), s.kdfIterations(), "***", "***", "***");
-        assertThrows(CryptoException.class, () -> VaultIdentity.unlock(badMaterial, pw));
-        assertThrows(CryptoException.class, () -> VaultIdentity.unlockWithRecovery(badMaterial, "recovery-code"));
+        assertKind(AltsFailure.Kind.INVALID_INPUT, () -> VaultIdentity.unlock(badMaterial, pw));
+        assertKind(
+                AltsFailure.Kind.INVALID_INPUT, () -> VaultIdentity.unlockWithRecovery(badMaterial, "recovery-code"));
         // A flipped byte in a well-formed sealing is still an authentication failure, not a crash.
         WrappedIdentity flipped = new WrappedIdentity(
                 s.ed25519PublicKey(),
@@ -179,7 +180,40 @@ class VaultIdentityTest {
                 flipFirstByte(s.wrappedPrivateMaterial()),
                 null,
                 null);
-        assertThrows(CryptoException.class, () -> VaultIdentity.unlock(flipped, pw));
+        assertKind(AltsFailure.Kind.CRYPTO, () -> VaultIdentity.unlock(flipped, pw));
+    }
+
+    @Test
+    void aKeyOfTheWrongLengthOrAMissingFieldIsInvalidInput() throws Exception {
+        WrappedIdentity s = VaultIdentity.create("pw".toCharArray()).export();
+        char[] pw = "pw".toCharArray();
+        String shortKey = Base64.getEncoder().encodeToString(new byte[31]);
+        assertKind(
+                AltsFailure.Kind.INVALID_INPUT,
+                () -> VaultIdentity.unlock(with(s, shortKey, s.x25519PublicKey(), s.kdfSalt(), s.kdfIterations()), pw));
+        assertKind(
+                AltsFailure.Kind.INVALID_INPUT,
+                () -> VaultIdentity.unlock(
+                        with(s, s.ed25519PublicKey(), shortKey, s.kdfSalt(), s.kdfIterations()), pw));
+        assertKind(AltsFailure.Kind.INVALID_INPUT, () -> VaultIdentity.unlock(s, null));
+        // A stored record that lost a field (for example Gson reading a truncated file) is refused as input.
+        assertKind(
+                AltsFailure.Kind.INVALID_INPUT,
+                () -> new WrappedIdentity(null, s.x25519PublicKey(), s.kdfSalt(), 600_000, "x", null, null));
+        assertKind(
+                AltsFailure.Kind.INVALID_INPUT,
+                () -> new WrappedIdentity(
+                        s.ed25519PublicKey(), s.x25519PublicKey(), s.kdfSalt(), 600_000, null, null, null));
+    }
+
+    @Test
+    void theRecoveryKeyIsPbkdf2OfTheNormalizedCodeAtTheVaultIterationCount() throws Exception {
+        byte[] salt = new byte[16];
+        javax.crypto.SecretKey key = RecoveryCode.deriveKey("ab-cd ef", salt);
+        assertArrayEquals(
+                Pbkdf2.deriveKey("abcdef".toCharArray(), salt, 600_000).getEncoded(),
+                key.getEncoded(),
+                "dashes and whitespace are dropped, and 600000 iterations are used");
     }
 
     /**
@@ -214,5 +248,10 @@ class VaultIdentityTest {
             byte[] sig = identity.signChallenge(signed);
             assertTrue(Ed25519.verify(identity.identityPublicKey(), signed, sig));
         }
+    }
+
+    private static void assertKind(AltsFailure.Kind kind, Executable call) {
+        AltsException e = assertThrows(AltsException.class, call);
+        assertEquals(kind, e.kind(), e.getMessage());
     }
 }

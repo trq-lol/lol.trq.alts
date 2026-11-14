@@ -90,6 +90,10 @@ class ErrorKindMigrationTableTest {
         rows.put("build()'s IllegalStateException, store file in use", "CONFLICT");
         rows.put("build()'s IllegalStateException, store not lockable", "STORAGE");
         rows.put("CookieFile.read's IOException", "INVALID_INPUT");
+        rows.put("CryptoException, a wrong passphrase or recovery code", "CRYPTO");
+        rows.put("CryptoException, a malformed stored identity", "INVALID_INPUT");
+        rows.put("CryptoException, another failed key operation", "CRYPTO");
+        rows.put("VaultException", "PROTOCOL");
         return rows;
     }
 

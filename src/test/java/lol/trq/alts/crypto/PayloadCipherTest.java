@@ -1,6 +1,7 @@
 package lol.trq.alts.crypto;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -8,6 +9,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure;
 import org.junit.jupiter.api.Test;
 
 /** AES-GCM AEAD round-trip and AAD-binding behaviour. */
@@ -41,14 +44,26 @@ class PayloadCipherTest {
         byte[] ct = PayloadCipher.encrypt(key, iv, PayloadCipher.aad("repo-1", 3L, 0L), plaintext);
 
         // Different version → different AAD → tag fails.
-        assertThrows(
-                CryptoException.class, () -> PayloadCipher.decrypt(key, iv, PayloadCipher.aad("repo-1", 4L, 0L), ct));
+        assertEquals(
+                AltsFailure.Kind.CRYPTO,
+                assertThrows(
+                                AltsException.class,
+                                () -> PayloadCipher.decrypt(key, iv, PayloadCipher.aad("repo-1", 4L, 0L), ct))
+                        .kind());
         // Different epoch → tag fails.
-        assertThrows(
-                CryptoException.class, () -> PayloadCipher.decrypt(key, iv, PayloadCipher.aad("repo-1", 3L, 1L), ct));
+        assertEquals(
+                AltsFailure.Kind.CRYPTO,
+                assertThrows(
+                                AltsException.class,
+                                () -> PayloadCipher.decrypt(key, iv, PayloadCipher.aad("repo-1", 3L, 1L), ct))
+                        .kind());
         // Different repo → tag fails.
-        assertThrows(
-                CryptoException.class, () -> PayloadCipher.decrypt(key, iv, PayloadCipher.aad("repo-2", 3L, 0L), ct));
+        assertEquals(
+                AltsFailure.Kind.CRYPTO,
+                assertThrows(
+                                AltsException.class,
+                                () -> PayloadCipher.decrypt(key, iv, PayloadCipher.aad("repo-2", 3L, 0L), ct))
+                        .kind());
     }
 
     @Test
@@ -59,7 +74,10 @@ class PayloadCipherTest {
         byte[] ct = PayloadCipher.encrypt(key, iv, aad, "data".getBytes(StandardCharsets.UTF_8));
 
         ct[0] ^= 0x01;
-        assertThrows(CryptoException.class, () -> PayloadCipher.decrypt(key, iv, aad, ct));
+        assertEquals(
+                AltsFailure.Kind.CRYPTO,
+                assertThrows(AltsException.class, () -> PayloadCipher.decrypt(key, iv, aad, ct))
+                        .kind());
     }
 
     @Test

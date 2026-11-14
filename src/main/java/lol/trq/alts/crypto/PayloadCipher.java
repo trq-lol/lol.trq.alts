@@ -6,6 +6,8 @@ import java.security.SecureRandom;
 import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure;
 
 /**
  * Authenticated encryption core: AES-256-GCM over a raw {@link SecretKey} with caller-supplied
@@ -43,9 +45,9 @@ public final class PayloadCipher {
      * @param aad the additional authenticated data, or null/empty for none
      * @param plaintext the bytes to encrypt
      * @return the ciphertext with the GCM tag appended
-     * @throws CryptoException if encryption fails
+     * @throws AltsException of kind {@code CRYPTO} if encryption fails
      */
-    public static byte[] encrypt(SecretKey key, byte[] iv, byte[] aad, byte[] plaintext) throws CryptoException {
+    public static byte[] encrypt(SecretKey key, byte[] iv, byte[] aad, byte[] plaintext) {
         try {
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(TAG_BITS, iv));
@@ -54,7 +56,7 @@ public final class PayloadCipher {
             }
             return cipher.doFinal(plaintext);
         } catch (Exception e) {
-            throw new CryptoException("AES-GCM encrypt failed", e);
+            throw failure("AES-GCM encrypt failed", e);
         }
     }
 
@@ -66,9 +68,9 @@ public final class PayloadCipher {
      * @param aad the additional authenticated data that must match the encrypt-time value
      * @param ciphertext the ciphertext with the appended GCM tag
      * @return the recovered plaintext
-     * @throws CryptoException if the tag is invalid (wrong key, tampered data, or mismatched AAD)
+     * @throws AltsException of kind {@code CRYPTO} if the tag is invalid (wrong key, tampered data, or mismatched AAD)
      */
-    public static byte[] decrypt(SecretKey key, byte[] iv, byte[] aad, byte[] ciphertext) throws CryptoException {
+    public static byte[] decrypt(SecretKey key, byte[] iv, byte[] aad, byte[] ciphertext) {
         try {
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(TAG_BITS, iv));
@@ -77,7 +79,7 @@ public final class PayloadCipher {
             }
             return cipher.doFinal(ciphertext);
         } catch (Exception e) {
-            throw new CryptoException("AES-GCM decrypt failed (wrong key, tampered data, or AAD mismatch)", e);
+            throw failure("AES-GCM decrypt failed (wrong key, tampered data, or AAD mismatch)", e);
         }
     }
 
@@ -117,5 +119,9 @@ public final class PayloadCipher {
             value >>>= 8;
         }
         return b;
+    }
+
+    private static AltsException failure(String what, Throwable cause) {
+        return new AltsException(AltsFailure.of(AltsFailure.Kind.CRYPTO, "Vault crypto: " + what), cause);
     }
 }
