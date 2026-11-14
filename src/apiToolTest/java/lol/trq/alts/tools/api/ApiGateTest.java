@@ -344,6 +344,10 @@ class ApiGateTest {
                     public static final char MARK = 'x';
                     public static final long BIG = 5L;
                     public static final double HALF = 0.5;
+                    public static final String SLASH = "a\\\\b";
+                    public static final float ONE_AND_A_HALF = 1.5f;
+                    public static final char QUOTE = '\\'';
+                    public static final char NEWLINE = '\\n';
                     public static final Object NOT_CONSTANT = new Object();
                     public final int notStatic = 4;
                     static { System.exit(99); }
@@ -360,6 +364,16 @@ class ApiGateTest {
         assertTrue(lines.contains("fx.Consts field public static final char fx.Consts.MARK = 'x'"), lines::toString);
         assertTrue(lines.contains("fx.Consts field public static final long fx.Consts.BIG = 5L"), lines::toString);
         assertTrue(lines.contains("fx.Consts field public static final double fx.Consts.HALF = 0.5D"), lines::toString);
+        assertTrue(
+                lines.contains("fx.Consts field public static final java.lang.String fx.Consts.SLASH = \"a\\\\b\""),
+                lines::toString);
+        assertTrue(
+                lines.contains("fx.Consts field public static final float fx.Consts.ONE_AND_A_HALF = 1.5F"),
+                lines::toString);
+        assertTrue(lines.contains("fx.Consts field public static final char fx.Consts.QUOTE = '\\''"), lines::toString);
+        assertTrue(
+                lines.contains("fx.Consts field public static final char fx.Consts.NEWLINE = '\\u000a'"),
+                lines::toString);
         assertTrue(
                 lines.contains("fx.Consts field public static final java.lang.Object fx.Consts.NOT_CONSTANT"),
                 lines::toString);
