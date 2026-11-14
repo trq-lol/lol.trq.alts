@@ -104,7 +104,7 @@ public final class SkinAvatarCache<H> {
      *
      * @param uuid the player UUID to resolve an avatar for; null or blank yields null
      * @return the ready handle, or null while a fetch is pending, is backing off, or was just started
-     * @since 0.2.0, keyed on the player's UUID since 0.10.0
+     * @since 0.1.0, keyed on the player's UUID since 0.10.0
      */
     @SuppressWarnings("unchecked")
     public H get(String uuid) {
