@@ -24,6 +24,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `account.SkinProblem` (`UNREADABLE`, `EMPTY`, `TOO_LARGE`, `NOT_PNG`, `WRONG_DIMENSIONS`) and
   `SkinService.validate(byte[])`, which says why bytes are not an uploadable skin without sending
   anything.
+- **The shared vault speaks AVP 0.5** (the "0.5 (draft)" specification of the Alt Vault Protocol), in
+  `lol.trq.alts.vault`. A repository has an owner, whose keys come from a 24-word BIP39 phrase
+  (`OwnerIdentity`: `generate`, `fromPhrase`, `fromEntropy`, `phrase`, `entropy`); every change to the
+  members, the refresh-token policy or the hosts is a state the owner signs, and every write is a
+  commit a member signs. The client verifies all of it itself, from genesis, and trusts no host:
+  - `alts.vault()` returns `VaultHosts`, which connects to a host on the runtime's transport (its proxy,
+    timeouts and executor) by the host's key. `connect` takes a `RepoLocator`, a `HostRef`, a
+    `VaultSnapshot` or a locator and key, and refuses a host that serves another key with `PROTOCOL`; a
+    locator alone is a first contact. A locator is reached at `https://<locator>` unless
+    `Builder#vaultHostAddress` maps it elsewhere. Each runtime keeps its own host tokens, and
+    `close()` drops them.
+  - `SharedVault.create`, `open`, `prepareJoin`, `join` and `resume` give one member device's copy.
+    `sync()` returns a `SyncReport`: the new states, a diverged owner chain the tie rule settled
+    (`divergedAt`), a policy that turned to sharing (`policyTurnedOn`), the unreadable and discarded
+    heads, and the pending leave requests. `openReport()` says the same of the pull that opened the copy.
+  - The accounts are `AltAccount`s with `BanInfo` per server id: `accounts()`, `account(uuid)`, `put`,
+    `remove(uuid)`, `markBanned`. `put` stamps only the fields that changed, so two devices editing
+    different fields of one account both keep their edit. While the repository withholds refresh
+    tokens, `refreshToken` and `expiresAt` are neither sent nor read. Nothing the vault reads is saved
+    to the `AccountStore`.
+  - The owner invites from a pasted `InviteToken`, removes a `VaultMember` from `roster()` (the data
+    key rotates), sets the policy with `setShareRefreshTokens`, and removes leaving members with
+    `processLeaves()`; a member can `leave()`. `hosts()` lists the repository's hosts.
+  - `LinkSession` adds a second owner device without typing the phrase, after the owner confirms a
+    6-digit code on both devices.
+  - `RepoLocator`, `InviteToken`, `LinkRequest` and `LinkGrant` read pasted text, whitespace anywhere
+    ignored, and refuse anything else with `INVALID_INPUT`.
+  - `VaultSnapshot` is what a host persists between runs, as JSON, encrypted (for example in
+    `HostSecrets`): the pin a rollback must not go below, the retained data keys, the clock and the
+    merged accounts. Its `toString` shows no key and no account.
+  - A host that serves a forged state or rolls the repository back fails the whole operation with
+    `PROTOCOL` and changes nothing (the reference client keeps the valid prefix instead). Every vault
+    future fails only with an `AltsException`. No request carries the phrase, its entropy or seed, a
+    private key, a data key or a plaintext account field.
+- `VaultIdentity.fingerprint()`, the member fingerprint an owner compares with an invite token's.
 
 ### Changed
 
@@ -145,6 +180,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server cannot have the key sign an AVP 0.5 leave request or commit signature passed off as a nonce. It
   stays the raw-nonce signature a host uses to authenticate to a 0.4 server; AVP 0.5 authentication signs
   a domain-separated challenge transcript instead.
+- **Breaking: the identity types moved to `lol.trq.alts.vault`.** `VaultIdentity`, `WrappedIdentity` and
+  `RecoveryCode` were in `lol.trq.alts.crypto`; change the import. The JSON form of `WrappedIdentity` is
+  unchanged, so a stored identity still opens. `VaultIdentity` is also the AVP 0.5 member identity: its
+  Ed25519 key is the member key and its X25519 key the one data keys are wrapped to.
 
 ### Removed
 
