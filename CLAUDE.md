@@ -176,9 +176,11 @@ final class with static factories and withers instead: `AltAccount`, `MicrosoftA
 `BulkOptions`, `NetworkScope`, `ClaimOptions`, `AltsFailure` and `BulkEntryResult` are, with the
 accessors, value `equals`/`hashCode` and (redacted where it applies) `toString` a record would have.
 `AltAccount`'s private fields carry the `@SerializedName`s, and their names and order are the store
-file's format: `StoreFormatCompatTest` loads a file 0.12 wrote and requires the same bytes back, and
-the module opens `model` to Gson for it. `AltsFailure` is a value, not a wire DTO, and carries no
-annotations.
+file's format, but Gson never writes them: the stores read and write an account through the record
+`internal.store.AltAccountJson.Stored`, same components, same order, so no final field is set by
+reflection (a later JDK refuses that). Keep the two in step; `StoreFormatCompatTest` loads a file 0.12
+wrote and requires the same bytes back. `AltsFailure` and `MicrosoftAuthConfig` are values, not wire
+DTOs, and carry no annotations.
 
 **Logging in is one step more than operating on an account.** `AltAccountService.check`/`refresh` never
 touch the live session; `loginAccount` is `refresh` plus the injection. Keep it that way: anything that
@@ -329,8 +331,9 @@ and its RPS ticket prefix.
   `SharedVault.engineForTests`) stay package-private.
 - **Every test runs twice.** `check` runs the suite on the class path (`test`) and again with the jar as
   a named module (`moduleTest`), so a missing `requires` or `opens` fails there. Gson builds private
-  types by reflection only in `store`, `internal.auth` and `model` (`AltAccount`'s fields), which the
-  descriptor opens to Gson alone.
+  records by reflection only in `store`, `internal.auth` and `internal.store` (the record an
+  `AltAccount` goes through), which the descriptor opens to Gson alone. Never make Gson fill a final
+  field: give the type a record form instead.
 - **Do not edit a docs snippet directly.** Every multi-line Java block in `docs/GETTING_STARTED.md` is
   inlined from a method in `examples/`, which `check` compiles with `-Xlint:deprecation -Werror`. Change
   the example first, then the guide, character for character.
