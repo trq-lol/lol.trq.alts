@@ -56,6 +56,50 @@ tasks.withType(Javadoc).configureEach {
     options.encoding = 'UTF-8'
 }
 
+// The published Javadoc is the API: the internal packages are not exported and are not documented.
+tasks.named('javadoc', Javadoc) {
+    exclude '**/internal/**'
+    // The public sources still refer to internal types; javadoc resolves them from the source path, and
+    // documents only the files it is given.
+    options.addPathOption('-source-path').value = sourceSets.main.java.srcDirs as List
+}
+
+// Fails if the published Javadoc names an internal package or documents an internal type: an entry under an
+// `internal` directory, or a page, index or element list that refers to `lol.trq.alts.internal.<something>`.
+def javadocCheck = tasks.register('javadocCheck') {
+    group = 'verification'
+    description = 'Checks that the javadoc jar holds no internal package and no page for an internal type.'
+    def javadocJar = tasks.named('javadocJar').flatMap { it.archiveFile }
+    inputs.file(javadocJar).withPropertyName('javadocJar')
+    def marker = layout.buildDirectory.file('javadocCheck/ok')
+    outputs.file(marker)
+    doLast {
+        def reference = ~/lol[.\/]trq[.\/]alts[.\/]internal[.\/]/
+        def problems = []
+        new java.util.zip.ZipFile(javadocJar.get().asFile).withCloseable { zip ->
+            zip.entries().each { entry ->
+                if (entry.name.split('/').contains('internal')) {
+                    problems << "entry ${entry.name}"
+                } else if (!entry.directory && (entry.name.endsWith('.html') || entry.name.endsWith('.js')
+                        || entry.name.endsWith('element-list'))) {
+                    def text = zip.getInputStream(entry).getText('UTF-8')
+                    if (reference.matcher(text).find()) {
+                        problems << "reference in ${entry.name}"
+                    }
+                }
+            }
+        }
+        if (!problems.isEmpty()) {
+            throw new GradleException('The javadoc names internal packages or types:\n  ' + problems.join('\n  '))
+        }
+        marker.get().asFile.text = 'ok\n'
+    }
+}
+
+tasks.named('check') {
+    dependsOn javadocCheck
+}
+
 tasks.named('test') {
     useJUnitPlatform()
     // ErrorKindMigrationTableTest reads the changelog's error-kind table, so a changed table reruns it.
