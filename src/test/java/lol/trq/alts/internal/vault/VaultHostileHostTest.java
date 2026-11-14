@@ -597,6 +597,102 @@ class VaultHostileHostTest {
     }
 
     @Test
+    void aRemovedMembersVerifiedButUnreadableHeadIsInTheFrontier() {
+        VaultEngine owner = fx.create(newOwner());
+        MemberKeys bobKeys = MemberKeys.generate();
+        VaultEngine bob = fx.invite(owner, bobKeys);
+        set(bob, "note", "b1");
+        await(owner.pull());
+        // A head the owner verifies but cannot read: sealed under a key nobody was given.
+        Commit garbled = Commits.seal(
+                AvpCrypto.randomBytes(32),
+                new Commits.Header(bob.repoId(), bob.heads(), bob.tip().state().manifestSeq(), bob.tipHash(), 0),
+                Payload.EMPTY.encode(),
+                bobKeys.ed25519Seed());
+        bob.host().push(bobKeys, bob.repoId(), garbled);
+        PullReport r = await(owner.pull());
+        assertEquals(ids(List.of(garbled.commitId())), ids(r.unreadableHeads()));
+        await(owner.remove(bobKeys.ed25519Public()));
+        List<byte[]> frontier = owner.tip()
+                .state()
+                .removalOf(bobKeys.ed25519Public())
+                .orElseThrow()
+                .frontier();
+        assertTrue(ids(frontier).contains(AvpBytes.base64(garbled.commitId())), "every verified commit is covered");
+    }
+
+    @Test
+    void anotherRepositoryServedInPlaceOfTheOneAskedForIsRefused() {
+        VaultFixture.Owner o = newOwner();
+        VaultEngine first = fx.create(o);
+        VaultEngine second = fx.create(o);
+        MemberKeys bob = MemberKeys.generate();
+        fx.invite(first, bob);
+        VaultEngine inSecond = fx.invite(second, bob);
+        String asked = first.repoId();
+        String served = second.repoId();
+        fx.host.interceptor = (req, honest) -> honest.apply(
+                new TestAvpHost.Request(req.method(), req.path().replace(asked, served), req.headers(), req.body()));
+        assertEquals(
+                Kind.PROTOCOL,
+                failure(VaultEngine.open(fx.connect(), bob, asked, fx.clock)).kind());
+        EngineState wrong = new EngineState(
+                asked, inSecond.state().chainHashes(), new java.util.TreeMap<>(), 0, 0, Payload.EMPTY, false);
+        assertEquals(
+                Kind.PROTOCOL,
+                failure(VaultEngine.resume(fx.connect(), bob, wrong, fx.clock)).kind());
+    }
+
+    @Test
+    void anAcceptanceThatDoesNotCheckIsRefusedOnPrepareJoin() {
+        VaultEngine owner = fx.create(newOwner());
+        MemberKeys bob = MemberKeys.generate();
+        String repoId = owner.repoId();
+        long expires = System.currentTimeMillis() + 600_000;
+        byte[] hostSeed = fx.host.seed();
+        byte[] other = AvpCrypto.randomBytes(32);
+        Tokens.Acceptance otherSigner =
+                Tokens.signAcceptance(repoId, bob.ed25519Public(), expires, AvpCrypto.randomBytes(32));
+        Tokens.Acceptance forgedSig = new Tokens.Acceptance(
+                repoId,
+                bob.ed25519Public(),
+                fx.host.key(),
+                expires,
+                Tokens.signAcceptance(repoId, bob.ed25519Public(), expires, other)
+                        .signature());
+        Tokens.Acceptance otherRepo =
+                Tokens.signAcceptance("AAAAAAAAAAAAAAAAAAAAAA", bob.ed25519Public(), expires, hostSeed);
+        Tokens.Acceptance otherMember =
+                Tokens.signAcceptance(repoId, MemberKeys.generate().ed25519Public(), expires, hostSeed);
+        for (Tokens.Acceptance bad : List.of(otherSigner, forgedSig, otherRepo, otherMember)) {
+            fx.host.interceptor = (req, honest) -> req.path().equals("/v1/prepare-join")
+                    ? TestAvpHost.Response.json(200, Tokens.toJson(bad))
+                    : honest.apply(req);
+            assertEquals(
+                    Kind.PROTOCOL,
+                    failure(VaultEngine.prepareJoin(fx.connect(), bob, repoId)).kind());
+        }
+    }
+
+    @Test
+    void twoLeaveRequestsOfOneMemberRemoveItOnce() {
+        VaultEngine owner = fx.create(newOwner());
+        MemberKeys bobKeys = MemberKeys.generate();
+        VaultEngine bob = fx.invite(owner, bobKeys);
+        await(bob.leave());
+        Tokens.LeaveRequest again =
+                Tokens.signLeave(owner.repoId(), System.currentTimeMillis() + 1, bobKeys.ed25519Seed());
+        onPull(answer -> {
+            answer.getAsJsonArray("leaves").add(Tokens.toJson(again));
+            return answer;
+        });
+        List<byte[]> removed = await(owner.processLeaves());
+        assertEquals(1, removed.size());
+        assertFalse(owner.tip().state().hasMember(bobKeys.ed25519Public()));
+        assertEquals(3, owner.tip().state().manifestSeq(), "one removal, not two");
+    }
+
+    @Test
     void aBareBadRequestIsReportedByItsStatus() {
         VaultEngine owner = fx.create(newOwner());
         fx.host.interceptor = (req, honest) -> req.path().endsWith("/push")

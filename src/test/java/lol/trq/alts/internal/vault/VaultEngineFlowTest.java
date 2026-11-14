@@ -448,6 +448,14 @@ class VaultEngineFlowTest {
                 token.homeHostLocator(),
                 token.acceptance());
         assertEquals(Kind.PROTOCOL, failure(owner.invite(otherKey)).kind());
+        // A token that names another home host than the one whose acceptance it carries: never added.
+        InviteToken otherHome = new InviteToken(
+                token.ed25519PublicKey(),
+                token.x25519PublicKey(),
+                MemberKeys.generate().ed25519Public(),
+                "elsewhere.vault.example",
+                token.acceptance());
+        assertEquals(Kind.PROTOCOL, failure(owner.invite(otherHome)).kind());
         fx.skew.set(16 * 60_000L);
         assertEquals(Kind.PROTOCOL, failure(owner.invite(token)).kind(), "expired");
         assertEquals(1, owner.tip().state().manifestSeq());
