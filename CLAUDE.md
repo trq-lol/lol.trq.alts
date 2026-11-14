@@ -330,7 +330,7 @@ and its RPS ticket prefix.
 JDK 25 required. The library has no Minecraft dependency, so it builds standalone. A release is a
 `build: release X.Y.Z` commit (version in `build.gradle`, dated changelog heading, the API dump's
 version) followed by a `vX.Y.Z` tag; the tag's CI run publishes the GitHub release from that changelog
-section.
+section, once the build and the no-leak scan of that commit have passed.
 
 ## Further reading
 

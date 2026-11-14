@@ -69,7 +69,7 @@ A release is a `build: release X.Y.Z` commit that:
 3. dates the changelog heading (`## [X.Y.Z] - YYYY-MM-DD`);
 4. passes `./gradlew check --rerun-tasks`.
 
-It is followed by a `vX.Y.Z` tag on that commit. CI builds the tag and publishes a GitHub release whose notes are that changelog section, so the heading has to match the tag's version exactly.
+It is followed by a `vX.Y.Z` tag on that commit. CI builds the tag, runs the no-leak scan on it, and only then publishes a GitHub release whose notes are that changelog section, so the heading has to match the tag's version exactly.
 
 ## Pull requests
 
