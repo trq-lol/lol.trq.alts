@@ -23,6 +23,9 @@ import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure.Kind;
+import lol.trq.alts.internal.account.AccountUrls;
+import lol.trq.alts.internal.account.ProfileLookupServiceImpl;
+import lol.trq.alts.internal.account.Uuids;
 import lol.trq.alts.internal.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -94,9 +97,9 @@ class ProfileLookupServiceTest {
         server.start();
         lookup = new ProfileLookupServiceImpl(
                 TestTransports.direct(),
-                new AccountEndpoints("http://"
+                new AccountUrls(new AccountEndpoints("http://"
                         + InetAddress.getLoopbackAddress().getHostAddress() + ":"
-                        + server.getAddress().getPort()));
+                        + server.getAddress().getPort())));
     }
 
     @AfterEach
@@ -368,7 +371,7 @@ class ProfileLookupServiceTest {
 
     @Test
     void lookupPathSegmentsAreEncoded() {
-        AccountEndpoints endpoints = new AccountEndpoints("https://services.example");
+        AccountUrls endpoints = new AccountUrls(new AccountEndpoints("https://services.example"));
 
         assertEquals(
                 "https://services.example/minecraft/profile/lookup/name/Plain_Name1",

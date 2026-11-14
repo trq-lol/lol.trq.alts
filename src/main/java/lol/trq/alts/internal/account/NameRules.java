@@ -1,4 +1,4 @@
-package lol.trq.alts.account;
+package lol.trq.alts.internal.account;
 
 import java.util.regex.Pattern;
 
@@ -8,7 +8,7 @@ import java.util.regex.Pattern;
  * @author trq
  * @since 0.12.0
  */
-final class NameRules {
+public final class NameRules {
 
     private static final Pattern VALID = Pattern.compile("[A-Za-z0-9_]{3,16}");
 

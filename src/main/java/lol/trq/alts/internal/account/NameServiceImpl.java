@@ -1,4 +1,4 @@
-package lol.trq.alts.account;
+package lol.trq.alts.internal.account;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
@@ -16,6 +16,13 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import lol.trq.alts.AltsFailure;
 import lol.trq.alts.AltsFailure.Kind;
+import lol.trq.alts.account.ClaimOptions;
+import lol.trq.alts.account.ClaimResult;
+import lol.trq.alts.account.NameAvailability;
+import lol.trq.alts.account.NameChangeResult;
+import lol.trq.alts.account.NameEligibility;
+import lol.trq.alts.account.NameService;
+import lol.trq.alts.account.PlayerProfile;
 import lol.trq.alts.internal.net.FailureText;
 import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
@@ -30,7 +37,7 @@ import lol.trq.alts.time.TimeSource;
  * @author trq
  * @since 1.0.0
  */
-final class NameServiceImpl implements NameService {
+public final class NameServiceImpl implements NameService {
 
     /** The kinds of failed change that end a claim run rather than being tried again. */
     private static final java.util.Set<Kind> TERMINAL = java.util.EnumSet.of(
@@ -40,10 +47,10 @@ final class NameServiceImpl implements NameService {
     private static final long SPIN_THRESHOLD_MILLIS = 20L;
 
     private final AccountHttp http;
-    private final AccountEndpoints endpoints;
+    private final AccountUrls endpoints;
     private final Gson gson;
 
-    NameServiceImpl(AccountHttp http, AccountEndpoints endpoints, Gson gson) {
+    public NameServiceImpl(AccountHttp http, AccountUrls endpoints, Gson gson) {
         this.http = http;
         this.endpoints = endpoints;
         this.gson = gson;

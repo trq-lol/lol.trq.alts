@@ -1,9 +1,11 @@
-package lol.trq.alts.account;
+package lol.trq.alts.internal.account;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
+import lol.trq.alts.account.CertificateService;
+import lol.trq.alts.account.PlayerCertificate;
 import lol.trq.alts.net.NetworkScope;
 
 /**
@@ -13,12 +15,12 @@ import lol.trq.alts.net.NetworkScope;
  * @author trq
  * @since 0.12.0
  */
-final class CertificateServiceImpl implements CertificateService {
+public final class CertificateServiceImpl implements CertificateService {
 
     private final AccountHttp http;
-    private final AccountEndpoints endpoints;
+    private final AccountUrls endpoints;
 
-    CertificateServiceImpl(AccountHttp http, AccountEndpoints endpoints) {
+    public CertificateServiceImpl(AccountHttp http, AccountUrls endpoints) {
         this.http = http;
         this.endpoints = endpoints;
     }

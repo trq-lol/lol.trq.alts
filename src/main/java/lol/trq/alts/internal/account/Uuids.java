@@ -1,4 +1,4 @@
-package lol.trq.alts.account;
+package lol.trq.alts.internal.account;
 
 import java.util.Locale;
 import java.util.regex.Pattern;
@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
  * @author trq
  * @since 0.12.0
  */
-final class Uuids {
+public final class Uuids {
 
     private static final Pattern UNDASHED = Pattern.compile("[0-9a-fA-F]{32}");
 
@@ -23,7 +23,7 @@ final class Uuids {
      * @param id a dashed or undashed UUID, or null
      * @return the dashed form; the input unchanged when it is not thirty-two hex digits, null for null
      */
-    static String dashed(String id) {
+    public static String dashed(String id) {
         String undashed = undashed(id);
         if (undashed == null) {
             return id;
@@ -45,7 +45,7 @@ final class Uuids {
      * @param id a dashed or undashed UUID, or null
      * @return the undashed form, or null when the input is not a UUID
      */
-    static String undashed(String id) {
+    public static String undashed(String id) {
         if (id == null) {
             return null;
         }

@@ -1,8 +1,12 @@
-package lol.trq.alts.account;
+package lol.trq.alts.internal.account;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import java.util.List;
+import lol.trq.alts.account.Cape;
+import lol.trq.alts.account.CapeService;
+import lol.trq.alts.account.PlayerProfile;
+import lol.trq.alts.account.ProfileService;
 import lol.trq.alts.net.NetworkScope;
 
 /**
@@ -12,14 +16,14 @@ import lol.trq.alts.net.NetworkScope;
  * @author trq
  * @since 1.0.0
  */
-final class CapeServiceImpl implements CapeService {
+public final class CapeServiceImpl implements CapeService {
 
     private final AccountHttp http;
-    private final AccountEndpoints endpoints;
+    private final AccountUrls endpoints;
     private final Gson gson;
     private final ProfileService profile;
 
-    CapeServiceImpl(AccountHttp http, AccountEndpoints endpoints, Gson gson, ProfileService profile) {
+    public CapeServiceImpl(AccountHttp http, AccountUrls endpoints, Gson gson, ProfileService profile) {
         this.http = http;
         this.endpoints = endpoints;
         this.gson = gson;

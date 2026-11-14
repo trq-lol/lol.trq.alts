@@ -2,6 +2,16 @@ package lol.trq.alts.account;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import lol.trq.alts.internal.account.AccountHttp;
+import lol.trq.alts.internal.account.AccountUrls;
+import lol.trq.alts.internal.account.BlocklistServiceImpl;
+import lol.trq.alts.internal.account.CapeServiceImpl;
+import lol.trq.alts.internal.account.CertificateServiceImpl;
+import lol.trq.alts.internal.account.EntitlementServiceImpl;
+import lol.trq.alts.internal.account.NameServiceImpl;
+import lol.trq.alts.internal.account.PlayerAttributesServiceImpl;
+import lol.trq.alts.internal.account.ProfileServiceImpl;
+import lol.trq.alts.internal.account.SkinServiceImpl;
 import lol.trq.alts.internal.net.HttpTransport;
 
 /**
@@ -35,14 +45,15 @@ public final class AccountServices {
 
     private AccountServices(HttpTransport transport, String token, String accountUuid, AccountEndpoints endpoints) {
         AccountHttp http = new AccountHttp(transport, token, accountUuid);
-        this.profile = new ProfileServiceImpl(http, endpoints, GSON);
-        this.entitlements = new EntitlementServiceImpl(http, endpoints);
-        this.name = new NameServiceImpl(http, endpoints, GSON);
-        this.skin = new SkinServiceImpl(http, endpoints, GSON);
-        this.cape = new CapeServiceImpl(http, endpoints, GSON, this.profile);
-        this.attributes = new PlayerAttributesServiceImpl(http, endpoints);
-        this.certificates = new CertificateServiceImpl(http, endpoints);
-        this.blocklist = new BlocklistServiceImpl(http, endpoints);
+        AccountUrls urls = new AccountUrls(endpoints);
+        this.profile = new ProfileServiceImpl(http, urls, GSON);
+        this.entitlements = new EntitlementServiceImpl(http, urls);
+        this.name = new NameServiceImpl(http, urls, GSON);
+        this.skin = new SkinServiceImpl(http, urls, GSON);
+        this.cape = new CapeServiceImpl(http, urls, GSON, this.profile);
+        this.attributes = new PlayerAttributesServiceImpl(http, urls);
+        this.certificates = new CertificateServiceImpl(http, urls);
+        this.blocklist = new BlocklistServiceImpl(http, urls);
     }
 
     /**

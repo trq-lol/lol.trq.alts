@@ -1,4 +1,4 @@
-package lol.trq.alts.account;
+package lol.trq.alts.internal.account;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -11,6 +11,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import lol.trq.alts.account.ProfileLookupService;
+import lol.trq.alts.account.PublicProfile;
 import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 
@@ -25,15 +27,15 @@ import lol.trq.alts.net.NetworkScope;
  * @author trq
  * @since 0.12.0
  */
-final class ProfileLookupServiceImpl implements ProfileLookupService {
+public final class ProfileLookupServiceImpl implements ProfileLookupService {
 
     /** The most names the batch endpoint accepts in one request. */
     static final int BATCH_SIZE = 10;
 
     private final AccountHttp http;
-    private final AccountEndpoints endpoints;
+    private final AccountUrls endpoints;
 
-    ProfileLookupServiceImpl(HttpTransport transport, AccountEndpoints endpoints) {
+    public ProfileLookupServiceImpl(HttpTransport transport, AccountUrls endpoints) {
         this.http = AccountHttp.anonymous(transport);
         this.endpoints = endpoints;
     }

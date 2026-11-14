@@ -1,9 +1,11 @@
-package lol.trq.alts.account;
+package lol.trq.alts.internal.account;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import lol.trq.alts.account.EntitlementService;
+import lol.trq.alts.account.Entitlements;
 import lol.trq.alts.net.NetworkScope;
 
 /**
@@ -17,12 +19,12 @@ import lol.trq.alts.net.NetworkScope;
  * @author trq
  * @since 1.0.0
  */
-final class EntitlementServiceImpl implements EntitlementService {
+public final class EntitlementServiceImpl implements EntitlementService {
 
     private final AccountHttp http;
-    private final AccountEndpoints endpoints;
+    private final AccountUrls endpoints;
 
-    EntitlementServiceImpl(AccountHttp http, AccountEndpoints endpoints) {
+    public EntitlementServiceImpl(AccountHttp http, AccountUrls endpoints) {
         this.http = http;
         this.endpoints = endpoints;
     }

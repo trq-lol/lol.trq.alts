@@ -1,6 +1,7 @@
 package lol.trq.alts.account;
 
 import com.google.gson.annotations.SerializedName;
+import lol.trq.alts.internal.account.Uuids;
 
 /**
  * A player's public identity — the name and UUID anyone can look up, with nothing an account owner alone

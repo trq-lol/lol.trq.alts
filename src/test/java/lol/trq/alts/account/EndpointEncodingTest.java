@@ -3,6 +3,7 @@ package lol.trq.alts.account;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.IOException;
+import lol.trq.alts.internal.account.AccountUrls;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,7 +45,7 @@ class EndpointEncodingTest {
 
     @Test
     void nameEndpointsEncodeTheirSegment() {
-        AccountEndpoints endpoints = new AccountEndpoints("https://services.example");
+        AccountUrls endpoints = new AccountUrls(new AccountEndpoints("https://services.example"));
 
         assertEquals(
                 "https://services.example/minecraft/profile/name/a%2Fb%3Fc%23d%20e/available",

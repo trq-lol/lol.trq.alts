@@ -2,6 +2,7 @@ package lol.trq.alts.account;
 
 import com.google.gson.annotations.SerializedName;
 import java.util.List;
+import lol.trq.alts.internal.account.Uuids;
 
 /**
  * The players an account has blocked, from {@code GET /privacy/blocklist}.

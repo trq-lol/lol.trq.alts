@@ -1,6 +1,8 @@
 package lol.trq.alts.account;
 
 import lol.trq.alts.internal.account.AccountAccess;
+import lol.trq.alts.internal.account.AccountUrls;
+import lol.trq.alts.internal.account.ProfileLookupServiceImpl;
 import lol.trq.alts.internal.net.HttpTransport;
 
 /**
@@ -32,6 +34,6 @@ final class AccountBridge implements AccountAccess.Bridge {
 
     @Override
     public ProfileLookupService profileLookup(HttpTransport transport, AccountEndpoints endpoints) {
-        return new ProfileLookupServiceImpl(transport, endpoints == null ? AccountEndpoints.defaults() : endpoints);
+        return new ProfileLookupServiceImpl(transport, new AccountUrls(endpoints));
     }
 }

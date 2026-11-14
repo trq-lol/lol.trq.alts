@@ -1,9 +1,11 @@
-package lol.trq.alts.account;
+package lol.trq.alts.internal.account;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.List;
+import lol.trq.alts.account.Blocklist;
+import lol.trq.alts.account.BlocklistService;
 import lol.trq.alts.net.NetworkScope;
 
 /**
@@ -12,12 +14,12 @@ import lol.trq.alts.net.NetworkScope;
  * @author trq
  * @since 0.12.0
  */
-final class BlocklistServiceImpl implements BlocklistService {
+public final class BlocklistServiceImpl implements BlocklistService {
 
     private final AccountHttp http;
-    private final AccountEndpoints endpoints;
+    private final AccountUrls endpoints;
 
-    BlocklistServiceImpl(AccountHttp http, AccountEndpoints endpoints) {
+    public BlocklistServiceImpl(AccountHttp http, AccountUrls endpoints) {
         this.http = http;
         this.endpoints = endpoints;
     }

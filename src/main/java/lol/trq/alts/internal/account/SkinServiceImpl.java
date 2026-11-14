@@ -1,4 +1,4 @@
-package lol.trq.alts.account;
+package lol.trq.alts.internal.account;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -10,6 +10,10 @@ import java.util.HexFormat;
 import java.util.Optional;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure.Kind;
+import lol.trq.alts.account.PlayerProfile;
+import lol.trq.alts.account.SkinModel;
+import lol.trq.alts.account.SkinProblem;
+import lol.trq.alts.account.SkinService;
 import lol.trq.alts.internal.net.Multipart;
 import lol.trq.alts.net.NetworkScope;
 
@@ -20,7 +24,7 @@ import lol.trq.alts.net.NetworkScope;
  * @author trq
  * @since 1.0.0
  */
-final class SkinServiceImpl implements SkinService {
+public final class SkinServiceImpl implements SkinService {
 
     private static final SecureRandom BOUNDARIES = new SecureRandom();
 
@@ -35,10 +39,10 @@ final class SkinServiceImpl implements SkinService {
     private static final int LEGACY_SKIN_HEIGHT = 32;
 
     private final AccountHttp http;
-    private final AccountEndpoints endpoints;
+    private final AccountUrls endpoints;
     private final Gson gson;
 
-    SkinServiceImpl(AccountHttp http, AccountEndpoints endpoints, Gson gson) {
+    public SkinServiceImpl(AccountHttp http, AccountUrls endpoints, Gson gson) {
         this.http = http;
         this.endpoints = endpoints;
         this.gson = gson;

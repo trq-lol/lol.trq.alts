@@ -1,4 +1,4 @@
-package lol.trq.alts.account;
+package lol.trq.alts.internal.account;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -8,6 +8,9 @@ import java.util.Optional;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure;
 import lol.trq.alts.AltsFailure.Kind;
+import lol.trq.alts.account.PlayerProfile;
+import lol.trq.alts.account.ProfileCreationResult;
+import lol.trq.alts.account.ProfileService;
 import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 
@@ -18,13 +21,13 @@ import lol.trq.alts.net.NetworkScope;
  * @author trq
  * @since 1.0.0
  */
-final class ProfileServiceImpl implements ProfileService {
+public final class ProfileServiceImpl implements ProfileService {
 
     private final AccountHttp http;
-    private final AccountEndpoints endpoints;
+    private final AccountUrls endpoints;
     private final Gson gson;
 
-    ProfileServiceImpl(AccountHttp http, AccountEndpoints endpoints, Gson gson) {
+    public ProfileServiceImpl(AccountHttp http, AccountUrls endpoints, Gson gson) {
         this.http = http;
         this.endpoints = endpoints;
         this.gson = gson;

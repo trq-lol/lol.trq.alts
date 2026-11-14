@@ -1,4 +1,4 @@
-package lol.trq.alts.account;
+package lol.trq.alts.internal.account;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
@@ -26,13 +26,13 @@ import lol.trq.alts.net.NetworkScope;
  * @author trq
  * @since 1.0.0
  */
-final class AccountHttp {
+public final class AccountHttp {
 
     private final HttpTransport transport;
     private final String token;
     private final String accountUuid;
 
-    AccountHttp(HttpTransport transport, String token, String accountUuid) {
+    public AccountHttp(HttpTransport transport, String token, String accountUuid) {
         this.transport = java.util.Objects.requireNonNull(transport, "transport");
         this.token = token;
         this.accountUuid = accountUuid;

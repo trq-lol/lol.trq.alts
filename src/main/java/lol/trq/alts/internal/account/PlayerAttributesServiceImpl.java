@@ -1,4 +1,4 @@
-package lol.trq.alts.account;
+package lol.trq.alts.internal.account;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -7,6 +7,8 @@ import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import lol.trq.alts.account.PlayerAttributes;
+import lol.trq.alts.account.PlayerAttributesService;
 import lol.trq.alts.net.NetworkScope;
 
 /**
@@ -20,12 +22,12 @@ import lol.trq.alts.net.NetworkScope;
  * @author trq
  * @since 0.12.0
  */
-final class PlayerAttributesServiceImpl implements PlayerAttributesService {
+public final class PlayerAttributesServiceImpl implements PlayerAttributesService {
 
     private final AccountHttp http;
-    private final AccountEndpoints endpoints;
+    private final AccountUrls endpoints;
 
-    PlayerAttributesServiceImpl(AccountHttp http, AccountEndpoints endpoints) {
+    public PlayerAttributesServiceImpl(AccountHttp http, AccountUrls endpoints) {
         this.http = http;
         this.endpoints = endpoints;
     }

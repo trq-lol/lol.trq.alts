@@ -14,6 +14,8 @@ import java.util.Optional;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure;
 import lol.trq.alts.AltsFailure.Kind;
+import lol.trq.alts.internal.account.AccountUrls;
+import lol.trq.alts.internal.account.ProfileLookupServiceImpl;
 import lol.trq.alts.internal.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,7 +53,7 @@ class AccountServicesFailureKindTest {
     private void open(AccountEndpoints endpoints) {
         services = AccountServices.create(
                 TestTransports.direct(), TOKEN, "11111111-2222-3333-4444-555555555555", endpoints);
-        lookup = new ProfileLookupServiceImpl(TestTransports.direct(), endpoints);
+        lookup = new ProfileLookupServiceImpl(TestTransports.direct(), new AccountUrls(endpoints));
     }
 
     /** Every call that throws on a failure, by name. */
@@ -197,7 +199,7 @@ class AccountServicesFailureKindTest {
     void aClosedTransportIsCancelled() {
         var transport = TestTransports.direct();
         services = AccountServices.create(transport, TOKEN, "11111111-2222-3333-4444-555555555555", server.endpoints());
-        lookup = new ProfileLookupServiceImpl(transport, server.endpoints());
+        lookup = new ProfileLookupServiceImpl(transport, new AccountUrls(server.endpoints()));
         transport.close();
 
         assertThrown(throwingCalls(), Kind.CANCELLED, Optional.empty());
