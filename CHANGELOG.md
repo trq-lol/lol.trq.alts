@@ -63,6 +63,7 @@ constructors are gone, and so are deconstruction patterns over them.
 | 0.12 | 1.0 |
 | --- | --- |
 | `new AltAccount(uuid, username, accessToken, type, lastUsed, lastUsedBy, bans, sourceClient, sourceUser, refreshToken, expiresAt)` | `AltAccount.builder(uuid, username, accessToken, type).lastUsed(..).lastUsedBy(..).bans(..).sourceClient(..).sourceUser(..).refreshToken(..).expiresAt(..).build()` (each setter optional), or `account.toBuilder()` to change several fields; the store file format is unchanged |
+| `new MicrosoftAuthConfig(...)` (thirteen or eleven arguments) | `MicrosoftAuthConfig.of(clientId)` or `legacyMsa(clientId)`, then `withScope`, `withRedirectPath`, `withEndpoints`, `withDeviceCodeEndpoints`, and the new `withRedirectUri` and `withRpsTicketPrefix` |
 
 **The shared vault: 0.4 to AVP 0.5.** 1.0 writes AVP 0.5 only, which is not wire compatible with 0.4
 and specifies no upgrade. A repository moves in five steps:

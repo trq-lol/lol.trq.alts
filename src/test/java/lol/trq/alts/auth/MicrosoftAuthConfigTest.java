@@ -1,8 +1,10 @@
 package lol.trq.alts.auth;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -46,8 +48,11 @@ class MicrosoftAuthConfigTest {
 
     @Test
     void blankOptionalsFallBackToDefaults() {
-        MicrosoftAuthConfig config =
-                new MicrosoftAuthConfig("app", "  ", null, null, null, null, null, null, null, "  ", "  ");
+        MicrosoftAuthConfig config = MicrosoftAuthConfig.of("app")
+                .withScope("  ")
+                .withRedirectPath(null)
+                .withRedirectUri("  ")
+                .withRpsTicketPrefix("  ");
         assertEquals(MicrosoftAuthConfig.DEFAULT_SCOPE, config.scope());
         assertEquals(MicrosoftAuthConfig.DEFAULT_REDIRECT_PATH, config.redirectPath());
         assertEquals(MicrosoftAuthConfig.DEFAULT_RPS_TICKET_PREFIX, config.rpsTicketPrefix());
@@ -93,6 +98,33 @@ class MicrosoftAuthConfigTest {
         assertEquals("custom.scope", config.scope());
         assertEquals("/cb", config.redirectPath());
         assertEquals("app", config.clientId());
+    }
+
+    @Test
+    void theRefreshGrantRedirectAndTicketPrefixHaveTheirOwnCopies() {
+        MicrosoftAuthConfig config = MicrosoftAuthConfig.of("app")
+                .withRedirectUri(MicrosoftAuthConfig.LEGACY_MSA_REDIRECT_URI)
+                .withRpsTicketPrefix(MicrosoftAuthConfig.LEGACY_MSA_RPS_TICKET_PREFIX)
+                .withScope(MicrosoftAuthConfig.LEGACY_MSA_SCOPE);
+
+        assertEquals(MicrosoftAuthConfig.legacyMsa("app"), config, "the legacy dialect, built by hand");
+        assertEquals(MicrosoftAuthConfig.legacyMsa("app").hashCode(), config.hashCode());
+        assertNull(config.withRedirectUri(null).redirectUri());
+        assertEquals("app", config.withRpsTicketPrefix("x=").clientId());
+        assertEquals("x=", config.withRpsTicketPrefix("x=").rpsTicketPrefix());
+    }
+
+    @Test
+    void aConfigIsAValueOverEveryField() {
+        MicrosoftAuthConfig config = MicrosoftAuthConfig.of("app");
+
+        assertEquals(MicrosoftAuthConfig.of("app"), config);
+        assertNotEquals(config, config.withClientId("other"));
+        assertNotEquals(config, config.withDeviceCodeEndpoints("https://id.example/code", null));
+        assertTrue(config.toString().startsWith("MicrosoftAuthConfig[clientId=app, scope="), config::toString);
+        assertTrue(
+                config.toString().endsWith(", deviceTokenUrl=" + MicrosoftAuthConfig.DEFAULT_DEVICE_TOKEN_URL + "]"),
+                config::toString);
     }
 
     @Test

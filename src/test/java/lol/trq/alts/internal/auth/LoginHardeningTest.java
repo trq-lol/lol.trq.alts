@@ -139,9 +139,6 @@ class LoginHardeningTest {
         assertEquals("https://id.example/code", custom.deviceCodeUrl());
         assertEquals(MicrosoftAuthConfig.DEFAULT_DEVICE_TOKEN_URL, custom.deviceTokenUrl());
 
-        MicrosoftAuthConfig positional =
-                new MicrosoftAuthConfig("app", null, null, null, null, null, null, null, null, null, null);
-        assertEquals(defaults, positional, "the eleven-argument constructor still exists and defaults the rest");
         assertEquals(
                 MicrosoftAuthConfig.DEFAULT_DEVICE_CODE_URL,
                 MicrosoftAuthConfig.legacyMsa("app").deviceCodeUrl());
