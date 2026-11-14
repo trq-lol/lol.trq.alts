@@ -598,6 +598,10 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
 - A saving (`ADD`) Microsoft sign-in (browser, device code, refresh token) stored the account before
   installing its session, so one whose session the host's injector refused was saved anyway. It now
   installs first and saves only on success, as the other routes always did.
+- `AccountStore.load()` and `HostSecrets.load()` cleared memory and then refilled it, so a host reading
+  `accounts()` or `get(key)` from another thread could see an empty store mid-load. Each now replaces
+  the whole contents in one step. A store file whose plaintext is empty used to leave memory as it was;
+  it now loads as the empty store it is.
 
 ## [0.12.0] - 2026-11-12
 

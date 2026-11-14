@@ -14,7 +14,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.UnaryOperator;
 import lol.trq.alts.AltsFailure;
 import lol.trq.alts.internal.store.StoreFile;
@@ -79,8 +78,9 @@ public final class AccountStore {
     private final Object lock = new Object();
 
     // Copy-on-write because logins resolve on the library executor while the host reads accounts() from its
-    // render thread; a plain ArrayList lets one thread's write blow up the other's iteration.
-    private final List<AltAccount> accounts = new CopyOnWriteArrayList<>();
+    // render thread; a plain ArrayList lets one thread's write blow up the other's iteration. A load swaps
+    // the whole contents in one step, so that reader never sees the list empty halfway through one.
+    private final LiveList<AltAccount> accounts = new LiveList<>();
 
     private volatile AltAccount currentAccount;
     private volatile AltsFailure loadWarning;
@@ -472,7 +472,9 @@ public final class AccountStore {
     }
 
     /**
-     * Loads and decrypts accounts from disk into memory, clearing existing entries first. A file that
+     * Loads and decrypts accounts from disk into memory, replacing what memory held in one step: a reader
+     * of {@link #accounts()} on another thread sees the old list or the new one, never an empty one in
+     * between. A file that holds no accounts, an empty one included, leaves the list empty. A file that
      * exists but cannot be read leaves the in-memory list alone and records the reason on
      * {@link #loadError()}. Entries that cannot be used are skipped and noted on {@link #loadWarning()}.
      * Once the runtime is closed nothing is read, and {@link #loadError()} says so.
@@ -485,12 +487,8 @@ public final class AccountStore {
             StoreFile.LoadOutcome outcome = file.load(json -> {
                 JsonElement root = normalizeLegacyBans(JsonParser.parseString(json));
                 StorageData loaded = GSON.fromJson(root, StorageData.class);
-                if (loaded == null) {
-                    return;
-                }
-                List<AltAccount> valid = usable(loaded.accounts(), skipped);
-                accounts.clear();
-                accounts.addAll(valid);
+                // An empty plaintext parses to nothing at all: a store of no accounts, not "no change".
+                accounts.replaceContents(usable(loaded == null ? null : loaded.accounts(), skipped));
             });
             if (skipped[0] > 0 && outcome != StoreFile.LoadOutcome.FAILED) {
                 loadWarning = AltsFailure.of(

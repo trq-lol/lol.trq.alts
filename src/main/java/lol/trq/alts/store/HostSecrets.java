@@ -59,9 +59,10 @@ public final class HostSecrets {
     /** Guards each mutation together with the hand-off of its snapshot to {@link #file}. */
     private final Object lock = new Object();
 
-    // Concurrent because a host reads secrets from its render thread while background work writes them.
+    // Concurrent because a host reads secrets from its render thread while background work writes them,
+    // and replaced whole by a load, so that reader never sees a secret missing halfway through one.
     /** Arbitrary host key/value secrets, persisted as a single encrypted file. */
-    private final Map<String, String> secrets = new ConcurrentHashMap<>();
+    private volatile Map<String, String> secrets = new ConcurrentHashMap<>();
 
     static {
         StoreBridge.install();
@@ -243,9 +244,11 @@ public final class HostSecrets {
     }
 
     /**
-     * Loads and decrypts secrets from disk into memory, clearing existing entries first. A file that
-     * exists but cannot be read leaves the in-memory map alone and records the reason on
-     * {@link #loadError()}. Once the runtime is closed nothing is read, and {@link #loadError()} says so.
+     * Loads and decrypts secrets from disk into memory, replacing what memory held in one step: a reader on
+     * another thread sees the old secrets or the new ones, never a secret missing in between. A file that
+     * holds no secrets, an empty one included, leaves none. A file that exists but cannot be read leaves
+     * the in-memory map alone and records the reason on {@link #loadError()}. Once the runtime is closed
+     * nothing is read, and {@link #loadError()} says so.
      *
      * @since 1.0.0
      */
@@ -253,18 +256,17 @@ public final class HostSecrets {
         synchronized (lock) {
             StoreFile.LoadOutcome outcome = file.load(json -> {
                 SecretData loaded = GSON.fromJson(json, SecretData.class);
-                if (loaded == null) {
-                    return;
-                }
-                secrets.clear();
-                if (loaded.secrets() != null) {
+                Map<String, String> read = new ConcurrentHashMap<>();
+                // An empty plaintext parses to nothing at all: no secrets, not "no change".
+                if (loaded != null && loaded.secrets() != null) {
                     // A null key or value cannot live in the map, and one of them must not cost the rest.
                     loaded.secrets().forEach((key, value) -> {
                         if (key != null && value != null) {
-                            secrets.put(key, value);
+                            read.put(key, value);
                         }
                     });
                 }
+                secrets = read;
             });
             if (outcome == StoreFile.LoadOutcome.MIGRATED) {
                 scheduleSave();
