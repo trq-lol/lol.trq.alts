@@ -254,6 +254,34 @@ class MergeVectorsTest {
                         .orElseThrow());
     }
 
+    /**
+     * Equal stamps with different values (non-conformant input, implementation-defined by SPEC 5): the value
+     * with the greater compact JSON bytes wins, in either order, for a field and a ban alike.
+     */
+    @Test
+    void anEqualStampTieIsBrokenByTheValueBytesInEitherOrder() {
+        Payload left = Payload.parse(("{\"v\":2,\"accounts\":{\"u\":{\"fields\":{\"username\":"
+                        + "{\"value\":\"bbb\",\"at\":5,\"n\":1,\"by\":\"a\"}},\"bans\":{\"s\":"
+                        + "{\"value\":{\"banned\":true},\"at\":5,\"n\":1,\"by\":\"a\"}}}}}")
+                .getBytes(StandardCharsets.UTF_8));
+        Payload right = Payload.parse(("{\"v\":2,\"accounts\":{\"u\":{\"fields\":{\"username\":"
+                        + "{\"value\":\"aaaa\",\"at\":5,\"n\":1,\"by\":\"a\"}},\"bans\":{\"s\":"
+                        + "{\"value\":null,\"at\":5,\"n\":1,\"by\":\"a\"}}}}}")
+                .getBytes(StandardCharsets.UTF_8));
+        Payload lr = Payload.merge(List.of(left, right));
+        Payload rl = Payload.merge(List.of(right, left));
+        assertEquals(normal(lr.toJson()), normal(rl.toJson()), "commutative under a tie");
+        // "bbb" (0x22 0x62 ...) is greater than "aaaa" (0x22 0x61 ...), length aside; an object ('{' is 0x7b)
+        // is greater than null ('n' is 0x6e).
+        assertEquals(
+                "bbb", lr.accounts().get("u").fields().get("username").value().getAsString());
+        assertTrue(lr.accounts().get("u").bans().get("s").value().isJsonObject());
+        assertEquals(
+                normal(lr.toJson()),
+                normal(Payload.merge(List.of(lr, left, right)).toJson()),
+                "idempotent");
+    }
+
     @Test
     void stampsCompareByByAsUtf8BytesNotUtf16() {
         // U+FB01 is ef ac 81 in UTF-8 and U+1F600 is f0 9f 98 80: the emoji is greater by bytes, while a

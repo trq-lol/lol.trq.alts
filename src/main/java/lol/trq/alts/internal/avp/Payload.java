@@ -268,6 +268,11 @@ public record Payload(SortedMap<String, Account> accounts) {
      * server id takes the register with the greatest stamp; {@code deleted} is the greatest marker. The
      * merge is commutative, associative and idempotent.
      *
+     * <p>Two registers with equal stamps and different values cannot come from conformant writers, and SPEC
+     * 5 leaves their merge implementation-defined. This client keeps the one whose value has the greater
+     * compact JSON encoding ({@link AvpJson#write}), compared as unsigned bytes, so the merge stays
+     * commutative even for such input.
+     *
      * @param payloads the payloads
      * @return the merge
      */
@@ -289,8 +294,28 @@ public record Payload(SortedMap<String, Account> accounts) {
 
     private static SortedMap<String, Field> mergeRegisters(SortedMap<String, Field> a, SortedMap<String, Field> b) {
         SortedMap<String, Field> out = new TreeMap<>(a);
-        b.forEach((k, f) -> out.merge(k, f, (x, y) -> y.stamp().compareTo(x.stamp()) > 0 ? y : x));
+        b.forEach((k, f) -> out.merge(k, f, Payload::greater));
         return out;
+    }
+
+    /**
+     * The register with the greater stamp; at an equal stamp, the one whose compact JSON value is greater
+     * as unsigned bytes (the first if the bytes are equal too, which are then the same value).
+     */
+    private static Field greater(Field x, Field y) {
+        int c = y.stamp().compareTo(x.stamp());
+        if (c != 0) {
+            return c > 0 ? y : x;
+        }
+        byte[] xs = AvpJson.write(x.value);
+        byte[] ys = AvpJson.write(y.value);
+        try {
+            return Arrays.compareUnsigned(ys, xs) > 0 ? y : x;
+        } finally {
+            // A value may be a credential.
+            Arrays.fill(xs, (byte) 0);
+            Arrays.fill(ys, (byte) 0);
+        }
     }
 
     /**
