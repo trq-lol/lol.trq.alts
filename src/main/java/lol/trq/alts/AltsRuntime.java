@@ -39,7 +39,6 @@ import lol.trq.alts.spi.StoreKeyProvider;
 import lol.trq.alts.spi.TextureUploader;
 import lol.trq.alts.spi.ToastSink;
 import lol.trq.alts.spi.VaultDirectoryProvider;
-import lol.trq.alts.spi.VaultTransportResolver;
 import lol.trq.alts.store.AccountStore;
 import lol.trq.alts.store.HostSecrets;
 import lol.trq.alts.vault.VaultHosts;
@@ -76,7 +75,6 @@ public final class AltsRuntime<H> implements AutoCloseable {
     private final Map<String, AsyncCache<String, GameStats>> gameStatsCaches;
     private final AsyncCache<String, GameStats> emptyStatsCache;
     private final ToastSink toasts;
-    private final VaultTransportResolver vaultResolver;
     private final VaultAccess.Bridge vaultAccess;
     private final VaultHosts vault;
     private final StoreAccess.Bridge stores;
@@ -138,7 +136,6 @@ public final class AltsRuntime<H> implements AutoCloseable {
             }
 
             this.toasts = builder.toastSink;
-            this.vaultResolver = builder.vaultTransportResolver;
             this.vaultAccess = VaultAccess.bridge();
             this.vault = vaultAccess.hosts(transport, builder.vaultHostAddress);
             this.loginService =
@@ -429,18 +426,6 @@ public final class AltsRuntime<H> implements AutoCloseable {
     }
 
     /**
-     * Returns the host's vault transport resolver, or {@code null} when the host did not wire one (the
-     * shared-vault feature is then unavailable). Maps an {@code avp://host} authority to a
-     * {@link lol.trq.alts.vault.transport.VaultTransport} the host implements over its own network stack.
-     *
-     * @return the vault transport resolver, or null when unset
-     * @since 0.6.1
-     */
-    public VaultTransportResolver vaultTransportResolver() {
-        return vaultResolver;
-    }
-
-    /**
      * Accumulating builder that injects the host seams. Required seams are validated in {@link #build()},
      * never in the setters; setters use bare names (no {@code withX} prefixes).
      *
@@ -457,7 +442,6 @@ public final class AltsRuntime<H> implements AutoCloseable {
         private ToastSink toastSink;
         private final Map<String, GameStatsSource> gameStatsSources = new LinkedHashMap<>();
         private MicrosoftAuthConfig microsoftAuth;
-        private VaultTransportResolver vaultTransportResolver;
         private Function<String, URI> vaultHostAddress;
         private ProxyProvider proxyProvider;
         private AvatarSource avatarSource;
@@ -573,20 +557,6 @@ public final class AltsRuntime<H> implements AutoCloseable {
          */
         public Builder<H> microsoftAuth(MicrosoftAuthConfig value) {
             this.microsoftAuth = value;
-            return this;
-        }
-
-        /**
-         * Sets the vault transport resolver (optional; without it the shared-vault feature is
-         * unavailable but every other surface works). The host maps an {@code avp://host} authority to a
-         * {@link lol.trq.alts.vault.transport.VaultTransport} it implements over its own network stack
-         * (HTTP, a gRPC tunnel, a test double).
-         *
-         * @param value the host vault transport resolver
-         * @return this builder
-         */
-        public Builder<H> vaultTransportResolver(VaultTransportResolver value) {
-            this.vaultTransportResolver = value;
             return this;
         }
 

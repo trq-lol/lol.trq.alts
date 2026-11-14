@@ -44,7 +44,6 @@ The library never touches your types. You implement a small set of seams in `lol
 | `GameStatsSource` | Optional. Fetch one server's stats as display chips; you hold any API key. One per server. |
 | `ProxyProvider` | Optional. Name the route each request takes. Without one, everything connects directly. |
 | `StoreKeyProvider` | Optional. Supply the key material the stores are sealed under. |
-| `VaultTransportResolver` | Optional. Map an `avp://host` authority to a transport, for the shared vault. |
 | `DeviceCodePrompt` | Passed to `loginDeviceCode`, not to the builder. Show the user a code and an address. |
 
 ## 3. Build the runtime
@@ -75,7 +74,7 @@ For Microsoft login you must register your own [Azure application](https://learn
 
 If your credential was minted by a **legacy MSA** application and not an Azure OAuth one, use `MicrosoftAuthConfig.legacyMsa(id)` in place of `of(id)`. The two are different dialects of the same flow: the grant must declare the desktop redirect the application registered, ask for the `MBI_SSL` scope, and hand Xbox Live a `t=`-prefixed RPS ticket. Sending the OAuth shape to a legacy application is answered with a flat `400`. Refresh tokens are the practical use: the browser flow needs the desktop redirect these applications declare, which the loopback callback server cannot serve.
 
-Other builder options, all optional: `proxyProvider`, `avatarSource`, `executor` (see [Threads and shutdown](#threads-and-shutdown)), `storeKeyProvider` and `migrateFromMachineKey` (see [Protecting the stored file](#protecting-the-stored-file)), `vaultTransportResolver`, `secretsFileName` and `secretsKeyBinding`.
+Other builder options, all optional: `proxyProvider`, `avatarSource`, `executor` (see [Threads and shutdown](#threads-and-shutdown)), `storeKeyProvider` and `migrateFromMachineKey` (see [Protecting the stored file](#protecting-the-stored-file)), `vaultHostAddress` (where `alts.vault()` reaches a vault host), `secretsFileName` and `secretsKeyBinding`.
 
 `build()` also reads whatever store is already on disk, so `alts.store().accounts()` is populated by the time it returns. You do not call `alts.store().load()` yourself.
 

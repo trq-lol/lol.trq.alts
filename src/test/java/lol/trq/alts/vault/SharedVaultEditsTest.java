@@ -206,32 +206,6 @@ class SharedVaultEditsTest {
     }
 
     @Test
-    @SuppressWarnings("deprecation")
-    void anAvp05CopyRefusesEveryOldFacadeMethod() throws Exception {
-        try (VaultWorld w = new VaultWorld(dir)) {
-            SharedVault v = pair(w).bob();
-            List<org.junit.jupiter.api.function.Executable> calls = List.of(
-                    () -> v.createRepo(null, List.of()),
-                    () -> v.createRepo(null, List.of(), true),
-                    () -> v.openRepo(null, null),
-                    () -> v.openRepo(null, null, null),
-                    () -> v.addMember(null, null),
-                    () -> v.addMember(null, null, null),
-                    () -> v.encryptPayload(null, List.of()),
-                    () -> v.decryptPayload(null, null, 0L),
-                    () -> v.rotateKey(null, List.of(), List.<MemberPublicKey>of()),
-                    () -> v.rotateKey(null, List.of(), (lol.trq.alts.vault.transport.VaultManifest) null),
-                    () -> v.removeMember(null, List.of(), List.<MemberPublicKey>of()),
-                    () -> v.removeMember(null, List.of(), null, null));
-            assertEquals(12, calls.size(), "every 0.4 instance method");
-            for (int i = 0; i < calls.size(); i++) {
-                IllegalStateException e = assertThrows(IllegalStateException.class, calls.get(i), "call " + i);
-                assertEquals("an AVP 0.5 copy is not a 0.4 facade", e.getMessage(), "call " + i);
-            }
-        }
-    }
-
-    @Test
     void aChangedBanOnAServerSyncsAsTheNewValue() throws Exception {
         try (VaultWorld w = new VaultWorld(dir)) {
             Pair p = pair(w);

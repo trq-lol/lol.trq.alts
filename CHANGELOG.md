@@ -251,6 +251,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `lol.trq.alts.testSeams` system property and the test hooks it guarded (`HttpUtil.resetForTests`,
   `IoExecutor.resetForTests`, `NetTestHooks`): a test builds its own runtime or transport and needs no
   process-wide reset.
+- **Breaking: the 0.4 shared vault**, with no deprecation bridge; 1.0 writes AVP 0.5 only, and
+  `LegacyVaultReader` reads a 0.4 repository once so its accounts can move to a new one. Gone: the 0.4
+  half of `SharedVault` (both constructors, `createRepo`, `openRepo`, `addMember`, `encryptPayload`,
+  `decryptPayload`, `rotateKey`, `removeMember`, `SharedVault.CreatedRepo`,
+  `SharedVault.RotationResult`, and the `IllegalStateException` a 0.5 copy threw from them); every type
+  in `vault.transport` (`VaultTransport`, `KeyBindingVerifier`, `IssuerSignedKeyBindingVerifier` and the
+  wire DTOs: `VaultManifest`, `MemberEntry`, `EncryptedEnvelope`, `AuthChallenge`, `AuthToken`,
+  `ChallengeRequest`, `TokenRequest`, `CreateRepoRequest`, `PullRequest`, `PullResponse`,
+  `PushRequest`, `PushResponse`, `MemberAddRequest`, `MemberRemoveRequest`); every type in
+  `vault.federation` (`RepoAddress`, `InviteRequest`, and the 0.4 `RepoLocator`, which the 0.5
+  `vault.RepoLocator` replaces); `vault.RepoPin`, `vault.RepoContext` and `vault.MemberPublicKey`;
+  `spi.VaultTransportResolver`, `Builder#vaultTransportResolver` and `AltsRuntime.vaultTransportResolver()`
+  (a 0.5 host is reached by locator and matched by key over the runtime's transport, `alts.vault()`); and
+  the 0.4 wrap types in `crypto`: `KeyWrapScheme`, `X25519HkdfAesGcmKeyWrap`, `RepoDataKey`, `WrappedKey`
+  and `Hkdf`. The wrap scheme itself is unchanged in AVP 0.5, and the importer reads 0.4 wraps with it.
 
 ### Error kinds
 

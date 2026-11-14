@@ -7,3 +7,6 @@ These JSON files are copied verbatim from the Alt Vault Protocol spec repository
 They stay because the read-only 0.4 importer is still gated by them. AVP 0.5 replaced
 the protocol and its vectors (one directory up); 0.4 is frozen, so this set is never
 updated. It goes when the last 0.4 reader goes.
+
+`key-binding-message.json` was dropped with the 0.4 key-binding verifier, which nothing reads any
+more; the files here are the ones the importer and the identity's primitives are gated by.

@@ -12,15 +12,13 @@ import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure;
 import lol.trq.alts.crypto.CryptoException;
 import lol.trq.alts.crypto.Ed25519;
-import lol.trq.alts.crypto.KeyWrapScheme;
 import lol.trq.alts.crypto.Pbkdf2;
-import lol.trq.alts.crypto.RepoDataKey;
-import lol.trq.alts.crypto.WrappedKey;
 import lol.trq.alts.crypto.X25519;
-import lol.trq.alts.crypto.X25519HkdfAesGcmKeyWrap;
+import lol.trq.alts.internal.avp.AvpCrypto;
 import lol.trq.alts.internal.avp.Challenge;
 import lol.trq.alts.internal.avp.Commits;
 import lol.trq.alts.internal.avp.Tokens;
+import lol.trq.alts.internal.avp.WrappedKey;
 import org.junit.jupiter.api.Test;
 
 /** Create / unlock / recovery round-trips for the vault identity. */
@@ -41,11 +39,11 @@ class VaultIdentityTest {
         assertTrue(Ed25519.verify(created.identityPublicKey(), nonce, sig));
 
         // The unlocked X25519 key unwraps a data key wrapped to the original public key.
-        KeyWrapScheme scheme = new X25519HkdfAesGcmKeyWrap();
-        RepoDataKey rdk = RepoDataKey.generate();
-        WrappedKey blob = rdk.wrapTo(scheme, created.keyAgreementPublicKey());
-        RepoDataKey recovered = RepoDataKey.unwrap(scheme, blob, unlocked.keyAgreementPrivateKey(), 0);
-        assertArrayEquals(rdk.secretKey().getEncoded(), recovered.secretKey().getEncoded());
+        byte[] dataKey = AvpCrypto.randomBytes(32);
+        WrappedKey blob = AvpCrypto.wrap(
+                X25519.encodePublicKey(created.keyAgreementPublicKey()), dataKey, AvpCrypto.WrapLabel.DATA_KEY);
+        byte[] scalar = X25519.encodePrivateKey(unlocked.keyAgreementPrivateKey());
+        assertArrayEquals(dataKey, AvpCrypto.unwrap(scalar, blob, AvpCrypto.WrapLabel.DATA_KEY));
     }
 
     @Test
