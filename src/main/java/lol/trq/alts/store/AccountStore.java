@@ -1,7 +1,6 @@
 package lol.trq.alts.store;
 
 import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -16,6 +15,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.UnaryOperator;
 import lol.trq.alts.AltsFailure;
+import lol.trq.alts.internal.store.AltAccountJson;
 import lol.trq.alts.internal.store.StoreFile;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.BanInfo;
@@ -63,8 +63,11 @@ public final class AccountStore {
     /** The neutral default key-binding constant. */
     static final String DEFAULT_KEY_BINDING = "lol.trq.alts";
 
-    /** Gson keyed purely on {@link SerializedName}, the house serialization convention. */
-    private static final Gson GSON = new GsonBuilder().create();
+    /**
+     * Gson keyed purely on {@link SerializedName}, the house serialization convention, reading and writing
+     * each account through its record form rather than its final fields.
+     */
+    private static final Gson GSON = AltAccountJson.gson();
 
     /** The encrypted file, owned and locked by this store. */
     private final StoreFile file;

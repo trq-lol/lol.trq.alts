@@ -5,11 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.google.gson.Gson;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import lol.trq.alts.internal.store.AltAccountJson;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -59,8 +59,8 @@ class DefensiveCopyTest {
 
     @Test
     void anAccountGsonReadKeepsItsBansReadOnly() {
-        AltAccount read =
-                new Gson().fromJson("{\"uuid\":\"u\",\"bans\":{\"example.net\":{\"banned\":true}}}", AltAccount.class);
+        AltAccount read = AltAccountJson.gson()
+                .fromJson("{\"uuid\":\"u\",\"bans\":{\"example.net\":{\"banned\":true}}}", AltAccount.class);
 
         assertEquals(1, read.bans().size());
         assertThrows(UnsupportedOperationException.class, () -> read.bans().clear());

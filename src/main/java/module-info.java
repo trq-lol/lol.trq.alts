@@ -30,13 +30,13 @@ module lol.trq.alts {
     exports lol.trq.alts.vault;
 
     // Gson builds these private records by reflection: the store files (AccountStore.StorageData,
-    // HostSecrets.SecretData) and the device-code authorization response. AltAccount is a final class whose
-    // private fields Gson reads and sets, for the account file. Every other type Gson reads is a public
-    // record in an exported package, which needs no opening.
+    // HostSecrets.SecretData), the device-code authorization response, and the record an AltAccount is read
+    // and written through (AltAccountJson.Stored), so no final field of AltAccount is set by reflection.
+    // Every other type Gson reads is a public record in an exported package, which needs no opening.
     opens lol.trq.alts.store to
             com.google.gson;
     opens lol.trq.alts.internal.auth to
             com.google.gson;
-    opens lol.trq.alts.model to
+    opens lol.trq.alts.internal.store to
             com.google.gson;
 }

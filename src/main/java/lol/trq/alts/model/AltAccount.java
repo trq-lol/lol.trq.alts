@@ -10,8 +10,9 @@ import java.util.stream.Collectors;
 
 /**
  * An immutable Minecraft account stored locally within a client. Holds the credentials and metadata
- * required to reconstruct a game session. Persisted via Gson; every field carries a {@link SerializedName}
- * so serialization survives obfuscation, and the store file keeps the shape it had when this was a record.
+ * required to reconstruct a game session. Every field carries a {@link SerializedName}, so serialization
+ * survives obfuscation; the library's stores read and write it through a record of the same shape, so the
+ * store file keeps the shape it had when this was a record.
  *
  * <p>A final class rather than a record since 1.0.0, so a later field is an addition and not a break: build
  * one with {@link #of}, {@link #builder} or {@link #toBuilder()}, and derive copies with the {@code withX}
@@ -43,8 +44,9 @@ import java.util.stream.Collectors;
  */
 public final class AltAccount {
 
-    // The field names and their order are the store file's format: Gson writes them in this order, under
-    // these names, leaving out nulls, exactly as it wrote the record's components.
+    // The field names and their order are the store file's format. The library's Gson reads and writes them
+    // through a record with the same components in the same order (internal.store.AltAccountJson), so no
+    // final field is written by reflection; keep the two in step.
     @SerializedName("uuid")
     private final String uuid;
 
@@ -77,11 +79,6 @@ public final class AltAccount {
 
     @SerializedName("expiresAt")
     private final long expiresAt;
-
-    /** For Gson, which sets every field from the file; a field the file lacks stays null or 0. */
-    private AltAccount() {
-        this(null, null, null, null, 0L, null, null, null, null, null, 0L);
-    }
 
     private AltAccount(
             String uuid,
@@ -225,8 +222,8 @@ public final class AltAccount {
      * @since 0.5.0
      */
     public Map<String, BanInfo> bans() {
-        // A map Gson filled in is this account's alone; the view keeps it read-only all the same.
-        return bans == null ? null : Collections.unmodifiableMap(bans);
+        // Already this account's own unmodifiable copy.
+        return bans;
     }
 
     /**

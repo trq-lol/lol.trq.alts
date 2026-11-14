@@ -6,12 +6,43 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
+import java.util.Map;
+import lol.trq.alts.internal.store.AltAccountJson;
 import org.junit.jupiter.api.Test;
 
 class AltAccountSerializationTest {
 
-    private final Gson gson = new GsonBuilder().create();
+    /** The library's own: an account goes through its record form, never its final fields. */
+    private final Gson gson = AltAccountJson.gson();
+
+    /**
+     * The record form writes every field under its name, in the order the store file has always had,
+     * leaving out the nulls.
+     */
+    @Test
+    void writesTheFieldsInTheStoreFileOrder() {
+        AltAccount full = AltAccount.builder("u", "Alex", "a", AccountType.MICROSOFT)
+                .lastUsed(1L)
+                .lastUsedBy("m")
+                .bans(Map.of("example.net", new BanInfo(true, 2L, "kick", "d", "m")))
+                .sourceClient("c")
+                .sourceUser("s")
+                .refreshToken("r")
+                .expiresAt(3L)
+                .build();
+
+        assertEquals(
+                "{\"uuid\":\"u\",\"username\":\"Alex\",\"accessToken\":\"a\",\"type\":\"MICROSOFT\",\"lastUsed\":1,"
+                        + "\"lastUsedBy\":\"m\",\"bans\":{\"example.net\":{\"banned\":true,\"observedAt\":2,"
+                        + "\"source\":\"kick\",\"detail\":\"d\",\"observedBy\":\"m\"}},\"sourceClient\":\"c\","
+                        + "\"sourceUser\":\"s\",\"refreshToken\":\"r\",\"expiresAt\":3}",
+                gson.toJson(full));
+        assertEquals(
+                "{\"uuid\":\"u\",\"lastUsed\":0,\"expiresAt\":0}",
+                gson.toJson(AltAccount.builder("u", null, null, null).build()));
+        assertEquals("null", gson.toJson(null, AltAccount.class));
+        assertNull(gson.fromJson("null", AltAccount.class));
+    }
 
     /**
      * Gate for forward compatibility: a legacy account payload (written by an older {@code @Expose}-based

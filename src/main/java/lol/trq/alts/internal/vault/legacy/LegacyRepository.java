@@ -18,6 +18,7 @@ import lol.trq.alts.internal.avp.AvpCrypto.WrapLabel;
 import lol.trq.alts.internal.avp.AvpFailures;
 import lol.trq.alts.internal.avp.AvpJson;
 import lol.trq.alts.internal.avp.WrappedKey;
+import lol.trq.alts.internal.store.AltAccountJson;
 import lol.trq.alts.model.AltAccount;
 
 /**
@@ -62,7 +63,7 @@ public final class LegacyRepository {
     private static final byte AAD_SEPARATOR = 0x1F;
     private static final int KEY_BYTES = 32;
     private static final int IV_BYTES = 12;
-    private static final Gson GSON = new Gson();
+    private static final Gson GSON = AltAccountJson.gson();
 
     private LegacyRepository() {}
 
