@@ -312,7 +312,8 @@ public record Payload(SortedMap<String, Account> accounts) {
         try {
             return Arrays.compareUnsigned(ys, xs) > 0 ? y : x;
         } finally {
-            // A value may be a credential.
+            // A value may be a credential. This clears only these two copies: AvpJson.write builds them from
+            // an immutable String, which stays in memory until it is collected.
             Arrays.fill(xs, (byte) 0);
             Arrays.fill(ys, (byte) 0);
         }
