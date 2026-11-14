@@ -398,7 +398,6 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   an `IllegalArgumentException` whose message quotes nothing, before anything is sent. The proxy
   credential is placed only by the route: on the `CONNECT` of a tunnel, or on a plain request to the
   proxy itself, never on a connection the JDK would send to the origin.
-
 - **Breaking: a failure is an `AltsFailure` everywhere.** An outcome a caller branches on is a result
   carrying `Optional<AltsFailure> failure()`; everything else throws `AltsException`. Sign-in returns
   `auth.LoginResult(account, failure)` (`success()` and `message()` remain as methods); `AccountStatus`
@@ -416,7 +415,7 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   `loadError()`, `saveError()` and `loadWarning()` as `Optional<AltsFailure>` of kind `STORAGE`. Read
   `failure().map(AltsFailure::kind)` where you read a reason, `failure().flatMap(AltsFailure::retryAfter)`
   where you read `retryAfter()`, and `failure().flatMap(AltsFailure::xstsError)` where you read
-  `xstsError()`. The table below maps every former constant to its kind.
+  `xstsError()`. The [Error kinds](#error-kinds) table above maps every former constant to its kind.
 - **Breaking: a failure message is the library's own.** A failed account-service call says which
   request failed and with what status; the service's `errorMessage` is no longer repeated, since a
   service may echo what it was sent. A sign-in no longer repeats what the host's session injector
@@ -473,7 +472,7 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   and `rateLimited()` go, replaced by `LoginResult.failure(AltsFailure)` and
   `LoginResult.failure(Kind, String)`.
 - **Breaking:** `crypto.CryptoException` and `vault.VaultException`; every failure is an
-  `AltsException` (the table below maps them).
+  `AltsException` (the [Error kinds](#error-kinds) table above maps them).
 - **Breaking: the `lol.trq.alts.crypto` package.** Its primitives (`Ed25519`, `X25519`, `Pbkdf2` and
   `PayloadCipher`, which loses the 0.4 `aad` builder) are internal, under
   `lol.trq.alts.internal.crypto`, and no public type takes or returns one. A host needs none of them:
