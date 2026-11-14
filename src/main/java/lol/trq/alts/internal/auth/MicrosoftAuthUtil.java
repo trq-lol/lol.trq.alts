@@ -142,12 +142,39 @@ public final class MicrosoftAuthUtil {
      */
     public CompletableFuture<MinecraftProfile> authenticateWithRefreshToken(
             MicrosoftAuthConfig config, String refreshToken, NetworkScope account) {
+        return authenticateWithRefreshToken(config, refreshToken, account, rotated -> {});
+    }
+
+    /**
+     * Renews a session from a stored refresh token, telling {@code redeemed} the refresh token the token
+     * endpoint issued as soon as it is issued, before the rest of the chain runs. The endpoint rotates
+     * the token on every redemption and the one redeemed may not work again, so a caller that stores it
+     * must keep the rotated one even when a later hop (Xbox Live, XSTS, the Minecraft services login)
+     * fails.
+     *
+     * @param config the host's Microsoft authentication configuration (client id, scope, endpoints)
+     * @param refreshToken the stored refresh token to redeem
+     * @param account a scope naming the account the token belongs to, or {@code null} for none
+     * @param redeemed receives the refresh token to keep from now on (the rotated one, or the redeemed
+     *     one when none was issued); runs on the transport's executor, and a failure it throws fails the
+     *     renewal
+     * @return a future containing the renewed {@link MinecraftProfile}
+     * @throws NullPointerException if {@code config} or {@code redeemed} is null
+     * @since 1.0.0
+     */
+    public CompletableFuture<MinecraftProfile> authenticateWithRefreshToken(
+            MicrosoftAuthConfig config, String refreshToken, NetworkScope account, Consumer<String> redeemed) {
         Objects.requireNonNull(config, "config");
+        Objects.requireNonNull(redeemed, "redeemed");
         if (refreshToken == null || refreshToken.isBlank()) {
             return CompletableFuture.failedFuture(
                     new AltsException(Kind.REAUTH_REQUIRED, "Token refresh: no refresh token"));
         }
         return exchangeRefreshForToken(config, refreshToken, account)
+                .thenApply(tokens -> {
+                    redeemed.accept(tokens.refreshToken());
+                    return tokens;
+                })
                 .thenCompose(tokens -> completeFrom(config, tokens, account));
     }
 

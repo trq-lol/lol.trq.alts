@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.auth.AccountStatus;
 import lol.trq.alts.auth.AccountStatus.State;
 import lol.trq.alts.bulk.BulkEntryResult;
@@ -149,6 +150,37 @@ class StoredRecordMergeTest {
         service().refresh(expired("stored-refresh")).get(10, TimeUnit.SECONDS);
 
         assertEquals(null, local.reloadFromDiskAndFind(UUID).refreshToken());
+    }
+
+    /**
+     * The token endpoint rotates the refresh token the moment it redeems one, and the one redeemed may
+     * not work again. A later hop failing (here the Minecraft services login throttling) must not lose
+     * the rotated token, or the next renewal replays a spent one.
+     */
+    @Test
+    void aRotatedRefreshTokenIsKeptWhenALaterStepIsRateLimited() throws Exception {
+        chain.fail("/mclogin", 429);
+        local.seed(expired("stored-refresh"));
+
+        AccountStatus status = service().refresh(expired("stored-refresh")).get(10, TimeUnit.SECONDS);
+
+        assertEquals(Kind.RATE_LIMITED, status.failure().orElseThrow().kind());
+        assertEquals(
+                "ms-refresh",
+                local.reloadFromDiskAndFind(UUID).refreshToken(),
+                "the token issued by the redemption was persisted as soon as it was issued");
+        assertEquals("ms-refresh", status.account().refreshToken(), "and the caller's status carries it too");
+    }
+
+    @Test
+    void aRotatedRefreshTokenOfAnAccountTheStoreDoesNotHoldReachesOnlyTheCaller() throws Exception {
+        chain.fail("/mclogin", 429);
+
+        AccountStatus status = service().refresh(expired("direct-refresh")).get(10, TimeUnit.SECONDS);
+
+        assertEquals(Kind.RATE_LIMITED, status.failure().orElseThrow().kind());
+        assertEquals("ms-refresh", status.account().refreshToken());
+        assertTrue(local.store().accounts().isEmpty(), "nothing was persisted for it");
     }
 
     @Test

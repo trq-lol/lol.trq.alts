@@ -362,7 +362,7 @@ class AccountServiceTest {
 
         assertEquals(Kind.RATE_LIMITED, status.failure().map(AltsFailure::kind).orElse(null));
         assertTrue(status.failure().map(f -> f.kind() == Kind.RATE_LIMITED).orElse(false));
-        assertEquals("stored-refresh", localStore.find(UUID).refreshToken());
+        assertEquals("rotated", localStore.find(UUID).refreshToken(), "the token issued before the throttle is kept");
     }
 
     /** Xbox Live turning the account away is not an outage, and retrying it only spends rotations. */
@@ -379,9 +379,9 @@ class AccountServiceTest {
         assertEquals(State.NOT_ENTITLED, status.state());
         assertFalse(status.failure().map(f -> f.kind() == Kind.RATE_LIMITED).orElse(false));
         assertEquals(
-                "stored-refresh",
+                "rotated",
                 localStore.find(UUID).refreshToken(),
-                "the refresh token was accepted, so it is not the thing that is spent");
+                "the refresh token was accepted, so it is not spent: the rotated one it was exchanged for is kept");
     }
 
     /**

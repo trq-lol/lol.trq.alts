@@ -568,6 +568,11 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   name) onto the record the store holds, under the store's lock, and the renewed account it returns
   is that record. A stated `invalid_grant` discards the stored refresh token only when it is the one
   that was refused. An account the store does not hold is still never persisted.
+- A renewal whose token redemption succeeded but whose later hop failed (a throttled Minecraft
+  services login, an Xbox Live refusal, an outage) kept the redeemed refresh token and dropped the
+  rotated one, so the next renewal replayed a token the service may already have retired. The rotated
+  token is now written to the stored account as soon as the token endpoint issues it, and the failed
+  status carries it too.
 
 ## [0.12.0] - 2026-11-12
 

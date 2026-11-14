@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import lol.trq.alts.AltsFailure;
@@ -212,6 +213,11 @@ public class AltAccountServiceImpl implements AltAccountService {
      * attribution. The renewed account handed back is that stored record; for an account the store does
      * not hold, it is the caller's copy with the new tokens.
      *
+     * <p>The rotated refresh token is written the moment the token endpoint issues it, before the rest
+     * of the chain runs: the redeemed one may not work again, so a later hop failing (a throttled
+     * Minecraft services login, say) must not cost the account its only working credential. A failed
+     * status then carries the rotated token as well.
+     *
      * @param account the account to renew
      * @return a future holding the outcome
      */
@@ -219,15 +225,20 @@ public class AltAccountServiceImpl implements AltAccountService {
         // The scope names the account on every hop, so a host proxying per account can route this
         // renewal apart from the next account's.
         NetworkScope scope = NetworkScope.forAccount(NetworkScope.Purpose.AUTH, account.uuid(), account.username());
+        AtomicReference<AltAccount> redeemed = new AtomicReference<>(account);
         return microsoft
-                .authenticateWithRefreshToken(microsoftAuth, account.refreshToken(), scope)
+                .authenticateWithRefreshToken(microsoftAuth, account.refreshToken(), scope, rotated -> {
+                    UnaryOperator<AltAccount> keep =
+                            held -> held.withTokens(held.accessToken(), rotated, held.expiresAt());
+                    redeemed.set(update(account.uuid(), keep).orElseGet(() -> keep.apply(account)));
+                })
                 .thenApply(profile -> {
                     UnaryOperator<AltAccount> renewal =
                             held -> held.withTokens(profile.accessToken(), profile.refreshToken(), profile.expiresAt());
                     AltAccount renewed = update(account.uuid(), renewal).orElseGet(() -> renewal.apply(account));
                     return AccountStatus.renewed(renewed);
                 })
-                .exceptionally(failure -> renewalFailure(failure, account));
+                .exceptionally(failure -> renewalFailure(failure, redeemed.get()));
     }
 
     /**

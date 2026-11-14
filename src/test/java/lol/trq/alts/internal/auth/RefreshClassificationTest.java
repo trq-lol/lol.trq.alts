@@ -122,9 +122,9 @@ class RefreshClassificationTest {
         assertFalse(status.usable());
         assertEquals(expected, status.failure().map(AltsFailure::kind).orElse(null), "the stored-account route");
         assertEquals(
-                "stored-refresh",
+                "rotated",
                 localStore.find(UUID).refreshToken(),
-                "a failure after the token was accepted must not cost the stored credential");
+                "a failure after the token was accepted keeps the credential, the rotated one it was issued");
     }
 
     @Test
