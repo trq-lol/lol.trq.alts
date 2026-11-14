@@ -8,11 +8,13 @@ cannot drift from the library API) but are not part of the published jar.
 The compiled companion to [`../docs/GETTING_STARTED.md`](../docs/GETTING_STARTED.md). Every snippet
 that guide shows is a method here, one per section:
 
-- `buildRuntime`, `warnIfTheStoreDidNotLoad`: wiring the seams and reporting a store that could not be read.
+- `buildRuntime`, `warnIfTheStoreDidNotLoad`, `startOverWithoutTheOldFile`: wiring the seams, reporting a
+  store that could not be read, and giving up on it with `discardUnreadable()` once the user says so.
 - `buildRuntimeWithHostKey`: sealing the stores under a host-supplied key, with the one-launch migration opt-in.
+- `runUntilShutdown`: closing the runtime with try-with-resources, which releases its store files.
 - `logInAndRead`, `logInWithDeviceCode`, `logInFromCookieFile`: browser, device-code and cookie-file sign-in.
 - `logInStoredAccount`, `importRefreshToken`, `logInStoredAccountWithBranching`: silent renewal, refresh-token
-  import, and branching on the typed failure reason, rate limits included.
+  import, and branching on the failure's kind, rate limits included.
 - `proxyPerAccount`: one proxy route per account.
 - `sweepStoredAccounts`, `refreshEverything`, `importPastedCredentials`: checking and renewing accounts
   without logging in, singly and in bulk.
@@ -31,9 +33,9 @@ The AVP 0.5 shared vault end to end: `createRepository` (the owner key kept as i
 snapshot in the host secrets), `requestInvite` and `join` on the joiner's side, `invite` on the owner's
 after comparing fingerprints, and `shareAndSync`, which resumes from the snapshot, shares an account,
 renews another with `update` (which never reverts a field another member changed), syncs and acts on the
-report. Compiled the same way; not yet inlined into the guide.
+report. Compiled the same way, and inlined into the guide's "Shared vault" section.
 
-This file is the authoritative copy; the guide inlines from it. Change the library API and the
+Both files are the authoritative copy; the guide inlines from them. Change the library API and the
 build breaks here, which is the point: markdown alone rots silently. Keep the two in step when either
 moves. Spotless formats this directory too, so a snippet pasted into the guide is already house-styled.
 

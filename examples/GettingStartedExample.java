@@ -129,6 +129,39 @@ public final class GettingStartedExample {
     }
 
     /**
+     * Section 3: starting a new store when the user says the old file will never open again, for example
+     * after the OS user was renamed or the host key was lost. Until then the store refuses every write, so
+     * an unreadable file is never replaced by an empty one.
+     *
+     * @param alts the runtime built by {@link #buildRuntime}
+     */
+    public static void startOverWithoutTheOldFile(AltsRuntime<MyHandle> alts) {
+        // Only on the user's word. The old file is copied aside first, and the next write starts a new store.
+        if (alts.store().loadError().isPresent() && !alts.store().discardUnreadable()) {
+            // The copy aside failed, so the refusal stands; saveError() says why.
+            alts.store().saveError().ifPresent(failure -> showError(failure.message()));
+        }
+    }
+
+    /**
+     * Section "Threads and shutdown": a runtime holds a lock on its two store files until it is closed, so
+     * a host closes it when it is done with it. Closing writes what is still waiting, releases the files,
+     * closes the proxy tunnels and shuts down the executor the runtime created; a host's own executor is
+     * left running.
+     *
+     * @param dataDir the directory the encrypted account file lives in
+     * @param azureClientId the host's own Azure application id
+     */
+    public static void runUntilShutdown(Path dataDir, String azureClientId) {
+        try (AltsRuntime<MyHandle> alts = buildRuntime(dataDir, azureClientId)) {
+            // Open for as long as the host runs. Whatever still waits on the runtime when it closes (a
+            // sign-in, a bulk run, a scheduled claim) ends as a failure.
+            runHostUntilExit(alts);
+        }
+        // The files are released: another runtime may now open the same directory.
+    }
+
+    /**
      * Section "Routing requests": one proxy per account, so a sweep over fifty alts does not arrive at
      * the service as one machine. The provider is asked per request; anything it cannot answer fails the
      * request rather than falling back to the real address.
@@ -394,9 +427,10 @@ public final class GettingStartedExample {
             return LegacyVaultReader.read(manifestJson, envelopeJson, identity);
         } catch (AltsException e) {
             switch (e.kind()) {
-                // The text the host saved is not JSON at all: fetch or export it again.
+                // The text the host saved is not strict JSON: fetch or export it again.
                 case INVALID_INPUT -> showError("That is not a saved 0.4 repository");
-                // Not this member's repository, or a manifest and envelope that do not belong together.
+                // Not this member's repository, a manifest and envelope that do not belong together, or
+                // not a 0.4 document at all.
                 case PROTOCOL -> showError("This identity cannot read that repository");
                 // The key did not unwrap or the payload did not authenticate: wrong identity, or tampered.
                 case CRYPTO -> showError("The repository could not be decrypted");
@@ -565,6 +599,9 @@ public final class GettingStartedExample {
 
     /** Stands in for the host translating a {@link SessionData} into its platform's live session. */
     private static void installSession(SessionData session) {}
+
+    /** Stands in for the host doing its work until it shuts down. */
+    private static void runHostUntilExit(AltsRuntime<MyHandle> alts) {}
 
     /** Stands in for the host's notification UI. */
     private static void show(ToastSink.Level level, String title, String description) {}
