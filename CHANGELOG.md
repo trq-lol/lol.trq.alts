@@ -49,7 +49,9 @@ part of a result. The [Error kinds](#error-kinds) table below maps every former 
 | `CookieFile.read`'s `IOException` | `AltsException` of kind `INVALID_INPUT` |
 | `NameChangeResult` and `ProfileCreationResult` outcomes `NOT_ENTITLED`, `UNAUTHORIZED`, `RATE_LIMITED` | `FAILED`, with the kind on `failure()` |
 | `ClaimResult.StopReason.RATE_LIMITED`, `UNKNOWN`; `ClaimResult.rateLimited()` | `TERMINAL_FAILURE`, with the kind on `failure()` |
+| `new ClaimResult(claimed, attempts, finalResult)`, `new ClaimResult(claimed, attempts, finalResult, stopReason)` | `new ClaimResult(claimed, attempts, finalResult, stopReason, failure)` |
 | `BulkEntryResult.reason()` | `BulkEntryResult.failure()` |
+| `BulkEntryResult.failure(index, label, FailureReason, message, attempts)` | `BulkEntryResult.failure(index, label, AltsFailure, attempts)` |
 | store `loadError()`, `saveError()`, `loadWarning()` strings | `Optional<AltsFailure>` of kind `STORAGE` |
 
 **The shared vault: 0.4 to AVP 0.5.** 1.0 writes AVP 0.5 only, which is not wire compatible with 0.4
@@ -416,7 +418,7 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
 
 - **Breaking:** `AltLoginCallback` and `AltLoginCallback.FailureReason`: every route returns a future,
   and the reason is `AltsFailure.Kind`. `AltLoginCallback.LoginResult` is now `auth.LoginResult`; its
-  constructors with three to six arguments, `failure(String)`, `failure(String, FailureReason, ...)`
+  constructors with four to six arguments, `failure(String)`, `failure(String, FailureReason, ...)`
   and `rateLimited()` go, replaced by `LoginResult.failure(AltsFailure)` and
   `LoginResult.failure(Kind, String)`.
 - **Breaking:** `crypto.CryptoException` and `vault.VaultException`; every failure is an
@@ -431,8 +433,10 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   `notFound()` and `retryAfter()` become `failure().kind()` and `failure().retryAfter()`.
 - **Breaking:** `AccountStatus.rateLimited()`, `AccountStatus.retryAfter()`, `AccountStatus.reason()`,
   the `AccountStatus.failure` overloads taking a reason and a message, `ClaimResult.rateLimited()`,
-  `ClaimResult`'s three-argument constructor and its stop-reason inference, and the result records'
-  `retryAfter` components.
+  `ClaimResult`'s three-argument constructor and its stop-reason inference, its four-argument canonical
+  constructor (the canonical one now takes the failure as a fifth argument), the
+  `BulkEntryResult.failure(int, String, FailureReason, String, int)` factory (now
+  `failure(int, String, AltsFailure, int)`), and the result records' `retryAfter` components.
 - Internal: `MicrosoftAuthUtil.AuthFlowException`, `MicrosoftAuthUtil.XstsAuthException` and
   `MicrosoftAuthUtil.RefreshRejectedException`; the sign-in chain fails with `AltsException`.
 - **Breaking:** `AltStore` and `SecretStore`, with no deprecation bridge. Their static `bind`,
