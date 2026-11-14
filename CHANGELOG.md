@@ -304,7 +304,8 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   build's `apiCheck` fails a change that removes or alters any of it outside a new major version, so the
   1.x surface stays what 1.0.0 promises. Internal packages are outside it.
 - **Three more Xbox Live refusals decoded.** `XstsError` gains `ACCOUNT_BANNED` (`XErr` 2148916227),
-  `ACCOUNT_RESTRICTED` (2148916229) and `TERMS_NOT_ACCEPTED` (2148916234). Each still arrives as
+  `ACCOUNT_RESTRICTED` (2148916229) and `TERMS_NOT_ACCEPTED` (2148916234), named for what each code
+  is commonly observed to mean (Xbox Live does not guarantee it). Each still arrives as
   `XBOX_DENIED`; before, they were `XstsError.UNKNOWN`. A host switching over `XstsError` without a
   `default` places them.
 - **`HostSecrets.find(key)`** returns the secret as an `Optional<String>`, empty when there is none.
