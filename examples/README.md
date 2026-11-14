@@ -25,6 +25,13 @@ that guide shows is a method here, one per section:
 
 The file is compiled with `-Xlint:deprecation -Werror`, so it cannot use deprecated API.
 
+## `SharedVaultExample`
+
+The AVP 0.5 shared vault end to end: `createRepository` (the owner key kept as its entropy, the
+snapshot in the host secrets), `requestInvite` and `join` on the joiner's side, `invite` on the owner's
+after comparing fingerprints, and `shareAndSync`, which resumes from the snapshot, writes an account,
+syncs and acts on the report. Compiled the same way; not yet inlined into the guide.
+
 This file is the authoritative copy; the guide inlines from it. Change the library API and the
 build breaks here, which is the point: markdown alone rots silently. Keep the two in step when either
 moves. Spotless formats this directory too, so a snippet pasted into the guide is already house-styled.
