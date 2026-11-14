@@ -695,7 +695,7 @@ Compiled as `SharedVaultExample.resumeOwner` and `shareAndSync`. A member resume
 - **Nothing the vault reads is saved to the `AccountStore`.** Copy an account into the store yourself if the user wants it kept locally.
 - **The `SyncReport` says what the owner has to act on:** new states, a diverged owner chain the tie rule settled (`divergedAt`), a policy that turned to sharing (`policyTurnedOn`), heads that could not be read or were discarded, malformed items, and pending leave requests. `openReport()` says the same of the pull that opened the copy.
 - **The owner manages the roster.** `roster()` lists the members as `VaultMember`s, `remove(member)` removes one and rotates the data key, `processLeaves()` removes members who asked to leave, and `hosts()` lists the repository's hosts. A member can `leave()`. Members cannot invite.
-- **A host that lies fails the whole operation with `PROTOCOL`.** A forged state, a forged commit or a rollback below the pin is refused, and the device's copy stays as it was. Every vault future fails only with an `AltsException`.
+- **A host that lies fails the whole operation with `PROTOCOL`.** A forged state or a rollback below the pin is refused, and the pull that met it adopts nothing of what the host served. A forged commit is not a failure: it is neither merged nor a parent, and `SyncReport.discardedCommits()` counts it. A sync with no new state and at most one readable head pushes nothing; one with more than one readable head merges and pushes, even when nothing is new. Every vault future fails only with an `AltsException`.
 
 ### Sharing policy
 

@@ -52,7 +52,8 @@ import lol.trq.alts.internal.avp.Tokens.RepoLocator;
  *   <li>It keeps its own {@link VerifiedChain}, checked from genesis, and pins its tip. A chain that does
  *       not contain the pin is refused as a rollback unless it diverges at or below the pin and wins the tie
  *       rule there (SPEC 6.4, 6.5). A host that serves a state that fails SPEC 6.1, or a rollback, fails the
- *       operation with {@link Kind#PROTOCOL} and changes nothing.
+ *       operation with {@link Kind#PROTOCOL}, and the pull that met it adopts nothing of that answer: the
+ *       chain, the pin, the heads and the payload stay as that pull found them.
  *   <li>It checks every pulled commit (SPEC 7.5 rules 1 to 3); a commit that fails is neither merged nor a
  *       parent. A head it cannot read is left alone without failing.
  *   <li>It merges every readable head and pushes the merge with exactly those heads as parents (SPEC 5),
@@ -700,8 +701,13 @@ public final class VaultEngine {
      * highest, checks every head, reads the heads it can, and pushes a merge commit when more than one head is
      * readable.
      *
+     * <p>A pull that finds no new state and at most one readable head pushes nothing. One that finds more
+     * than one readable head merges them and pushes, even when the host served nothing new (heads that
+     * diverged earlier, or a merge push that failed).
+     *
      * @return the report; fails with {@code PROTOCOL} for a state that does not verify or a rollback (and the
-     *     vault is unchanged), {@code INVALID_INPUT} after {@link #leave()}, or the host's refusal
+     *     pull adopts nothing of the answer), {@code INVALID_INPUT} after {@link #leave()}, or the host's
+     *     refusal
      */
     public CompletableFuture<PullReport> pull() {
         return serial(() -> {

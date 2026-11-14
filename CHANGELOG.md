@@ -248,7 +248,8 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
     `HostSecrets`): the pin a rollback must not go below, the retained data keys, the clock and the
     merged accounts. Its `toString` shows no key and no account.
   - A host that serves a forged state or rolls the repository back fails the whole operation with
-    `PROTOCOL` and changes nothing (the reference client keeps the valid prefix instead). Every vault
+    `PROTOCOL`, and the pull that met it adopts nothing of what the host served (the reference client
+    keeps the valid prefix instead). Every vault
     future fails only with an `AltsException`. No request carries the phrase, its entropy or seed, a
     private key, a data key or a plaintext account field.
   - A member that signs a stamp at the largest value there is (`at` and `n` both `Long.MAX_VALUE`)

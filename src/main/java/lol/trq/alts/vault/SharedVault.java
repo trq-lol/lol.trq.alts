@@ -30,8 +30,8 @@ import lol.trq.alts.model.BanInfo;
  * and pins the highest, refuses a rollback, checks every member-signed commit, merges the heads per account
  * and per field, wraps the data key only to invite-token keys, and withholds {@code refreshToken} and {@code
  * expiresAt} on read and on write unless the latest verified state shares them. A forged state or a
- * rollback fails the whole operation with {@code PROTOCOL} and changes nothing, where the reference client
- * keeps the valid prefix of what a host served. No secret (the owner phrase, its entropy or seed, a private
+ * rollback fails the whole operation with {@code PROTOCOL}, and the pull that met it adopts nothing of what
+ * the host served, where the reference client keeps the valid prefix of it. No secret (the owner phrase, its entropy or seed, a private
  * key, a data key, a plaintext account field) is ever sent to a host.
  *
  * <p>The accounts are {@link AltAccount}s ({@link #accounts()}, {@link #put}, {@link #remove(String)}, {@link
@@ -295,8 +295,13 @@ public final class SharedVault {
      * more than one. A head this device cannot read is left alone and counted, never a failure.
      *
      * <p>A forged state, a chain without the pin that does not win the tie rule (a rollback), or any state
-     * that fails a SPEC 6.1 check fails the whole sync with {@code PROTOCOL} and changes nothing. This is
-     * stricter than the reference client, which keeps the valid prefix of what a host served.
+     * that fails a SPEC 6.1 check fails the whole sync with {@code PROTOCOL}; such a sync adopts no state,
+     * reads no head and pushes no commit, so the copy stays as it was. This is stricter than the reference
+     * client, which keeps the valid prefix of what a host served.
+     *
+     * <p>A sync that finds no new state and at most one readable head pushes nothing. One that finds more
+     * than one readable head merges them and pushes a merge commit, even when the host served nothing new
+     * (heads that diverged earlier, or a merge push that failed).
      *
      * @return the report; fails with {@code PROTOCOL} as above, {@code INVALID_INPUT} after {@link #leave()},
      *     or the host's refusal by its kind
