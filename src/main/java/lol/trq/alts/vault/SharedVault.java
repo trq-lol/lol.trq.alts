@@ -428,9 +428,8 @@ public final class SharedVault {
      * A new or deleted account is written whole, and a revived one loses every ban server it held before its
      * deletion that it does not carry now. Each ban the account carries is written per server id; on a live
      * account, a server it does not mention is left as it is (clear one with {@link #markBanned} and a null
-     * ban). A put
-     * that changes nothing sends no commit. While the repository withholds refresh tokens, its {@code
-     * refreshToken} and {@code expiresAt} are not sent.
+     * ban). A put that changes nothing sends no commit. While the repository withholds refresh tokens, its
+     * {@code refreshToken} and {@code expiresAt} are not sent.
      *
      * <p>"Stale" means read before the copy merged a remote edit of the same account: such an object differs
      * from the copy in exactly the field the other member changed, and putting it stamps that field back.

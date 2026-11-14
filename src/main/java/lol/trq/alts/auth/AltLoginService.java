@@ -46,8 +46,8 @@ public interface AltLoginService {
      * the code. Call this only on an explicit action by the user, and always display the real
      * verification address the prompt is given.
      *
-     * <p>The default implementation reports {@code NOT_CONFIGURED}, so an existing implementation of
-     * this interface keeps compiling.
+     * <p>The default implementation reports {@code NOT_CONFIGURED}: a login service that offers no
+     * device-code sign-in says so as a result, like every other failure, rather than by throwing.
      *
      * @param prompt the host seam that shows the user the code and the verification address
      * @param mode the login mode (whether to add the account to storage)
@@ -60,8 +60,9 @@ public interface AltLoginService {
     }
 
     /**
-     * Authenticates using raw browser cookie data. Useful for bypassing 2FA if cookies are exported
-     * from an authenticated browser.
+     * Authenticates using raw browser cookie data. Reuses an existing browser session: the cookies,
+     * exported from a browser already signed in, sign the account in without asking for its password
+     * again.
      *
      * @param cookieData the cookie string in Netscape or mangled format
      * @param mode the login mode
