@@ -62,7 +62,7 @@ Package map (the exported packages are exactly what `module-info.java` exports a
 | `spi/` | the host seams, which are the entire boundary: `SessionInjector`, `VaultDirectoryProvider`, `MainThreadExecutor`, `ToastSink`, `TextureUploader`, `AvatarSource`, `GameStatsSource` (+ `StaticGameStatsSource`), `ProxyProvider`, `StoreKeyProvider`, `DeviceCodePrompt` |
 | `auth/` | `AltLoginService`, `AltAccountService`, `LoginResult`, `AccountStatus`, `MicrosoftAuthConfig`, `CookieFile`, `XstsError` |
 | `account/` | the surface over a token: profile (read, create), entitlements, name (+claim), skin (+`SkinProblem`), cape, attributes, certificates, blocklist, `AccountEndpoints`; plus the anonymous `ProfileLookupService` |
-| `bulk/` | one operation over many accounts: `BulkOperations`, `BulkOptions`, `BulkProgress`, `BulkReport`, `BulkEntryResult`, `CredentialKind` |
+| `bulk/` | one operation over many accounts: `BulkOperations`, `BulkHandle`, `BulkOptions`, `BulkProgress`, `BulkReport`, `BulkEntryResult`, `CredentialKind` |
 | `net/` | the value types a `ProxyProvider` sees: `NetworkScope` (purpose, account, route tag) and `ProxyRoute` |
 | `store/` | `AccountStore` and `HostSecrets`, reached only as `alts.store()` / `alts.secrets()` |
 | `time/` | `TimeSource` seam + `SystemTimeSource` / `NtpTimeSource`, for the scheduled name claim |
@@ -89,14 +89,19 @@ Package map (the exported packages are exactly what `module-info.java` exports a
 - **The API is frozen by a dump.** `api/lol.trq.alts.api` is the committed list of every exported type,
   member and signature. `apiCheck` (part of `check`) fails when a line is removed or changed in the same
   major version, and when the jar has API the dump lacks. An intended addition is recorded with
-  `./gradlew apiDump`; a removal is a 2.0 matter (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+  `./gradlew apiDump`; a removal is a 2.0 matter (see [CONTRIBUTING.md](CONTRIBUTING.md)). `apiDump`
+  cannot launder a break: it refuses to erase lines within a major version, to replace a missing or
+  headerless baseline, and to write a dump for a version ahead of the build's major. Only
+  `-PapiAllowBreaking=<reason>` overrides these refusals, and the reason is written into the dump's
+  header for review.
 - **Secrets stay out.** No API keys, tokens, or credentials in source or history. A server API key lives
   host-side behind `GameStatsSource` (or another seam). Never commit `.idea/`, `*.iml`, or machine paths.
 - **House style.** palantir-java-format (4-space, 120 column). Records for DTOs with `@SerializedName`
   on every component. Full Javadoc on public and protected members, with exactly one `@since` naming the
   release each one first shipped in (`SinceTagsTest` checks every exported declaration).
 - **Conventional Commits**, one logical change each, and **never** a `Co-Authored-By` or any other
-  AI-attribution trailer. See [CONTRIBUTING.md](CONTRIBUTING.md).
+  AI-attribution trailer. See [CONTRIBUTING.md](CONTRIBUTING.md). A breaking commit carries `!` after
+  its type or scope and a `BREAKING CHANGE:` footer saying what a host has to change.
 
 ## Patterns that matter
 
@@ -141,8 +146,8 @@ Hosts branch on the kind; a message string survives neither obfuscation nor loca
 *refusal* apart from an *unreachable service* apart from a *throttle*: the first means the credential is
 the problem, the second means retry, the third means wait, and conflating them sends the user through a
 browser login to fix an outage or retries into a ban. `AccountStatus.State` maps `RATE_LIMITED` and
-`NETWORK` to `UNREACHABLE` and `XBOX_DENIED` to `NOT_ENTITLED`; that mapping is an exhaustive switch,
-so a new kind has to be placed. `ErrorKindMigrationTableTest` pins every 0.12 constant's kind against
+`NETWORK` to `UNREACHABLE` and `XBOX_DENIED` to `NOT_ENTITLED`; that mapping is the exhaustive switch
+in `internal.auth.AltAccountServiceImpl.stateFor`, so a new kind has to be placed there. `ErrorKindMigrationTableTest` pins every 0.12 constant's kind against
 the CHANGELOG table, row for row.
 
 **A refresh token is a durable credential, not another access token.** It renews a session for as long as
@@ -258,7 +263,9 @@ and its RPS ticket prefix.
   `AltAccountService`, `BulkOperations`, `BulkHandle`, `ProfileLookupService`, the `account` services)
   are implemented by the library only and say so, so a method may be added there.
 - **Do not branch on a failure message** anywhere, including in tests. Branch on the kind; add a `Kind`
-  only if none fits, and place it in `AccountStatus.State`'s switch and the CHANGELOG.
+  only if none fits, and place it in `internal.auth.AltAccountServiceImpl.stateFor` (the
+  `AccountStatus.State` switch), in `internal.bulk.BulkOperationsImpl`'s kind decisions (only
+  `NETWORK` is retried; `RATE_LIMITED` stops or pauses a run), and in the CHANGELOG.
 - **Do not throw anything but `AltsException` out of a future**, and do not throw at the caller from a
   result-typed route: a sign-in, check or refresh returns its failure.
 - **Do not append a transport exception's message to user-facing text.** The JDK quotes the offending
@@ -314,7 +321,7 @@ and its RPS ticket prefix.
 ## Build
 
 ```bash
-./gradlew build          # compile + test + moduleTest + apiCheck + javadocCheck + spotlessCheck + examples
+./gradlew build          # compile + test + moduleTest + apiCheck + apiToolTest + javadocCheck + spotlessCheck + examples
 ./gradlew check          # the same gate CI runs
 ./gradlew spotlessApply  # format (run before committing)
 ./gradlew apiDump        # record an intended API addition in api/lol.trq.alts.api
