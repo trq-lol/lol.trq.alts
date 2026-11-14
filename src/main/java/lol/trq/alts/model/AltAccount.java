@@ -10,9 +10,11 @@ import java.util.stream.Collectors;
 
 /**
  * An immutable Minecraft account stored locally within a client. Holds the credentials and metadata
- * required to reconstruct a game session. Every field carries a {@link SerializedName}, so serialization
- * survives obfuscation; the library's stores read and write it through a record of the same shape, so the
- * store file keeps the shape it had when this was a record.
+ * required to reconstruct a game session. Every field carries a {@link SerializedName}, which names the
+ * store file's format; only the library's own stores serialize an account, through an internal record of
+ * the same shape, so the store file keeps the shape it had when this was a record. A host's own Gson cannot
+ * read or write this class on the module path, and on the class path only by setting final fields through
+ * reflection: a host that persists accounts itself goes through the accessors and {@link #builder}.
  *
  * <p>A final class rather than a record since 1.0.0, so a later field is an addition and not a break: build
  * one with {@link #of}, {@link #builder} or {@link #toBuilder()}, and derive copies with the {@code withX}

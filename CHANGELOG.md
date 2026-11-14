@@ -319,7 +319,9 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   the canonical constructor. The stores read and write it through an internal record with the same
   components under the same names and in the same order, so an account file written by 0.12 loads and is
   written back byte for byte (pinned by a fixture captured from 0.12.0). No final field is set by
-  reflection, and `lol.trq.alts.model` is not opened to Gson.
+  reflection, and `lol.trq.alts.model` is not opened to Gson. A host's own Gson therefore cannot read or
+  write an `AltAccount` on the module path, and on the class path only by setting final fields through
+  reflection: a host that persists accounts itself goes through the accessors and the builder.
 - **Breaking: the default loopback redirect path changed.** `MicrosoftAuthConfig.DEFAULT_REDIRECT_PATH`
   is now `/lol_trq_alts_loopback_redirect_long_enough_to_avoid_accidental_leaks_on_screenshare`, a neutral
   path, still long to reduce accidental exposure on a shared screen. The
