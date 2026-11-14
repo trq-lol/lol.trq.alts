@@ -249,7 +249,16 @@ public final class VaultEngine {
                     new Commits.Header(repoId, List.of(), 1, chain.tipHash(), 0),
                     Payload.EMPTY.encode(),
                     me.seedRef());
-            host.createRepo(me, genesis, first);
+            try {
+                host.createRepo(me, genesis, first);
+            } catch (AltsException lost) {
+                // SPEC 12.3: an answer that never arrived, or a duplicate_repo for a retry after success. The
+                // repository was created iff the host now serves this very genesis.
+                boolean retryable = lost.kind() == Kind.NETWORK || VaultFailures.hasCode(lost, "duplicate_repo");
+                if (!retryable || !servesGenesis(host, me, repoId, chain.tipHash())) {
+                    throw lost;
+                }
+            }
             VaultEngine v = new VaultEngine(host, me, chain, clock, new Hlc(0, 0));
             v.retained.put(0L, dataKey.clone());
             v.recordOwn(first);
@@ -257,6 +266,16 @@ public final class VaultEngine {
             return v;
         } finally {
             Arrays.fill(dataKey, (byte) 0);
+        }
+    }
+
+    /** Whether the host serves {@code genesisHash} as the repository's first state; false when it cannot say. */
+    private static boolean servesGenesis(HostClient host, MemberKeys me, String repoId, byte[] genesisHash) {
+        try {
+            List<SignedManifest> served = host.pull(me, repoId, 0).manifests();
+            return !served.isEmpty() && AvpBytes.same(Manifest.hash(served.get(0)), genesisHash);
+        } catch (AltsException unknown) {
+            return false;
         }
     }
 
@@ -941,11 +960,37 @@ public final class VaultEngine {
     private void publish(SignedManifest signed, Commit commit) {
         VerifiedChain next = chain.copy();
         next.extend(signed);
-        host.publish(me, chain.repoId(), signed, commit);
+        try {
+            host.publish(me, chain.repoId(), signed, commit);
+        } catch (AltsException lost) {
+            // SPEC 12.3: an answer that never arrived, or a manifest_conflict for a retry after success. The
+            // publication is done iff, once pulled, the verified tip is this very state.
+            boolean retryable = lost.kind() == Kind.NETWORK || VaultFailures.hasCode(lost, "manifest_conflict");
+            if (!retryable || !landed(signed)) {
+                throw lost;
+            }
+            return;
+        }
         int from = chain.size();
         chain = next;
         adoptKeys(from);
         local = local.underPolicy(share());
+    }
+
+    /**
+     * Pulls after a publication whose answer was lost and tells whether it landed. A pull the host lies on
+     * fails the operation as any pull does; one that cannot be made leaves the original failure standing.
+     */
+    private boolean landed(SignedManifest signed) {
+        try {
+            fetch(false);
+        } catch (AltsException unknown) {
+            if (unknown.kind() == Kind.PROTOCOL) {
+                throw unknown;
+            }
+            return false;
+        }
+        return AvpBytes.same(chain.tipHash(), Manifest.hash(signed));
     }
 
     /**

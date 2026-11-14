@@ -658,6 +658,56 @@ class VaultHostileHostTest {
                 "one re-pull from seq 0");
     }
 
+    /** The host commits the request and then the answer is lost, or replaced by the answer to a retry. */
+    private static TestAvpHost.Interceptor afterCommit(String path, TestAvpHost.Response instead) {
+        return (req, honest) -> {
+            TestAvpHost.Response r = honest.apply(req);
+            return req.path().equals(path) || req.path().endsWith(path) ? instead : r;
+        };
+    }
+
+    @Test
+    void aPublicationWhoseAnswerWasLostIsDoneWhenTheStateLanded() {
+        VaultEngine owner = fx.create(newOwner());
+        fx.host.interceptor = afterCommit("/manifest", TestAvpHost.Response.error(502, "bad_gateway", "lost"));
+        fx.host.clearLog();
+        await(owner.setShareRefreshTokens(true));
+        assertTrue(owner.tip().state().shareRefreshTokens());
+        assertArrayEquals(Manifest.hash(fx.host.tip(owner.repoId())), owner.tipHash());
+        assertEquals(1, fx.host.count("/manifest"), "never published twice");
+
+        fx.host.interceptor = afterCommit("/manifest", TestAvpHost.Response.error(409, "manifest_conflict", "again"));
+        MemberKeys bob = MemberKeys.generate();
+        await(owner.invite(await(VaultEngine.prepareJoin(fx.connect(), bob, owner.repoId()))));
+        assertTrue(owner.tip().state().hasMember(bob.ed25519Public()));
+
+        // An answer lost before the host committed anything is the failure it was.
+        fx.host.interceptor = (req, honest) -> req.path().endsWith("/manifest")
+                ? TestAvpHost.Response.error(502, "bad_gateway", "lost")
+                : honest.apply(req);
+        assertEquals(Kind.NETWORK, failure(owner.setShareRefreshTokens(false)).kind());
+        assertTrue(fx.host.tip(owner.repoId()).state().shareRefreshTokens());
+    }
+
+    @Test
+    void aCreationWhoseAnswerWasLostIsDoneWhenTheHostServesItsGenesis() {
+        fx.host.interceptor = afterCommit("/v1/repos", TestAvpHost.Response.error(502, "bad_gateway", "lost"));
+        VaultEngine owner = fx.create(newOwner());
+        assertArrayEquals(Manifest.hash(fx.host.tip(owner.repoId())), owner.tipHash());
+        set(owner, "username", "x");
+
+        fx.host.interceptor = afterCommit("/v1/repos", TestAvpHost.Response.error(409, "duplicate_repo", "exists"));
+        fx.create(newOwner());
+
+        fx.host.interceptor = (req, honest) -> req.path().equals("/v1/repos")
+                ? TestAvpHost.Response.error(502, "bad_gateway", "lost")
+                : honest.apply(req);
+        assertEquals(
+                Kind.NETWORK,
+                failure(VaultEngine.create(fx.connect(), newOwner().keys(), fx.clock))
+                        .kind());
+    }
+
     @Test
     void missingParentsAreRetriedWhileTheHostFetchesThem() {
         VaultEngine owner = fx.create(newOwner());
