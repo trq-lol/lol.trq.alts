@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import lol.trq.alts.auth.LoginResult;
-import lol.trq.alts.auth.MinecraftProfile;
+import lol.trq.alts.internal.auth.MinecraftProfile;
 import org.junit.jupiter.api.Test;
 
 /**

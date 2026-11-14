@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Objects;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure;
+import lol.trq.alts.internal.auth.CookieAuthUtil;
 
 /**
  * Reads exported browser cookies off disk into the text {@link CookieAuthUtil} parses.
