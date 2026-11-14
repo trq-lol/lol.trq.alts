@@ -297,7 +297,7 @@ class SharedVaultAvp05Test {
             AltAccount steve = full(UUID_A);
             await(p.owner().put(steve));
             await(p.owner().put(AltAccount.of(UUID_B, "Alex", "t", AccountType.OFFLINE)));
-            await(p.owner().remove(UUID_A));
+            await(p.owner().removeAccount(UUID_A));
             await(p.bob().sync());
             assertEquals(Optional.empty(), p.bob().account(UUID_A));
             assertEquals(
@@ -419,15 +419,17 @@ class SharedVaultAvp05Test {
                     .filter(m -> !m.owner())
                     .findFirst()
                     .orElseThrow();
-            await(p.owner().remove(bob));
+            await(p.owner().removeMember(bob));
             assertEquals(1, p.owner().roster().size());
             assertTrue(p.owner().roster().get(0).owner());
             assertTrue(p.owner().accounts().size() == 1, "the accounts are carried forward under the new key");
             // Bob is out: his next sync is refused.
             failure(p.bob().sync());
             VaultMember owner = p.owner().roster().get(0);
-            assertEquals(Kind.INVALID_INPUT, failure(p.owner().remove(owner)).kind(), "the owner is never removed");
-            assertEquals(Kind.INVALID_INPUT, failure(p.bob().remove(owner)).kind(), "only the owner removes");
+            assertEquals(
+                    Kind.INVALID_INPUT, failure(p.owner().removeMember(owner)).kind(), "the owner is never removed");
+            assertEquals(
+                    Kind.INVALID_INPUT, failure(p.bob().removeMember(owner)).kind(), "only the owner removes");
         }
     }
 
@@ -655,7 +657,7 @@ class SharedVaultAvp05Test {
             // A removal raises the epoch, so the snapshot retains two data keys.
             inviteOf(w, p.owner());
             VaultMember carol = p.owner().roster().get(2);
-            await(p.owner().remove(carol));
+            await(p.owner().removeMember(carol));
             await(p.bob().sync());
 
             VaultSnapshot s = p.bob().snapshot();
@@ -709,7 +711,7 @@ class SharedVaultAvp05Test {
                                     .put(AltAccount.builder(" ", "x", "t", AccountType.OFFLINE)
                                             .build()))
                             .kind());
-            assertEquals(Kind.INVALID_INPUT, failure(p.bob().remove(" ")).kind());
+            assertEquals(Kind.INVALID_INPUT, failure(p.bob().removeAccount(" ")).kind());
             // A host that answers with garbage.
             w.host.interceptor = (r, honest) -> r.path().endsWith("/pull")
                     ? new TestAvpHost.Response(200, "{\"manifests\":".getBytes(StandardCharsets.UTF_8), Map.of())

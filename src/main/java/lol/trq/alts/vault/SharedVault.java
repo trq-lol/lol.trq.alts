@@ -34,8 +34,8 @@ import lol.trq.alts.model.BanInfo;
  * the host served, where the reference client keeps the valid prefix of it. No secret (the owner phrase, its entropy or seed, a private
  * key, a data key, a plaintext account field) is ever sent to a host.
  *
- * <p>The accounts are {@link AltAccount}s ({@link #accounts()}, {@link #put}, {@link #remove(String)}, {@link
- * #markBanned}); the owner manages members and the policy ({@link #invite}, {@link #remove(VaultMember)},
+ * <p>The accounts are {@link AltAccount}s ({@link #accounts()}, {@link #put}, {@link #removeAccount(String)}, {@link
+ * #markBanned}); the owner manages members and the policy ({@link #invite}, {@link #removeMember(VaultMember)},
  * {@link #setShareRefreshTokens}, {@link #processLeaves()}); a member can {@link #leave()}. The host persists
  * {@link #snapshot()} after each operation and passes it to {@link #resume} next time. Nothing the vault reads
  * is written to the runtime's account store.
@@ -465,7 +465,7 @@ public final class SharedVault {
      * @return completes once the host stored the commit; fails as {@link #put}
      * @since 1.0.0
      */
-    public CompletableFuture<Void> remove(String uuid) {
+    public CompletableFuture<Void> removeAccount(String uuid) {
         Objects.requireNonNull(uuid, "uuid");
         if (uuid.isBlank()) {
             return VaultFutures.failed(noUuid());
@@ -572,7 +572,7 @@ public final class SharedVault {
      *     its kind
      * @since 1.0.0
      */
-    public CompletableFuture<Void> remove(VaultMember member) {
+    public CompletableFuture<Void> removeMember(VaultMember member) {
         Objects.requireNonNull(member, "member");
         return done(engine().remove(member.key()));
     }
@@ -603,7 +603,7 @@ public final class SharedVault {
 
     /**
      * Pulls, then removes every member whose pending leave request passes the AVP SPEC 8.4 checks, one
-     * removal each (as {@link #remove(VaultMember)}). Owner only.
+     * removal each (as {@link #removeMember(VaultMember)}). Owner only.
      *
      * @return the members removed, as the roster listed them after the pull; fails with {@code INVALID_INPUT}
      *     unless this device is the owner, and the host's refusal by its kind

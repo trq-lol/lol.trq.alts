@@ -112,7 +112,7 @@ class SharedVaultEditsTest {
                     Kind.INVALID_INPUT, failure(p.owner().update(X, a -> other)).kind());
             assertEquals(
                     Kind.INVALID_INPUT, failure(p.owner().put(alpha(), other)).kind());
-            await(p.owner().remove(X));
+            await(p.owner().removeAccount(X));
             assertEquals(Kind.NOT_FOUND, failure(p.owner().update(X, a -> a)).kind(), "a deleted account");
         }
     }
@@ -165,7 +165,7 @@ class SharedVaultEditsTest {
             BanInfo first = new BanInfo(true, 1L, "self", "first", null);
             BanInfo second = new BanInfo(true, 2L, "login", "second", null);
             await(p.owner().put(alpha().withBan("one.example", first)));
-            await(p.owner().remove(X));
+            await(p.owner().removeAccount(X));
             await(p.owner().put(alpha().withBan("one.example", second)));
             await(p.bob().sync());
             assertEquals(
@@ -229,7 +229,7 @@ class SharedVaultEditsTest {
             Pair p = pair(w);
             await(p.owner().put(alpha()));
             AltAccount read = p.owner().account(X).orElseThrow();
-            await(p.owner().remove(X));
+            await(p.owner().removeAccount(X));
             long pushes = w.host.count("/push");
             await(p.owner().put(read, read));
             assertEquals(pushes + 1, w.host.count("/push"), "a revival is a commit, though base equals edited");
@@ -246,14 +246,14 @@ class SharedVaultEditsTest {
             AltAccount banned = alpha().withBan("one.example", ban).withBan("two.example", ban);
             // Through put(base, edited): edited carries only the second server.
             await(p.owner().put(banned));
-            await(p.owner().remove(X));
+            await(p.owner().removeAccount(X));
             await(p.owner().put(banned, banned.withBan("one.example", null)));
             await(p.bob().sync());
             assertEquals(
                     Map.of("two.example", ban), p.bob().account(X).orElseThrow().bans());
             // Through put(account): the same, from an account carrying no ban at all.
             await(p.owner().put(banned));
-            await(p.owner().remove(X));
+            await(p.owner().removeAccount(X));
             await(p.owner().put(alpha()));
             await(p.bob().sync());
             assertNull(p.bob().account(X).orElseThrow().bans(), "no pre-deletion ban comes back");

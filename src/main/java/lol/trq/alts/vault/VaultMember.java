@@ -7,7 +7,7 @@ import lol.trq.alts.internal.avp.Tokens;
 
 /**
  * One member of a repository as the latest verified manifest state lists it (AVP SPEC 4.2): a view of the
- * roster, not an identity. Pass it to {@link SharedVault#remove(VaultMember)} to remove that member.
+ * roster, not an identity. Pass it to {@link SharedVault#removeMember(VaultMember)} to remove that member.
  *
  * @author trq
  * @since 1.0.0

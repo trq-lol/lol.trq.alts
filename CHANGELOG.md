@@ -87,7 +87,7 @@ and specifies no upgrade. A repository moves in five steps:
 
 | 0.12 | 1.0 |
 | --- | --- |
-| `SharedVault`'s 0.4 constructors and `createRepo`, `openRepo`, `addMember`, `encryptPayload`, `decryptPayload`, `rotateKey`, `removeMember` | `SharedVault.create`, `open`, `prepareJoin`, `join`, `resume`, then `accounts`, `update`, `put`, `remove`, `invite`, `sync` and the rest |
+| `SharedVault`'s 0.4 constructors and `createRepo`, `openRepo`, `addMember`, `encryptPayload`, `decryptPayload`, `rotateKey`, `removeMember` | `SharedVault.create`, `open`, `prepareJoin`, `join`, `resume`, then `accounts`, `update`, `put`, `removeAccount`, `invite`, `removeMember`, `sync` and the rest |
 | `KeyBindingVerifier`, `IssuerSignedKeyBindingVerifier` | none: the owner-signed chain and invite tokens replace key binding |
 | `RepoPin`, `RepoContext` | the pin lives in `VaultSnapshot` |
 | `VaultTransport` and the `vault.transport` DTOs | none: `alts.vault()` speaks AVP 0.5 over the runtime's transport |
@@ -245,8 +245,8 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
     (`divergedAt`), a policy that turned to sharing (`policyTurnedOn`), the unreadable and discarded
     heads, and the pending leave requests. `openReport()` says the same of the pull that opened the copy.
   - The accounts are `AltAccount`s with `BanInfo` per server id: `accounts()`, `account(uuid)`,
-    `update(uuid, edit)`, `put(base, edited)`, `put(account)`, `remove(uuid)`, `markBanned`. `update` is
-    the way to change an account: it edits the account as the copy holds it when the write runs and
+    `update(uuid, edit)`, `put(base, edited)`, `put(account)`, `removeAccount(uuid)`, `markBanned`.
+    `update` is the way to change an account: it edits the account as the copy holds it when the write runs and
     stamps only the fields the edit changed, so a field another member changed is never reverted.
     `put(base, edited)` stamps only the fields where the two differ, for an edit of an account read
     earlier. `put(account)` stamps the fields that differ from the copy as it stands when the write
@@ -255,9 +255,9 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
     that changes nothing sends no commit. While the repository withholds refresh tokens,
     `refreshToken` and `expiresAt` are neither sent nor read. Nothing the vault reads is saved to the
     `AccountStore`.
-  - The owner invites from a pasted `InviteToken`, removes a `VaultMember` from `roster()` (the data
-    key rotates), sets the policy with `setShareRefreshTokens`, and removes leaving members with
-    `processLeaves()`; a member can `leave()`. `hosts()` lists the repository's hosts.
+  - The owner invites from a pasted `InviteToken`, removes a `VaultMember` from `roster()` with
+    `removeMember` (the data key rotates), sets the policy with `setShareRefreshTokens`, and removes
+    leaving members with `processLeaves()`; a member can `leave()`. `hosts()` lists the repository's hosts.
   - `LinkSession` adds a second owner device without typing the phrase, after the owner confirms a
     6-digit code on both devices.
   - `RepoLocator`, `InviteToken`, `LinkRequest` and `LinkGrant` read pasted text, whitespace anywhere
