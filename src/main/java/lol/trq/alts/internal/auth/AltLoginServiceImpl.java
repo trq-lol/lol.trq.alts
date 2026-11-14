@@ -492,19 +492,36 @@ public class AltLoginServiceImpl implements AltLoginService {
      * @return the login result
      */
     private LoginResult inject(AltAccount account) {
-        if (importing) {
+        return install(account, false);
+    }
+
+    /**
+     * Installs an account as the live session and only then, when it is to be saved, stores it, and
+     * marks it current. A sign-in whose session the host could not install is neither saved nor made
+     * current, on every route alike.
+     *
+     * @param account the account to install
+     * @param save whether to add it to the store once the session is installed
+     * @return the login result
+     */
+    private LoginResult install(AltAccount account, boolean save) {
+        if (!importing) {
             // An import resolves and stores; the live session and the current account are the host's.
-            return LoginResult.success(account);
+            try {
+                sessionInjector.inject(
+                        new SessionData(account.username(), account.uuid(), account.accessToken(), account.type()));
+            } catch (Exception e) {
+                // The host's injector wrote that message, and it may quote the session it was handed.
+                return LoginResult.failure(Kind.UNKNOWN, "Session Injection: the host's session injector failed");
+            }
         }
-        try {
-            sessionInjector.inject(
-                    new SessionData(account.username(), account.uuid(), account.accessToken(), account.type()));
+        if (save) {
+            store.addAccount(account);
+        }
+        if (!importing) {
             store.useAccount(account);
-            return LoginResult.success(account);
-        } catch (Exception e) {
-            // The host's injector wrote that message, and it may quote the session it was handed.
-            return LoginResult.failure(Kind.UNKNOWN, "Session Injection: the host's session injector failed");
         }
+        return LoginResult.success(account);
     }
 
     /**
@@ -537,9 +554,8 @@ public class AltLoginServiceImpl implements AltLoginService {
 
         if (mode == LoginMode.ADD) {
             account = merged(account);
-            store.addAccount(account);
         }
-        return inject(account);
+        return install(account, mode == LoginMode.ADD);
     }
 
     /**

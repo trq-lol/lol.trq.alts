@@ -182,4 +182,22 @@ class SignInEdgeCaseTest {
             server.stop(0);
         }
     }
+
+    @Test
+    void aSavedSignInWhoseSessionCouldNotBeInstalledIsNotStored() throws Exception {
+        AltLoginServiceImpl logins = new AltLoginServiceImpl(
+                local.store(),
+                session -> {
+                    throw new IllegalStateException("the host could not install it");
+                },
+                chain.config(),
+                http);
+
+        LoginResult result =
+                logins.loginRefreshToken("M.refresh", LoginMode.ADD).get(10, TimeUnit.SECONDS);
+
+        assertEquals(Optional.of(Kind.UNKNOWN), result.failure().map(AltsFailure::kind));
+        assertTrue(local.store().accounts().isEmpty(), "a sign-in that failed to install is not saved");
+        assertTrue(local.store().currentAccount().isEmpty());
+    }
 }

@@ -595,6 +595,9 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
 - The cookie route dropped a stated wait: a `429` with `Retry-After` on one of its redirect hops, or on
   its profile hop, was `RATE_LIMITED` with no `retryAfter()`. It now carries the wait, as every other
   route does.
+- A saving (`ADD`) Microsoft sign-in (browser, device code, refresh token) stored the account before
+  installing its session, so one whose session the host's injector refused was saved anyway. It now
+  installs first and saves only on success, as the other routes always did.
 
 ## [0.12.0] - 2026-11-12
 
