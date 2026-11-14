@@ -181,6 +181,14 @@ class ModulePathConsumerTest {
                         .anyMatch(r -> r.name().equals("com.google.gson")
                                 && r.modifiers().contains(ModuleDescriptor.Requires.Modifier.TRANSITIVE)),
                 "Gson is required transitively");
+        // Reflection is opened to Gson only, and only where it builds private records.
+        assertEquals(
+                Set.of("lol.trq.alts.store -> [com.google.gson]", "lol.trq.alts.internal.auth -> [com.google.gson]"),
+                descriptor.opens().stream()
+                        .map(o -> o.source() + " -> " + new TreeSet<>(o.targets()))
+                        .collect(Collectors.toSet()),
+                "the opens are exactly the two Gson needs");
+        assertFalse(descriptor.isOpen(), "the module is not open");
     }
 
     @Test
