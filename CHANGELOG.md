@@ -51,7 +51,6 @@ part of a result. The [Error kinds](#error-kinds) table below maps every former 
 | `ClaimResult.StopReason.RATE_LIMITED`, `UNKNOWN`; `ClaimResult.rateLimited()` | `TERMINAL_FAILURE`, with the kind on `failure()` |
 | `BulkEntryResult.reason()` | `BulkEntryResult.failure()` |
 | store `loadError()`, `saveError()`, `loadWarning()` strings | `Optional<AltsFailure>` of kind `STORAGE` |
-| `build()`'s `IllegalStateException` for a store in use | `AltsException` of kind `CONFLICT` (or `STORAGE` when it cannot be locked) |
 
 **The shared vault: 0.4 to AVP 0.5.** 1.0 writes AVP 0.5 only, which is not wire compatible with 0.4
 and specifies no upgrade. A repository moves in five steps:
@@ -104,7 +103,8 @@ code to copy is under Removed). The implementation (`HttpUtil`'s successor `Http
   reason, refuses every write until a load succeeds or the host calls `discardUnreadable()`; before,
   only a missing key held writes back. The copy aside is made when the load fails.
 - **A store file has one owner.** Each store holds a lock on `<file>.lock`, so two runtimes on one
-  directory, in one process or two, can no longer both build; the second fails with `CONFLICT`.
+  directory, in one process or two, can no longer both build; the second fails with `CONFLICT`, and a
+  directory that cannot be created or locked fails `build()` with `STORAGE`. The lock is new in 1.0.
 - **Everything is per runtime.** A runtime built without a proxy provider connects directly, whatever
   another runtime was given; its store key provider and executor reach its own stores and tasks only.
 - **Route tags.** `NetworkScope` gains a fourth component, `Optional<String> routeTag`, and
@@ -182,8 +182,6 @@ says the kind); *none* means success, so `failure()` is empty.
 | `ClaimResult.StopReason.CANCELLED` | kept | |
 | `ClaimResult.StopReason.UNKNOWN` | `UNKNOWN` | Now `TERMINAL_FAILURE`. |
 | Store `loadError()`, `saveError()`, `loadWarning()` strings | `STORAGE` | |
-| `build()`'s `IllegalStateException`, store file in use | `CONFLICT` | |
-| `build()`'s `IllegalStateException`, store not lockable | `STORAGE` | |
 | `CookieFile.read`'s `IOException` | `INVALID_INPUT` | A sign-in from the file still reports `UNAUTHORIZED`. |
 | `CryptoException`, a wrong passphrase or recovery code | `CRYPTO` | From `VaultIdentity.unlock` and `unlockWithRecovery`; also a tampered sealing, or stored public keys that do not match the private material. |
 | `CryptoException`, a malformed stored identity | `INVALID_INPUT` | A missing or non-Base64 field, a key or sealing of the wrong length, an iteration count out of range, a missing passphrase, no recovery sealing. `WrappedIdentity`'s constructor reports a missing field the same way, where it threw `NullPointerException`. |
