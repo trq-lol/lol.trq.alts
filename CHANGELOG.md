@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-14
+
 ### Migrating from 0.12
 
 1.0.0 freezes the API, and it does so in one release: every form it replaces is removed outright, with
