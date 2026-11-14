@@ -258,6 +258,9 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   - Two registers with equal stamps and different values, which no conformant writer produces and
     whose merge SPEC 5 leaves implementation-defined, merge to the one whose value has the greater
     compact JSON encoding, compared as unsigned bytes, so the merge gives the same result in any order.
+  - A host that answers `422 missing_parents` (it is still fetching from its peers) is asked again,
+    up to 40 times, 100 ms apart. The pause is a wait on the runtime, so a `close()` during it ends the
+    operation at once with `CANCELLED` instead of leaving it to run out its retries.
 - `VaultIdentity.fingerprint()`, the member fingerprint an owner compares with an invite token's.
 - `vault.LegacyVaultReader`, the one way to read a repository of the 0.4 vault, which 1.0 no longer
   speaks: `read(manifestJson, envelopeJson, identity)` takes the manifest and envelope as the 0.4 host

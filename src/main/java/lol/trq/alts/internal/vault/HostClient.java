@@ -5,12 +5,17 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.LongSupplier;
 import lol.trq.alts.AltsException;
@@ -311,13 +316,20 @@ public final class HostClient {
 
     /**
      * Runs {@code call} again while the host answers {@code 422 missing_parents} (SPEC 10.4, the only
-     * retryable error), up to {@link #MISSING_PARENTS_RETRIES} times.
+     * retryable error), up to {@link #MISSING_PARENTS_RETRIES} times, pausing {@link #RETRY_PAUSE_MILLIS}
+     * between tries through {@link HttpTransport#delay}, so a {@code close()} during a pause ends the
+     * operation at once with {@code CANCELLED}.
      *
+     * <p>The pause's completion runs on the transport's executor, which may be a host's bounded pool whose
+     * threads are all busy (this thread among them). The wait is therefore bounded: once the pause has
+     * passed with no completion and the transport is still open, the next try goes ahead.
+     *
+     * @param transport the transport whose close ends the wait
      * @param call the request
      * @param <T> its result
      * @return the result
      */
-    static <T> T retryMissingParents(Call<T> call) {
+    static <T> T retryMissingParents(HttpTransport transport, Call<T> call) {
         int tries = 0;
         while (true) {
             try {
@@ -327,13 +339,25 @@ public final class HostClient {
                     throw e;
                 }
                 tries++;
-                try {
-                    Thread.sleep(RETRY_PAUSE_MILLIS);
-                } catch (InterruptedException interrupted) {
-                    Thread.currentThread().interrupt();
-                    throw VaultFailures.cancelled("interrupted", interrupted);
-                }
+                pause(transport);
             }
+        }
+    }
+
+    private static void pause(HttpTransport transport) {
+        CompletableFuture<Void> wait = transport.delay(Duration.ofMillis(RETRY_PAUSE_MILLIS));
+        try {
+            wait.get(RETRY_PAUSE_MILLIS * 2, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw VaultFailures.cancelled("interrupted", interrupted);
+        } catch (ExecutionException closed) {
+            throw VaultFailures.cancelled("the runtime is closed", closed.getCause());
+        } catch (TimeoutException busy) {
+            // The executor had no thread for the completion; the pause has passed all the same.
+        }
+        if (transport.isClosed()) {
+            throw VaultFailures.cancelled("the runtime is closed", null);
         }
     }
 
@@ -438,7 +462,7 @@ public final class HostClient {
     void push(MemberKeys me, String repoId, Commit commit) {
         JsonObject body = new JsonObject();
         body.add("commit", Commits.toJson(commit));
-        retryMissingParents(() -> post(me, repoPath(repoId, "push"), body, "the write"));
+        retryMissingParents(transport, () -> post(me, repoPath(repoId, "push"), body, "the write"));
     }
 
     /**
@@ -456,7 +480,7 @@ public final class HostClient {
         if (commit != null) {
             body.add("commit", Commits.toJson(commit));
         }
-        retryMissingParents(() -> post(me, repoPath(repoId, "manifest"), body, "the manifest change"));
+        retryMissingParents(transport, () -> post(me, repoPath(repoId, "manifest"), body, "the manifest change"));
     }
 
     /**
