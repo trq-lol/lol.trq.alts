@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.internal.net.HttpTransport;
@@ -43,26 +44,30 @@ class HostClientRetryTest {
     void aCloseDuringThePauseEndsTheRetryPromptlyAsCancelled() {
         HttpTransport transport = TestTransports.direct();
         AtomicInteger runs = new AtomicInteger();
-        long start = System.nanoTime();
+        AtomicLong closedAt = new AtomicLong();
         AltsException e = assertThrows(
                 AltsException.class,
                 () -> HostClient.retryMissingParents(transport, () -> {
                     if (runs.incrementAndGet() == 1) {
-                        // Close while the retry is pausing, after this answer.
+                        // Close early in the pause that follows this answer.
                         CompletableFuture.runAsync(
-                                transport::close,
+                                () -> {
+                                    closedAt.set(System.nanoTime());
+                                    transport.close();
+                                },
                                 CompletableFuture.delayedExecutor(
-                                        HostClient.RETRY_PAUSE_MILLIS / 4,
+                                        HostClient.RETRY_PAUSE_MILLIS / 10,
                                         TimeUnit.MILLISECONDS,
                                         TestTransports.EXECUTOR));
                     }
                     throw missingParents();
                 }));
-        long millis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        long afterClose = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - closedAt.get());
         assertEquals(Kind.CANCELLED, e.kind());
         assertEquals(1, runs.get(), "no try after the close");
+        // A sleep would hold on to the end of the pause, nine tenths of it after the close.
         assertTrue(
-                millis < HostClient.MISSING_PARENTS_RETRIES * HostClient.RETRY_PAUSE_MILLIS / 4,
-                "ended promptly, not after the retry budget: " + millis + " ms");
+                afterClose < HostClient.RETRY_PAUSE_MILLIS * 6 / 10,
+                "ended at the close, not at the end of the pause: " + afterClose + " ms after it");
     }
 }
