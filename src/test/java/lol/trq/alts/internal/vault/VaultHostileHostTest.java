@@ -806,6 +806,47 @@ class VaultHostileHostTest {
     }
 
     @Test
+    void aBareConflictOnAPublicationIsTerminal() {
+        VaultEngine owner = fx.create(newOwner());
+        fx.host.interceptor = (req, honest) -> req.path().endsWith("/manifest")
+                ? new TestAvpHost.Response(409, new byte[0], Map.of())
+                : honest.apply(req);
+        fx.host.clearLog();
+        assertEquals(Kind.CONFLICT, failure(owner.setShareRefreshTokens(true)).kind());
+        assertEquals(1, fx.host.count("/manifest"), "no retry: a 409 without its code is not a manifest_conflict");
+        assertEquals(1, fx.host.count("/pull"), "only the pull before publishing: no check and no re-pull");
+    }
+
+    @Test
+    void aHostThatForgesTheStateOnTheCheckAfterALostPublicationFailsItWithProtocol() {
+        VaultEngine owner = fx.create(newOwner());
+        java.util.concurrent.atomic.AtomicBoolean published = new java.util.concurrent.atomic.AtomicBoolean();
+        fx.host.interceptor = (req, honest) -> {
+            TestAvpHost.Response r = honest.apply(req);
+            if (req.path().endsWith("/manifest")) {
+                published.set(true);
+                return TestAvpHost.Response.error(502, "bad_gateway", "lost");
+            }
+            if (published.get() && req.path().endsWith("/pull")) {
+                JsonObject a = r.json();
+                JsonArray out = new JsonArray();
+                for (JsonElement e : a.getAsJsonArray("manifests")) {
+                    SignedManifest m = Manifest.signedFromJson(e);
+                    ManifestState flipped = with(
+                            m.state(),
+                            !m.state().shareRefreshTokens(),
+                            m.state().members());
+                    out.add(Manifest.toJson(new SignedManifest(flipped, m.ownerSignature())));
+                }
+                a.add("manifests", out);
+                return TestAvpHost.Response.json(200, a);
+            }
+            return r;
+        };
+        assertEquals(Kind.PROTOCOL, failure(owner.setShareRefreshTokens(true)).kind());
+    }
+
+    @Test
     void aCreationWhoseAnswerWasLostIsDoneWhenTheHostServesItsGenesis() {
         fx.host.interceptor = afterCommit("/v1/repos", TestAvpHost.Response.error(502, "bad_gateway", "lost"));
         VaultEngine owner = fx.create(newOwner());
