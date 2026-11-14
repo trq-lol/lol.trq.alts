@@ -1,5 +1,6 @@
 package lol.trq.alts;
 
+import java.net.URI;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -8,6 +9,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 import lol.trq.alts.account.AccountEndpoints;
 import lol.trq.alts.account.AccountServices;
 import lol.trq.alts.account.ProfileLookupService;
@@ -23,6 +25,7 @@ import lol.trq.alts.internal.skin.MojangAvatarSource;
 import lol.trq.alts.internal.skin.SkinAccess;
 import lol.trq.alts.internal.skin.UrlTemplateAvatarSource;
 import lol.trq.alts.internal.store.StoreAccess;
+import lol.trq.alts.internal.vault.VaultAccess;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.GameStats;
 import lol.trq.alts.net.HttpTransport;
@@ -39,6 +42,7 @@ import lol.trq.alts.spi.VaultDirectoryProvider;
 import lol.trq.alts.spi.VaultTransportResolver;
 import lol.trq.alts.store.AccountStore;
 import lol.trq.alts.store.HostSecrets;
+import lol.trq.alts.vault.VaultHosts;
 
 /**
  * Central wiring object for the consumer-agnostic account library. The host supplies its platform
@@ -73,6 +77,8 @@ public final class AltsRuntime<H> implements AutoCloseable {
     private final AsyncCache<String, GameStats> emptyStatsCache;
     private final ToastSink toasts;
     private final VaultTransportResolver vaultResolver;
+    private final VaultAccess.Bridge vaultAccess;
+    private final VaultHosts vault;
     private final StoreAccess.Bridge stores;
     private final AccountStore store;
     private final HostSecrets secrets;
@@ -133,6 +139,8 @@ public final class AltsRuntime<H> implements AutoCloseable {
 
             this.toasts = builder.toastSink;
             this.vaultResolver = builder.vaultTransportResolver;
+            this.vaultAccess = VaultAccess.bridge();
+            this.vault = vaultAccess.hosts(transport, builder.vaultHostAddress);
             this.loginService =
                     new AltLoginServiceImpl(store, builder.sessionInjector, builder.microsoftAuth, transport);
 
@@ -273,6 +281,9 @@ public final class AltsRuntime<H> implements AutoCloseable {
      * host that calls {@code close()} from its main thread should expect that work there, and must not
      * block in such a callback on something only {@code close()} would release.
      *
+     * <p>The vault's cached host tokens are dropped, and a vault operation still in flight fails with
+     * {@link AltsFailure.Kind#CANCELLED} at its next request.
+     *
      * <p>A wait that was due far in the future, such as a claim scheduled hours ahead, is failed at
      * once, but the JDK keeps the small task that would have woken it queued in its own delay scheduler
      * until its original time; that task then does nothing.
@@ -291,6 +302,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
                 stores.close(secrets);
             } finally {
                 try {
+                    vaultAccess.close(vault);
                     transport.close();
                 } finally {
                     if (ownedExecutor != null) {
@@ -405,6 +417,18 @@ public final class AltsRuntime<H> implements AutoCloseable {
     }
 
     /**
+     * Returns the shared vault's way to AVP 0.5 hosts: it connects to a host on this runtime's transport (its
+     * proxy provider, timeouts and executor), by the host's key, and caches the hosts' bearer tokens for this
+     * runtime alone. Open a repository on a connection with {@link lol.trq.alts.vault.SharedVault}.
+     *
+     * @return the vault entry
+     * @since 1.0.0
+     */
+    public VaultHosts vault() {
+        return vault;
+    }
+
+    /**
      * Returns the host's vault transport resolver, or {@code null} when the host did not wire one (the
      * shared-vault feature is then unavailable). Maps an {@code avp://host} authority to a
      * {@link lol.trq.alts.vault.transport.VaultTransport} the host implements over its own network stack.
@@ -434,6 +458,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
         private final Map<String, GameStatsSource> gameStatsSources = new LinkedHashMap<>();
         private MicrosoftAuthConfig microsoftAuth;
         private VaultTransportResolver vaultTransportResolver;
+        private Function<String, URI> vaultHostAddress;
         private ProxyProvider proxyProvider;
         private AvatarSource avatarSource;
         private String avatarUrlTemplate;
@@ -562,6 +587,24 @@ public final class AltsRuntime<H> implements AutoCloseable {
          */
         public Builder<H> vaultTransportResolver(VaultTransportResolver value) {
             this.vaultTransportResolver = value;
+            return this;
+        }
+
+        /**
+         * Maps an AVP host locator ({@code host} or {@code host:port}, as tokens and manifests name a host) to
+         * the base URL {@link AltsRuntime#vault()} reaches it at (optional; by default {@code
+         * https://<locator>}). For a host that reaches vault hosts through a gateway, or a development host
+         * served over plain {@code http} on a trusted network. The mapping never changes which host is
+         * accepted: a host is matched by its key wherever it is reached, and a token is kept per host key and
+         * address. A mapping that throws or returns null fails that connection with {@link
+         * AltsFailure.Kind#INVALID_INPUT}.
+         *
+         * @param value the mapping, or null for the default
+         * @return this builder
+         * @since 1.0.0
+         */
+        public Builder<H> vaultHostAddress(Function<String, URI> value) {
+            this.vaultHostAddress = value;
             return this;
         }
 

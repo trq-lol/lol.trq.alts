@@ -92,6 +92,29 @@ public final class HostClient {
      */
     public static HostClient connect(
             HttpTransport transport, URI base, byte[] expectedKey, TokenCache tokens, LongSupplier clock) {
+        return connect(transport, base, null, expectedKey, tokens, clock);
+    }
+
+    /**
+     * Connects to the host at {@code base} as {@link #connect(HttpTransport, URI, byte[], TokenCache,
+     * LongSupplier)} does, under a locator of the caller's: the one a token or a manifest names, when the
+     * address it is reached at is mapped from it.
+     *
+     * @param transport the runtime's transport
+     * @param base the host's base URL, {@code http(s)://host[:port]}
+     * @param locator the locator to name the host by, or {@code null} for {@code host[:port]} of {@code base}
+     * @param expectedKey the 32-byte key the host must have, or {@code null} to take the key discovery serves
+     * @param tokens the token cache, shared by every connection of one runtime
+     * @param clock epoch milliseconds
+     * @return the connection
+     */
+    public static HostClient connect(
+            HttpTransport transport,
+            URI base,
+            String locator,
+            byte[] expectedKey,
+            TokenCache tokens,
+            LongSupplier clock) {
         Objects.requireNonNull(transport, "transport");
         Objects.requireNonNull(tokens, "tokens");
         Objects.requireNonNull(clock, "clock");
@@ -103,7 +126,7 @@ public final class HostClient {
         while (root.endsWith("/")) {
             root = root.substring(0, root.length() - 1);
         }
-        String locator = base.getHost() + (base.getPort() == -1 ? "" : ":" + base.getPort());
+        String named = locator != null ? locator : base.getHost() + (base.getPort() == -1 ? "" : ":" + base.getPort());
         HttpTransport.RawResponse answer = exchange(transport, "GET", root + "/.well-known/avp", null, null);
         if (answer.status() != 200) {
             throw refusal(answer, "discovery");
@@ -113,7 +136,7 @@ public final class HostClient {
         if (expectedKey != null && !AvpBytes.same(key, expectedKey)) {
             throw VaultFailures.protocol("the host's discovery key is not the key it was expected to have");
         }
-        return new HostClient(transport, root, locator, key, tokens, clock);
+        return new HostClient(transport, root, named, key, tokens, clock);
     }
 
     /**
