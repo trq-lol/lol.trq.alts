@@ -66,6 +66,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     future fails only with an `AltsException`. No request carries the phrase, its entropy or seed, a
     private key, a data key or a plaintext account field.
 - `VaultIdentity.fingerprint()`, the member fingerprint an owner compares with an invite token's.
+- `vault.LegacyVaultReader`, the one way to read a repository of the 0.4 vault, which 1.0 no longer
+  speaks: `read(manifestJson, envelopeJson, identity)` takes the manifest and envelope as JSON exactly
+  as the 0.4 host served them and the member's `VaultIdentity`, and returns the accounts. It never
+  writes, never talks to a host and keeps nothing; it accepts what a 0.12 member could read (the
+  `X25519-HKDF-SHA256-AESGCM-v1` wrap, the member listed at the manifest's key epoch, an envelope of the
+  same repository and epoch, no older than the manifest, authenticated under the 0.4 AAD) and strips
+  `refreshToken` and `expiresAt` while the manifest withholds them. Text that is not JSON is
+  `INVALID_INPUT`, a document that is not the 0.4 shape or a member not listed is `PROTOCOL`, a key
+  that does not unwrap or a payload that does not authenticate is `CRYPTO`. The owner then creates an
+  AVP 0.5 repository with the accounts they choose.
 
 ### Changed
 
