@@ -94,6 +94,8 @@ public final class VaultSnapshot {
      */
     public static VaultSnapshot fromJson(String json) {
         Objects.requireNonNull(json, "json");
+        // The decoded keys are copied into the state; these are zeroed on every path, a failure included.
+        SortedMap<Long, byte[]> keys = new TreeMap<>();
         try {
             JsonObject o = AvpJson.object(AvpJson.parse(json.getBytes(StandardCharsets.UTF_8)), "a vault snapshot");
             if (AvpJson.int64(o, "v") != VERSION) {
@@ -103,14 +105,17 @@ public final class VaultSnapshot {
             for (JsonElement h : AvpJson.array(AvpJson.required(o, "chain"), "chain")) {
                 chain.add(AvpBytes.fromBase64(AvpJson.string(h, "a chain hash"), 32, "a chain hash"));
             }
-            SortedMap<Long, byte[]> keys = new TreeMap<>();
             for (Map.Entry<String, JsonElement> e : AvpJson.object(AvpJson.required(o, "epochKeys"), "epochKeys")
                     .entrySet()) {
                 long epoch = Long.parseLong(e.getKey());
                 if (epoch < 0) {
                     throw VaultFutures.invalid("a vault snapshot epoch is never negative");
                 }
-                keys.put(epoch, AvpBytes.fromBase64(AvpJson.string(e.getValue(), "an epoch key"), 32, "an epoch key"));
+                byte[] replaced = keys.put(
+                        epoch, AvpBytes.fromBase64(AvpJson.string(e.getValue(), "an epoch key"), 32, "an epoch key"));
+                if (replaced != null) {
+                    java.util.Arrays.fill(replaced, (byte) 0);
+                }
             }
             String memberId = AvpJson.string(o, "memberId");
             String hostKey = AvpJson.string(o, "homeHostKey");
@@ -124,7 +129,6 @@ public final class VaultSnapshot {
                     AvpJson.int64(o, "hlcN"),
                     Payload.fromJson(AvpJson.required(o, "payload")),
                     AvpJson.bool(o, "left"));
-            keys.values().forEach(k -> java.util.Arrays.fill(k, (byte) 0));
             return new VaultSnapshot(state, memberId, new HostRef(hostKey, AvpJson.string(o, "homeHostLocator")));
         } catch (RuntimeException malformed) {
             if (malformed instanceof AltsException e && e.kind() == Kind.INVALID_INPUT) {
@@ -133,6 +137,8 @@ public final class VaultSnapshot {
             // The parser's message may name a field; the library's own names the snapshot only.
             throw new AltsException(
                     AltsFailure.of(Kind.INVALID_INPUT, "Vault: this is not a valid vault snapshot"), malformed);
+        } finally {
+            keys.values().forEach(k -> java.util.Arrays.fill(k, (byte) 0));
         }
     }
 

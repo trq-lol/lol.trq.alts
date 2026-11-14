@@ -105,6 +105,11 @@ public final class VaultEngine {
     private final Object order = new Object();
     private CompletableFuture<?> tail = CompletableFuture.completedFuture(null);
     private volatile View view;
+    /**
+     * Guards the key copies a view holds: {@link #publishView()} zeroes the replaced view's copies, so every
+     * read of {@code view.retained()} happens under this lock and never sees a copy being zeroed.
+     */
+    private final Object viewKeys = new Object();
 
     /** What the accessors read: the state the last finished operation left. */
     private record View(
@@ -190,7 +195,7 @@ public final class VaultEngine {
     private void publishView() {
         SortedMap<Long, byte[]> keys = new TreeMap<>();
         retained.forEach((k, v) -> keys.put(k, v.clone()));
-        view = new View(
+        View next = new View(
                 chain.repoId(),
                 chain.tip(),
                 chain.hashes(),
@@ -203,6 +208,15 @@ public final class VaultEngine {
                 keys,
                 hlc.at(),
                 hlc.n());
+        View replaced;
+        synchronized (viewKeys) {
+            replaced = view;
+            view = next;
+        }
+        if (replaced != null) {
+            // No reader holds these any more: every read of a view's keys copies them under the lock.
+            replaced.retained().values().forEach(k -> Arrays.fill(k, (byte) 0));
+        }
     }
 
     // --- Opening a vault -------------------------------------------------------------------------
@@ -576,7 +590,9 @@ public final class VaultEngine {
      */
     public SortedMap<Long, byte[]> retainedEpochKeys() {
         SortedMap<Long, byte[]> out = new TreeMap<>();
-        view.retained().forEach((k, v) -> out.put(k, v.clone()));
+        synchronized (viewKeys) {
+            view.retained().forEach((k, v) -> out.put(k, v.clone()));
+        }
         return out;
     }
 
@@ -586,8 +602,12 @@ public final class VaultEngine {
      * @return the state; it holds secrets
      */
     public EngineState state() {
-        View v = view;
-        return new EngineState(v.repoId(), v.chainHashes(), v.retained(), v.hlcAt(), v.hlcN(), v.payload(), v.left());
+        synchronized (viewKeys) {
+            View v = view;
+            // EngineState copies the keys, under the lock.
+            return new EngineState(
+                    v.repoId(), v.chainHashes(), v.retained(), v.hlcAt(), v.hlcN(), v.payload(), v.left());
+        }
     }
 
     /**
