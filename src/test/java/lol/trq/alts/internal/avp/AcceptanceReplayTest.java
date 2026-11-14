@@ -10,77 +10,130 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.internal.avp.Commits.Commit;
 import lol.trq.alts.internal.avp.Manifest.SignedManifest;
 import lol.trq.alts.internal.avp.ManifestRules.Verdict;
+import lol.trq.alts.internal.vault.VerifiedChain;
+import lol.trq.alts.internal.vault.VerifiedChain.CommitVerdict;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@code acceptance.json} replayed from a client's side.
+ * {@code acceptance.json} replayed from a client's side, with the vault client's own checks.
  *
  * <p>The file holds a host's rules (SPEC 6, 7, 8.3, 8.4): each step is the verdict one host gives an item.
- * A client decides part of the same question on its own terms, and this test replays exactly that part
- * and asserts the client reaches the host's verdict:
+ * The client keeps the chain the host's verdicts build and decides each step on its own terms, and this
+ * test asserts it reaches the host's verdict:
  *
  * <ul>
- *   <li><b>Manifest states</b>, by SPEC 6.1 rules 1 to 5 and 6.2 ({@link ManifestRules}): structure, owner
- *       signature, genesis and the recomputed repository id, the chain link to the client's verified tip,
- *       and the content rules. A state the client accepts extends its chain, and at the end the client's
- *       tip is the host's {@code finalTip}.
- *   <li><b>Commits</b>, by SPEC 7.5 rule 1: structure, repository id, the recomputed commit id and the
- *       strict author signature. Every commit step is checked; a step the host refuses as {@code
- *       bad_request} must fail it, and every other step must pass it.
- *   <li><b>Leave requests</b>, by {@link Tokens#leaveVerdict}: the SPEC 8.4 checks the owner's client
- *       makes before it acts on one (signature, repository id, a member of the tip who is not the owner).
+ *   <li><b>Manifest states</b>, by SPEC 6.1 rules 1 to 5 and 6.2 ({@link ManifestRules}), against the
+ *       client's verified tip. A diverged owner state (SPEC 6.5) is decided by the client's tie rule ({@link
+ *       VerifiedChain#accepts(List, List)}): a state the host adopts in place of one the client holds must
+ *       win it, and the client adopts the winning chain too; a diverged state the host answers {@code
+ *       manifest_conflict} must lose it. At the end the client's tip is the host's {@code finalTip} in every
+ *       scenario.
+ *   <li><b>Commits</b>, by SPEC 7.5 rules 1 to 3 ({@link VerifiedChain#verifyCommit}): the recomputed id
+ *       and the strict author signature, the removal cutoff with ancestry over every commit header the
+ *       scenario has shown, and membership at the commit's epoch, of the cited state when it is on the
+ *       client's chain and of a state at or after the cited seq otherwise. A commit the host accepts must
+ *       pass; a commit the host refuses as {@code bad_request} must fail rule 1; a commit the host refuses as
+ *       {@code forbidden} must fail rule 2 or 3 unless its refusal is the host's storage alone, which is
+ *       checked too: a parent the host refused or dropped (SPEC 7.4). A commit the host answers {@code
+ *       too_many_heads} must pass, since the client has no head bound; one it answers {@code missing_parents}
+ *       must pass too, or be one the client refuses for the same lack: a citation of a state the client does
+ *       not hold, which rule 3 then refuses, or a removed member's commit whose frontier names a commit the
+ *       client has not seen, which rule 2 refuses until it has. Every head of {@code finalHeads} passes
+ *       against the final chain.
+ *   <li><b>Leave requests</b>, by {@link Tokens#leaveVerdict}: the SPEC 8.4 checks the owner's client makes
+ *       before it acts on one. At the end, the latest request per member that still passes against the final
+ *       tip is exactly {@code finalLeaves}.
  * </ul>
  *
  * <p>Only two classes are host-only, and they are counted, not replayed: {@code not_hosted} (SPEC 6.1 rule
  * 6, asserted to be a state that passes rules 1 to 5 and does not list the host) and publication
  * atomicity (SPEC 8.2, 8.3: the genesis or rotation commit carried with a state, asserted to be a state
- * that passes rules 1 to 5). The final heads, held commits and pending leaves are host storage.
- *
- * <p>The rest are client rules that land with the vault client (T6), which must replay them against these
- * same scenarios and raise the decided count accordingly: the SPEC 6.5 tie rule for diverged owner states
- * ({@code DIVERGED_OWNER_STATE} and the {@code AFTER_DIVERGED_STATE} steps behind them, 26 steps), and the
- * SPEC 7.5 rules 2 and 3 for commits (removal cutoff, membership and epoch), counted here past rule 1 by
- * the host's verdict.
+ * that passes rules 1 to 5). The held commits are host storage. Of the 360 steps the client decides 352
+ * (up from 326 with the constructions alone, which left the tie rule and rules 2 and 3 of SPEC 7.5 to the
+ * client); the 8 host-only steps are skipped.
  */
 class AcceptanceReplayTest {
 
     private static final JsonObject ROOT = Vectors.load("acceptance.json");
 
-    /** Why a step is not, or not fully, replayed. */
+    /** Why a step is not replayed. */
     enum Skipped {
         NOT_HOSTED,
-        PUBLISH_ATOMICITY,
-        COMMIT_ACCEPTED_BY_HOST,
-        COMMIT_FORBIDDEN_BY_HOST,
-        COMMIT_MISSING_PARENTS,
-        COMMIT_TOO_MANY_HEADS,
-        DIVERGED_OWNER_STATE,
-        AFTER_DIVERGED_STATE
+        PUBLISH_ATOMICITY
     }
 
-    /** What happened to each step: decided by the client, skipped, or (for commits) left past rule 1. */
-    private record Tally(
-            Map<String, Integer> decided,
-            Map<Skipped, Integer> skipped,
-            Map<Skipped, Integer> commitRest,
-            List<String> unexplained,
-            int[] tips) {}
+    /** What happened to each step. */
+    private record Tally(Map<String, Integer> decided, Map<Skipped, Integer> skipped, List<String> unexplained) {}
+
+    /** The client's view of one scenario. */
+    private static final class Client {
+        final List<SignedManifest> chain = new ArrayList<>();
+        final VerifiedChain.Ancestry ancestry = new VerifiedChain.Ancestry();
+        final Map<String, Commit> accepted = new LinkedHashMap<>();
+        final Map<String, Commit> seen = new LinkedHashMap<>();
+        final Set<String> refused = new HashSet<>();
+        final Map<String, Tokens.LeaveRequest> leaves = new LinkedHashMap<>();
+
+        List<byte[]> hashes() {
+            return hashes(chain);
+        }
+
+        static List<byte[]> hashes(List<SignedManifest> states) {
+            List<byte[]> out = new ArrayList<>();
+            states.forEach(m -> out.add(Manifest.hash(m)));
+            return out;
+        }
+
+        VerifiedChain verified() {
+            return VerifiedChain.of(chain);
+        }
+
+        CommitVerdict check(Commit c) {
+            return chain.isEmpty()
+                    ? CommitVerdict.BAD_ID_OR_SIGNATURE
+                    : verified().verifyCommit(c, ancestry);
+        }
+
+        /** After a new tip, a commit the host accepted that now fails the client rules is dropped (SPEC 7.3). */
+        void recheck() {
+            VerifiedChain v = verified();
+            accepted.entrySet().removeIf(e -> {
+                boolean drop = v.verifyCommit(e.getValue(), ancestry) != CommitVerdict.OK;
+                if (drop) {
+                    refused.add(e.getKey());
+                }
+                return drop;
+            });
+        }
+
+        void accept(Commit c) {
+            ancestry.learn(c);
+            seen.put(AvpBytes.base64(c.commitId()), c);
+            accepted.put(AvpBytes.base64(c.commitId()), c);
+        }
+    }
 
     @Test
     void theClientReachesTheHostsVerdictOnEveryStepItDecides() {
         List<JsonObject> scenarios = Vectors.cases(ROOT, "scenarios", 78);
-        Tally tally = new Tally(new TreeMap<>(), new TreeMap<>(), new TreeMap<>(), new ArrayList<>(), new int[2]);
+        Tally tally = new Tally(new TreeMap<>(), new TreeMap<>(), new ArrayList<>());
         int steps = 0;
+        int tips = 0;
         for (JsonObject s : scenarios) {
             steps += replay(s, tally);
+            tips++;
         }
         assertEquals(360, steps, "every step of every scenario");
         assertTrue(tally.unexplained().isEmpty(), String.join("\n", tally.unexplained()));
@@ -90,41 +143,36 @@ class AcceptanceReplayTest {
         int skipped =
                 tally.skipped().values().stream().mapToInt(Integer::intValue).sum();
         assertEquals(steps, decided + skipped, "every step is decided or skipped for a stated reason");
+        assertEquals(352, decided, "every step but the host-only classes is decided by the client");
         // Pinned, so a step that stops being decided (or a skip class that grows) is a visible change.
         assertEquals(
-                Map.of(
-                        "commit bad_request", 7,
-                        "commit rule 1 passes", 119,
-                        "leave bad_request", 1,
-                        "leave forbidden", 2,
-                        "leave ok", 5,
-                        "manifest bad_request", 26,
-                        "manifest manifest_conflict", 9,
-                        "manifest ok", 157),
+                new TreeMap<>(Map.ofEntries(
+                        Map.entry("commit bad_request", 7),
+                        Map.entry("commit forbidden", 16),
+                        Map.entry("commit forbidden (a parent the host refused, SPEC 7.4)", 4),
+                        Map.entry(
+                                "commit missing_parents (a frontier commit the client has not seen: rule 2 refuses it"
+                                        + " until then)",
+                                2),
+                        Map.entry("commit missing_parents (cites a state the client lacks: rule 3 refuses it too)", 2),
+                        Map.entry("commit missing_parents (the client rules pass)", 4),
+                        Map.entry("commit ok", 99),
+                        Map.entry("commit too_many_heads (the client rules pass)", 2),
+                        Map.entry("leave bad_request", 1),
+                        Map.entry("leave forbidden", 2),
+                        Map.entry("leave ok", 5),
+                        Map.entry("manifest bad_request", 26),
+                        Map.entry("manifest manifest_conflict", 10),
+                        Map.entry("manifest ok", 172))),
                 tally.decided());
-        assertEquals(
-                Map.of(
-                        Skipped.NOT_HOSTED, 2,
-                        Skipped.PUBLISH_ATOMICITY, 6,
-                        Skipped.DIVERGED_OWNER_STATE, 11,
-                        Skipped.AFTER_DIVERGED_STATE, 15),
-                tally.skipped());
-        assertEquals(
-                Map.of(
-                        Skipped.COMMIT_ACCEPTED_BY_HOST, 97,
-                        Skipped.COMMIT_FORBIDDEN_BY_HOST, 12,
-                        Skipped.COMMIT_MISSING_PARENTS, 8,
-                        Skipped.COMMIT_TOO_MANY_HEADS, 2),
-                tally.commitRest());
-        assertEquals(67, tally.tips()[0], "scenarios whose final tip the client reproduces");
-        assertEquals(11, tally.tips()[1], "scenarios whose host view left the client's at a diverged state");
+        assertEquals(Map.of(Skipped.NOT_HOSTED, 2, Skipped.PUBLISH_ATOMICITY, 6), tally.skipped());
+        assertEquals(78, tips, "every scenario's final tip, heads and leaves reproduced");
     }
 
     private static int replay(JsonObject scenario, Tally t) {
         String name = str(scenario, "name");
         byte[] hostKey = b64(scenario, "hostKey");
-        List<SignedManifest> chain = new ArrayList<>();
-        boolean diverged = false;
+        Client client = new Client();
         int count = 0;
         for (JsonElement e : scenario.getAsJsonArray("steps")) {
             count++;
@@ -132,51 +180,96 @@ class AcceptanceReplayTest {
             String where = name + " step " + count + " (" + str(step, "label") + ")";
             String op = str(step, "op");
             String expect = str(step, "expect");
-            if (diverged) {
-                t.skipped().merge(Skipped.AFTER_DIVERGED_STATE, 1, Integer::sum);
-                continue;
-            }
             switch (op) {
-                case "manifest" -> diverged = manifestStep(step, expect, hostKey, chain, where, t);
-                case "commit" -> commitStep(step, expect, chain, where, t);
-                case "leave" -> leaveStep(step, expect, chain, where, t);
+                case "manifest" -> manifestStep(step, expect, hostKey, client, where, t);
+                case "commit" -> commitStep(step, expect, client, where, t);
+                case "leave" -> leaveStep(step, expect, client, where, t);
                 default -> t.unexplained().add(where + ": unknown op " + op);
             }
         }
-        if (diverged) {
-            t.tips()[1]++;
-        } else {
-            JsonElement finalTip = scenario.get("finalTip");
-            String want = finalTip.isJsonNull() ? null : finalTip.getAsString();
-            String got = chain.isEmpty() ? null : AvpBytes.base64(Manifest.hash(chain.get(chain.size() - 1)));
-            if (want == null ? got != null : !want.equals(got)) {
-                t.unexplained().add(name + ": client tip " + got + " but host tip " + want);
-            }
-            t.tips()[0]++;
-        }
+        finalState(scenario, client, name, t);
         return count;
     }
 
-    /** Returns true when the host's view has left the client's (a diverged owner state was adopted). */
-    private static boolean manifestStep(
-            JsonObject step, String expect, byte[] hostKey, List<SignedManifest> chain, String where, Tally t) {
+    private static void finalState(JsonObject scenario, Client client, String name, Tally t) {
+        JsonElement finalTip = scenario.get("finalTip");
+        String want = finalTip.isJsonNull() ? null : finalTip.getAsString();
+        String got = client.chain.isEmpty()
+                ? null
+                : AvpBytes.base64(Manifest.hash(client.chain.get(client.chain.size() - 1)));
+        if (want == null ? got != null : !want.equals(got)) {
+            t.unexplained().add(name + ": client tip " + got + " but host tip " + want);
+            return;
+        }
+        for (JsonElement h : scenario.getAsJsonArray("finalHeads")) {
+            Commit c = client.seen.get(h.getAsString());
+            if (c == null || client.check(c) != CommitVerdict.OK) {
+                t.unexplained().add(name + ": final head " + h.getAsString() + " does not pass the client rules");
+            }
+        }
+        if (scenario.has("finalLeaves")) {
+            Set<String> want2 = new TreeSet<>();
+            for (JsonElement l : scenario.getAsJsonArray("finalLeaves")) {
+                JsonObject o = l.getAsJsonObject();
+                want2.add(str(o, "memberKey") + "@" + o.get("at").getAsLong());
+            }
+            Set<String> got2 = new TreeSet<>();
+            Manifest.ManifestState tip =
+                    client.chain.get(client.chain.size() - 1).state();
+            for (Tokens.LeaveRequest l : client.leaves.values()) {
+                if (Tokens.leaveVerdict(l, tip) == Tokens.LeaveVerdict.OK) {
+                    got2.add(AvpBytes.base64(l.memberKey()) + "@" + l.at());
+                }
+            }
+            if (!want2.equals(got2)) {
+                t.unexplained().add(name + ": client pending leaves " + got2 + " but host " + want2);
+            }
+        }
+    }
+
+    private static void manifestStep(
+            JsonObject step, String expect, byte[] hostKey, Client client, String where, Tally t) {
         JsonObject item = obj(step, "item");
         SignedManifest m;
         try {
             m = Manifest.signedFromJson(item.get("manifest"));
         } catch (AltsException malformed) {
             decide(t, "manifest", "bad_request", expect, where);
-            return false;
+            return;
         }
+        learnCarried(item, client);
+        List<SignedManifest> chain = client.chain;
         SignedManifest tip = chain.isEmpty() ? null : chain.get(chain.size() - 1);
         Verdict v = ManifestRules.check(m, tip);
-        String client = v.code().orElse("ok");
-        if (client.equals(expect)) {
-            decide(t, "manifest", client, expect, where);
+        String verdict = v.code().orElse("ok");
+        Optional<List<SignedManifest>> fork = fork(m, chain);
+        if (v == Verdict.NOT_LINKED && fork.isPresent() && str(step, "via").equals("offer")) {
+            // A diverged owner state by replication (SPEC 6.5): the client's tie rule decides it. A client publish
+            // is never adopted unless it extends the tip (SPEC 6.3), which the chain-link rule decides below.
+            boolean wins = VerifiedChain.accepts(client.hashes(), Client.hashes(fork.get()));
+            if (wins && expect.equals("ok")) {
+                decide(t, "manifest", "ok", expect, where);
+                chain.clear();
+                chain.addAll(fork.get());
+                carried(item, client);
+                client.recheck();
+                return;
+            }
+            if (!wins && expect.equals("manifest_conflict")) {
+                decide(t, "manifest", "manifest_conflict", expect, where);
+                return;
+            }
+            t.unexplained().add(where + ": tie rule " + (wins ? "wins" : "loses") + " but host " + expect);
+            return;
+        }
+        if (verdict.equals(expect)) {
+            decide(t, "manifest", verdict, expect, where);
             if (v == Verdict.OK) {
                 chain.add(m);
+                carried(item, client);
+                client.recheck();
             }
-            return false;
+            return;
         }
         if (v == Verdict.OK && expect.equals("not_hosted")) {
             // SPEC 6.1 rule 6 is the host's: the state passes every client rule and does not list it.
@@ -184,44 +277,58 @@ class AcceptanceReplayTest {
                 t.unexplained().add(where + ": not_hosted for a state that lists the host");
             }
             t.skipped().merge(Skipped.NOT_HOSTED, 1, Integer::sum);
-            return false;
+            return;
         }
         if (v == Verdict.OK
                 && (expect.equals("bad_request") || expect.equals("missing_parents"))
                 && publishRuleFails(m, tip, item, str(step, "via"), expect)) {
             t.skipped().merge(Skipped.PUBLISH_ATOMICITY, 1, Integer::sum);
-            return false;
-        }
-        if (v == Verdict.NOT_LINKED && expect.equals("ok") && forks(m, chain)) {
-            // The host adopted a state the client's chain does not extend to: a diverged owner state that
-            // won the tie rule (SPEC 6.5). It is still a valid state on its own branch, and where it
-            // replaces a state the client holds, it has the bytewise-lower manifest hash.
-            long seq = m.state().manifestSeq();
-            SignedManifest prev = seq == 1 ? null : chain.get((int) seq - 2);
-            if (ManifestRules.check(m, prev) != Verdict.OK) {
-                t.unexplained().add(where + ": an adopted diverged state that fails the client rules");
-            }
-            if (seq <= chain.size()
-                    && AvpBytes.compare(Manifest.hash(m), Manifest.hash(chain.get((int) seq - 1))) >= 0) {
-                t.unexplained().add(where + ": an adopted diverged state that does not win the tie rule");
-            }
-            t.skipped().merge(Skipped.DIVERGED_OWNER_STATE, 1, Integer::sum);
-            return true;
+            return;
         }
         t.unexplained().add(where + ": client " + v + " but host " + expect);
-        return false;
     }
 
-    /** A valid state whose seq the client already holds another state at, or that extends an older one. */
-    private static boolean forks(SignedManifest m, List<SignedManifest> chain) {
+    /**
+     * A carried commit's header counts for ancestry whatever happens to its state (SPEC 7.3: every header
+     * whose id recomputes and whose signature verifies), so a losing rotation commit can still cover a
+     * frontier.
+     */
+    private static void learnCarried(JsonObject item, Client client) {
+        try {
+            if (item.has("commit")) {
+                Commit c = Commits.fromJson(item.get("commit"));
+                client.ancestry.learn(c);
+                client.seen.put(AvpBytes.base64(c.commitId()), c);
+            }
+        } catch (AltsException malformed) {
+            // A carried commit that does not decode teaches nothing.
+        }
+    }
+
+    /** The commit carried with an adopted state is accepted with it. */
+    private static void carried(JsonObject item, Client client) {
+        if (item.has("commit")) {
+            client.accept(Commits.fromJson(item.get("commit")));
+        }
+    }
+
+    /**
+     * The chain a valid state would make if it replaced the client's states from its seq on: present when the
+     * state links to the client's state at the seq before and the client already holds another state there.
+     */
+    private static Optional<List<SignedManifest>> fork(SignedManifest m, List<SignedManifest> chain) {
         long seq = m.state().manifestSeq();
-        if (seq < 1 || seq > chain.size() + 1) {
-            return false;
+        if (seq < 2 || seq > chain.size()) {
+            return Optional.empty();
         }
-        if (seq <= chain.size() && Arrays.equals(Manifest.hash(chain.get((int) seq - 1)), Manifest.hash(m))) {
-            return false;
+        SignedManifest prev = chain.get((int) seq - 2);
+        if (ManifestRules.check(m, prev) != Verdict.OK
+                || Arrays.equals(Manifest.hash(chain.get((int) seq - 1)), Manifest.hash(m))) {
+            return Optional.empty();
         }
-        return seq == 1 || Manifest.linksTo(m, chain.get((int) seq - 2)) || seq <= chain.size();
+        List<SignedManifest> out = new ArrayList<>(chain.subList(0, (int) seq - 1));
+        out.add(m);
+        return Optional.of(out);
     }
 
     /**
@@ -258,59 +365,99 @@ class AcceptanceReplayTest {
         return !shaped || !Commits.verify(c);
     }
 
-    private static void commitStep(JsonObject step, String expect, List<SignedManifest> chain, String where, Tally t) {
-        boolean ruleOne;
+    private static void commitStep(JsonObject step, String expect, Client client, String where, Tally t) {
+        Commit c;
         try {
-            Commit c = Commits.fromJson(step.get("item"));
-            boolean repoOk =
-                    chain.isEmpty() || c.repoId().equals(chain.get(0).state().repoId());
-            ruleOne = repoOk && Commits.verify(c);
+            c = Commits.fromJson(step.get("item"));
         } catch (AltsException malformed) {
-            ruleOne = false;
-        }
-        if (expect.equals("bad_request")) {
-            if (ruleOne) {
-                t.unexplained().add(where + ": host bad_request but the commit passes rule 1");
-            }
             decide(t, "commit", "bad_request", expect, where);
             return;
         }
-        if (!ruleOne) {
-            t.unexplained().add(where + ": host " + expect + " but the commit fails rule 1");
-            return;
+        client.ancestry.learn(c);
+        client.seen.put(AvpBytes.base64(c.commitId()), c);
+        CommitVerdict v = client.check(c);
+        String id = AvpBytes.base64(c.commitId());
+        String result;
+        switch (expect) {
+            case "bad_request" -> result = v == CommitVerdict.BAD_ID_OR_SIGNATURE ? expect : v.name();
+            case "ok" -> {
+                result = v == CommitVerdict.OK ? expect : v.name();
+                if (v == CommitVerdict.OK) {
+                    client.accept(c);
+                }
+            }
+            case "forbidden" -> {
+                client.refused.add(id);
+                if (v == CommitVerdict.AFTER_REMOVAL_CUTOFF || v == CommitVerdict.NOT_A_MEMBER_AT_EPOCH) {
+                    result = expect;
+                } else if (v == CommitVerdict.OK && parentRefused(c, client)) {
+                    result = "forbidden (a parent the host refused, SPEC 7.4)";
+                } else {
+                    result = v.name();
+                }
+            }
+            case "missing_parents", "too_many_heads" -> {
+                if (v == CommitVerdict.OK) {
+                    result = expect + " (the client rules pass)";
+                } else if (expect.equals("missing_parents")
+                        && v == CommitVerdict.NOT_A_MEMBER_AT_EPOCH
+                        && !onChain(c, client)) {
+                    result = expect + " (cites a state the client lacks: rule 3 refuses it too)";
+                } else if (expect.equals("missing_parents")
+                        && v == CommitVerdict.AFTER_REMOVAL_CUTOFF
+                        && frontierUnseen(c, client)) {
+                    result = expect + " (a frontier commit the client has not seen: rule 2 refuses it until then)";
+                } else {
+                    result = v.name();
+                }
+            }
+            default -> result = "unknown " + expect;
         }
-        t.decided().merge("commit rule 1 passes", 1, Integer::sum);
-        Skipped rest =
-                switch (expect) {
-                    case "ok" -> Skipped.COMMIT_ACCEPTED_BY_HOST;
-                    case "forbidden" -> Skipped.COMMIT_FORBIDDEN_BY_HOST;
-                    case "missing_parents" -> Skipped.COMMIT_MISSING_PARENTS;
-                    case "too_many_heads" -> Skipped.COMMIT_TOO_MANY_HEADS;
-                    default -> null;
-                };
-        if (rest == null) {
-            t.unexplained().add(where + ": unexpected commit verdict " + expect);
+        if (result.startsWith(expect)) {
+            t.decided().merge("commit " + result, 1, Integer::sum);
         } else {
-            t.commitRest().merge(rest, 1, Integer::sum);
+            t.unexplained().add(where + ": client " + result + " but host " + expect);
         }
     }
 
-    private static void leaveStep(JsonObject step, String expect, List<SignedManifest> chain, String where, Tally t) {
-        String client;
+    private static boolean parentRefused(Commit c, Client client) {
+        return c.parents().stream().anyMatch(p -> client.refused.contains(AvpBytes.base64(p)));
+    }
+
+    private static boolean frontierUnseen(Commit c, Client client) {
+        return client.chain.get(client.chain.size() - 1).state().removalOf(c.author()).stream()
+                .flatMap(r -> r.frontier().stream())
+                .anyMatch(id -> !client.ancestry.knows(id));
+    }
+
+    private static boolean onChain(Commit c, Client client) {
+        long seq = c.manifestSeq();
+        return seq >= 1
+                && seq <= client.chain.size()
+                && Arrays.equals(Manifest.hash(client.chain.get((int) seq - 1)), c.manifestHash());
+    }
+
+    private static void leaveStep(JsonObject step, String expect, Client client, String where, Tally t) {
+        String verdict;
+        Tokens.LeaveRequest l = null;
         try {
-            Tokens.LeaveRequest l = Tokens.leaveFromJson(obj(step, "item"));
-            client = Tokens.leaveVerdict(l, chain.get(chain.size() - 1).state())
+            l = Tokens.leaveFromJson(obj(step, "item"));
+            verdict = Tokens.leaveVerdict(
+                            l, client.chain.get(client.chain.size() - 1).state())
                     .code()
                     .orElse("ok");
         } catch (AltsException malformed) {
-            client = "bad_request";
+            verdict = "bad_request";
         }
-        decide(t, "leave", client, expect, where);
+        decide(t, "leave", verdict, expect, where);
+        if (verdict.equals("ok") && expect.equals("ok")) {
+            client.leaves.put(AvpBytes.base64(l.memberKey()), l);
+        }
     }
 
-    private static void decide(Tally t, String op, String client, String expect, String where) {
-        if (!client.equals(expect)) {
-            t.unexplained().add(where + ": client " + client + " but host " + expect);
+    private static void decide(Tally t, String op, String verdict, String expect, String where) {
+        if (!verdict.equals(expect)) {
+            t.unexplained().add(where + ": client " + verdict + " but host " + expect);
             return;
         }
         t.decided().merge(op + " " + expect, 1, Integer::sum);
