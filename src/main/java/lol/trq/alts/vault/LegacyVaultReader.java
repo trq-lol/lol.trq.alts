@@ -4,7 +4,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import lol.trq.alts.AltsException;
-import lol.trq.alts.internal.vault.MemberKeys;
 import lol.trq.alts.internal.vault.legacy.LegacyRepository;
 import lol.trq.alts.model.AltAccount;
 
@@ -52,10 +51,11 @@ public final class LegacyVaultReader {
         Objects.requireNonNull(manifestJson, "manifestJson");
         Objects.requireNonNull(envelopeJson, "envelopeJson");
         Objects.requireNonNull(identity, "identity");
-        MemberKeys keys = identity.memberKeys();
-        byte[] x25519Private = keys.x25519Private();
+        // The importer needs the member id and the X25519 scalar only: it never signs, so the Ed25519 seed
+        // stays inside the identity, and the scalar is zeroed as soon as the read is done.
+        byte[] x25519Private = identity.keyAgreementScalar();
         try {
-            return LegacyRepository.read(manifestJson, envelopeJson, keys.id(), x25519Private);
+            return LegacyRepository.read(manifestJson, envelopeJson, identity.identityId(), x25519Private);
         } finally {
             Arrays.fill(x25519Private, (byte) 0);
         }

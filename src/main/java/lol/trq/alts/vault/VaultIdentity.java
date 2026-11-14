@@ -238,6 +238,16 @@ public final class VaultIdentity {
     }
 
     /**
+     * The raw 32-byte X25519 scalar, for a reader that unwraps and never signs.
+     *
+     * @return a fresh copy, which the caller zeroes
+     * @throws AltsException of kind {@link lol.trq.alts.AltsFailure.Kind#CRYPTO} if the key cannot be encoded
+     */
+    byte[] keyAgreementScalar() {
+        return X25519.encodePrivateKey(xPrivate);
+    }
+
+    /**
      * Returns the X25519 public key, to which other members wrap repository data keys for this member.
      *
      * @return the key-agreement public key
