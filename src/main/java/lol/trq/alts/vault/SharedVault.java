@@ -24,14 +24,13 @@ import lol.trq.alts.model.BanInfo;
 /**
  * One member device's copy of one AVP 0.5 shared alt repository.
  *
- * <p>An instance comes from {@link #create}, {@link #open}, {@link #join} or {@link #resume} and syncs through
- * its home host ({@link VaultHost}, from {@code
- * alts.vault()}). The client never trusts a host: it verifies every owner-signed manifest state from genesis
- * and pins the highest, refuses a rollback, checks every member-signed commit, merges the heads per account
- * and per field, wraps the data key only to invite-token keys, and withholds {@code refreshToken} and {@code
- * expiresAt} on read and on write unless the latest verified state shares them. A forged state or a
- * rollback fails the whole operation with {@code PROTOCOL}, and the pull that met it adopts nothing of what
- * the host served, where the reference client keeps the valid prefix of it. No secret (the owner phrase, its entropy or seed, a private
+ * <p>An instance comes from {@link #create}, {@link #open}, {@link #join} or {@link #resume} and syncs through its home
+ * host ({@link VaultHost}, from {@code alts.vault()}). The client never trusts a host: it verifies every owner-signed
+ * manifest state from genesis and pins the highest, refuses a rollback, checks every member-signed commit, merges the
+ * heads per account and per field, wraps the data key only to invite-token keys, and withholds {@code refreshToken} and
+ * {@code expiresAt} on read and on write unless the latest verified state shares them. A forged state or a rollback
+ * fails the whole operation with {@code PROTOCOL}, and the pull that met it adopts nothing of what the host served,
+ * where the reference client keeps the valid prefix of it. No secret (the owner phrase, its entropy or seed, a private
  * key, a data key, a plaintext account field) is ever sent to a host.
  *
  * <p>The accounts are {@link AltAccount}s ({@link #accounts()}, {@link #put}, {@link #removeAccount(String)}, {@link
