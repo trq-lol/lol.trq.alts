@@ -179,6 +179,9 @@ public final class BulkOptions {
      * {@code importCredentials} reads it; the runs over stored accounts name the account on every hop
      * instead.
      *
+     * <p>{@code null} does not clear the tag: it throws. Options without a tag are the ones built without
+     * this call.
+     *
      * @param tag the route tag
      * @return a copy with the tag set
      * @throws NullPointerException if {@code tag} is null
