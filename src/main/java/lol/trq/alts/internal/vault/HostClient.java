@@ -60,6 +60,7 @@ public final class HostClient {
 
     private final HttpTransport transport;
     private final String base;
+    private final String origin;
     private final String locator;
     private final byte[] key;
     private final TokenCache tokens;
@@ -70,6 +71,7 @@ public final class HostClient {
             HttpTransport transport, String base, String locator, byte[] key, TokenCache tokens, LongSupplier clock) {
         this.transport = transport;
         this.base = base;
+        this.origin = origin(URI.create(base));
         this.locator = locator;
         this.key = key.clone();
         this.tokens = tokens;
@@ -112,6 +114,19 @@ public final class HostClient {
             throw VaultFailures.protocol("the host's discovery key is not the key it was expected to have");
         }
         return new HostClient(transport, root, locator, key, tokens, clock);
+    }
+
+    /**
+     * The origin a token is bound to besides the host key: {@code scheme://host:port}, lower-cased, with the
+     * default port spelled out, so two spellings of one address share their tokens and no other address does.
+     *
+     * @param base the host's base URL
+     * @return the origin
+     */
+    static String origin(URI base) {
+        String scheme = base.getScheme().toLowerCase(java.util.Locale.ROOT);
+        int port = base.getPort() != -1 ? base.getPort() : scheme.equals("https") ? 443 : 80;
+        return scheme + "://" + base.getHost().toLowerCase(java.util.Locale.ROOT) + ":" + port;
     }
 
     /**
@@ -193,7 +208,7 @@ public final class HostClient {
         tokenLock.lock();
         try {
             byte[] subject = me.ed25519Public();
-            Optional<String> cached = tokens.get(key, subject, clock.getAsLong());
+            Optional<String> cached = tokens.get(key, origin, subject, clock.getAsLong());
             if (cached.isPresent()) {
                 return cached.get();
             }
@@ -212,7 +227,7 @@ public final class HostClient {
             JsonObject minted = postOpen("/api/auth/keypair/token", redeem, "the sign-in");
             String value = AvpJson.string(minted, "token");
             long expiresAt = AvpJson.int64(minted, "expiresAt");
-            tokens.put(key, subject, value, expiresAt);
+            tokens.put(key, origin, subject, value, expiresAt);
             return value;
         } finally {
             tokenLock.unlock();
@@ -240,7 +255,7 @@ public final class HostClient {
                 return AvpJson.parse(answer.body());
             }
             if (answer.status() == 401 && !fresh) {
-                tokens.drop(key, me.ed25519Public());
+                tokens.drop(key, origin, me.ed25519Public());
                 fresh = true;
                 continue;
             }

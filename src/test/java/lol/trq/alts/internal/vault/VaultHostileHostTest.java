@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.UnaryOperator;
 import lol.trq.alts.AltsException;
@@ -729,6 +730,34 @@ class VaultHostileHostTest {
             String auth = r.header("Authorization");
             if (auth != null) {
                 assertFalse(fx.host.tokensMintedUnder(first).contains(auth.substring("Bearer ".length())));
+            }
+        }
+    }
+
+    @Test
+    void anImpostorThatServesTheHostsKeyNeverReceivesTheHostsToken() throws Exception {
+        VaultEngine owner = fx.create(newOwner());
+        byte[] realKey = fx.host.key();
+        TestAvpHost impostor = fx.anotherHost();
+        impostor.interceptor = (req, honest) -> {
+            TestAvpHost.Response r = honest.apply(req);
+            if (req.path().equals("/.well-known/avp")) {
+                JsonObject o = r.json();
+                o.addProperty("hostKey", AvpBytes.base64(realKey));
+                return TestAvpHost.Response.json(200, o);
+            }
+            return r;
+        };
+        // Discovery is unauthenticated: the impostor passes the key check, but the cached token stays put.
+        HostClient connected = HostClient.connect(fx.transport, impostor.base(), realKey, fx.tokens, fx.clock);
+        failure(VaultEngine.open(connected, owner.member(), owner.repoId(), fx.clock));
+        Set<String> minted = fx.host.tokensMintedUnder(realKey);
+        assertFalse(minted.isEmpty());
+        assertTrue(impostor.count("/api/auth/keypair/challenge") >= 1, "the client signed in afresh there");
+        for (TestAvpHost.Request r : impostor.requests()) {
+            String auth = r.header("Authorization");
+            if (auth != null) {
+                assertFalse(minted.contains(auth.substring("Bearer ".length())), "the real host's token leaked");
             }
         }
     }
