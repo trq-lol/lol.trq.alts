@@ -39,8 +39,8 @@ import lol.trq.alts.vault.transport.VaultManifest;
 /**
  * A shared alt repository. This type carries two protocols while the library moves to AVP 0.5, and the 0.4
  * half (the public constructors, their instance methods, {@link CreatedRepo} and {@link RotationResult}) is
- * removed before 1.0.0. An instance is one or the other: a 0.4 facade calling an AVP 0.5 method throws
- * {@link IllegalStateException}.
+ * removed before 1.0.0. An instance is one or the other: a 0.4 facade calling an AVP 0.5 method, or an AVP
+ * 0.5 copy calling a 0.4 method, throws {@link IllegalStateException}.
  *
  * <h2>AVP 0.5: one member device's copy</h2>
  *
@@ -166,6 +166,7 @@ public final class SharedVault {
      * @throws CryptoException if key generation or encryption fails
      */
     public CreatedRepo createRepo(VaultIdentity creator, List<AltAccount> alts) throws CryptoException {
+        facade();
         return createRepo(creator, alts, false);
     }
 
@@ -181,6 +182,7 @@ public final class SharedVault {
      */
     public CreatedRepo createRepo(VaultIdentity creator, List<AltAccount> alts, boolean shareRefreshTokens)
             throws CryptoException {
+        facade();
         String repoId = UUID.randomUUID().toString();
         RepoDataKey dataKey = RepoDataKey.generate();
         MemberEntry creatorEntry = selfEntry(creator, dataKey, null);
@@ -205,6 +207,7 @@ public final class SharedVault {
      *     different key-wrap scheme or is inconsistent
      */
     public RepoContext openRepo(VaultManifest manifest, VaultIdentity identity) throws CryptoException, VaultException {
+        facade();
         return openRepo(manifest, identity, RepoPin.none());
     }
 
@@ -228,6 +231,7 @@ public final class SharedVault {
      */
     public RepoContext openRepo(VaultManifest manifest, VaultIdentity identity, RepoPin pin)
             throws CryptoException, VaultException {
+        facade();
         Objects.requireNonNull(pin, "pin");
         served(manifest, "manifest");
         if (!scheme.schemeId().equals(manifest.schemeId())) {
@@ -270,6 +274,7 @@ public final class SharedVault {
      */
     @Deprecated(since = "0.12.0")
     public MemberEntry addMember(RepoContext ctx, MemberPublicKey member) throws CryptoException {
+        facade();
         try {
             return addMember(ctx, member, null);
         } catch (VaultException e) {
@@ -292,6 +297,7 @@ public final class SharedVault {
      */
     public MemberEntry addMember(RepoContext ctx, MemberPublicKey member, String keyBindingSig)
             throws CryptoException, VaultException {
+        facade();
         Objects.requireNonNull(member, "member");
         return verifiedEntry(ctx.repoId(), member, keyBindingSig, ctx.dataKey());
     }
@@ -306,6 +312,7 @@ public final class SharedVault {
      * @throws CryptoException if encryption fails
      */
     public EncryptedEnvelope encryptPayload(RepoContext ctx, List<AltAccount> alts) throws CryptoException {
+        facade();
         long nextVersion = ctx.payloadVersion() + 1;
         return encrypt(ctx.repoId(), nextVersion, ctx.dataKey().epoch(), ctx.dataKey(), alts, ctx.shareRefreshTokens());
     }
@@ -326,6 +333,7 @@ public final class SharedVault {
      */
     public List<AltAccount> decryptPayload(RepoContext ctx, EncryptedEnvelope env, long expectedMinVersion)
             throws CryptoException, VaultException {
+        facade();
         served(env, "envelope");
         if (!env.repoId().equals(ctx.repoId())) {
             throw new VaultException("envelope repo id does not match context");
@@ -373,6 +381,7 @@ public final class SharedVault {
     public RotationResult rotateKey(
             RepoContext ctx, List<AltAccount> currentAlts, List<MemberPublicKey> remainingMembers)
             throws CryptoException {
+        facade();
         List<Claim> claimed = new ArrayList<>(remainingMembers.size());
         for (MemberPublicKey member : remainingMembers) {
             if (member == null) {
@@ -405,6 +414,7 @@ public final class SharedVault {
      */
     public RotationResult rotateKey(RepoContext ctx, List<AltAccount> currentAlts, VaultManifest roster)
             throws CryptoException, VaultException {
+        facade();
         return rotate(ctx, currentAlts, rosterOf(ctx, roster, null));
     }
 
@@ -423,6 +433,7 @@ public final class SharedVault {
     public RotationResult removeMember(
             RepoContext ctx, List<AltAccount> currentAlts, List<MemberPublicKey> remainingMembers)
             throws CryptoException {
+        facade();
         return rotateKey(ctx, currentAlts, remainingMembers);
     }
 
@@ -444,6 +455,7 @@ public final class SharedVault {
     public RotationResult removeMember(
             RepoContext ctx, List<AltAccount> currentAlts, VaultManifest roster, String removedMemberId)
             throws CryptoException, VaultException {
+        facade();
         Objects.requireNonNull(removedMemberId, "removedMemberId");
         if (removedMemberId.equals(ctx.identity().identityId())) {
             throw new VaultException("a member cannot remove itself by rotating the key");
@@ -628,6 +640,17 @@ public final class SharedVault {
         this.keyBindingVerifier = null;
         this.engine = engine;
         this.home = host;
+    }
+
+    /**
+     * Refuses a 0.4 operation on an AVP 0.5 copy, which holds no key-wrap scheme or verifier.
+     *
+     * @throws IllegalStateException on an AVP 0.5 copy
+     */
+    private void facade() {
+        if (engine != null) {
+            throw new IllegalStateException("an AVP 0.5 copy is not a 0.4 facade");
+        }
     }
 
     private VaultEngine engine() {
