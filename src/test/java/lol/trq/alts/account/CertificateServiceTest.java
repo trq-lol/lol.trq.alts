@@ -15,7 +15,8 @@ import java.security.Signature;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
-import lol.trq.alts.net.NetTestHooks;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure.Kind;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -62,7 +63,6 @@ class CertificateServiceTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        NetTestHooks.resetHttp();
         server = new LoopbackServices();
     }
 
@@ -156,34 +156,48 @@ class CertificateServiceTest {
         PlayerCertificate broken = new PlayerCertificate("not a key", "%%%", "sig", null, null, null);
         PlayerCertificate absent = new PlayerCertificate(null, null, "sig", null, null, null);
 
-        assertThrows(GeneralSecurityException.class, broken::privateKey);
-        assertThrows(GeneralSecurityException.class, broken::publicKey);
-        assertThrows(GeneralSecurityException.class, absent::privateKey);
+        assertEquals(Kind.INVALID_INPUT, kindThrownBy(broken::privateKey), "PEM that is not Base64");
+        assertEquals(Kind.INVALID_INPUT, kindThrownBy(broken::publicKey));
+        assertEquals(Kind.INVALID_INPUT, kindThrownBy(absent::privateKey), "no PEM at all");
+        assertEquals(Kind.INVALID_INPUT, kindThrownBy(absent::publicKey));
         assertFalse(absent.toString().contains("<redacted>"), "an absent key is shown as absent");
+    }
+
+    /** A PEM that decodes, but not to a key, is a key that did not decode: CRYPTO, unchecked. */
+    @Test
+    void aPemThatHoldsNoKeyIsACryptoFailure() {
+        String garbage = "-----BEGIN RSA PRIVATE KEY-----\n"
+                + Base64.getEncoder().encodeToString(new byte[64]) + "\n-----END RSA PRIVATE KEY-----";
+        PlayerCertificate unusable = new PlayerCertificate(garbage, garbage, "sig", null, null, null);
+
+        assertEquals(Kind.CRYPTO, kindThrownBy(unusable::privateKey));
+        assertEquals(Kind.CRYPTO, kindThrownBy(unusable::publicKey));
+    }
+
+    private static Kind kindThrownBy(org.junit.jupiter.api.function.Executable decode) {
+        return assertThrows(AltsException.class, decode).failure().kind();
     }
 
     @Test
     void aResponseWithNoKeyPairIsAFailure() {
         server.canned(200, "{\"publicKeySignatureV2\":\"sig\"}");
-        assertThrows(
-                AccountException.class, () -> server.services().certificates().fetch());
+        assertThrows(AltsException.class, () -> server.services().certificates().fetch());
 
         server.canned(204, "");
-        assertThrows(
-                AccountException.class, () -> server.services().certificates().fetch());
+        assertThrows(AltsException.class, () -> server.services().certificates().fetch());
     }
 
     @Test
     void certificateFailuresCarryTheirStatus() {
         server.canned(401, "{\"errorMessage\":\"Invalid token\"}");
-        AccountException refused = assertThrows(
-                AccountException.class, () -> server.services().certificates().fetch());
-        assertTrue(refused.tokenRefused());
+        AltsException refused = assertThrows(
+                AltsException.class, () -> server.services().certificates().fetch());
+        assertTrue(refused.kind() == Kind.UNAUTHORIZED);
 
         server.rateLimited(30);
-        AccountException limited = assertThrows(
-                AccountException.class, () -> server.services().certificates().fetch());
-        assertTrue(limited.rateLimited());
-        assertEquals(Duration.ofSeconds(30), limited.retryAfter());
+        AltsException limited = assertThrows(
+                AltsException.class, () -> server.services().certificates().fetch());
+        assertTrue(limited.kind() == Kind.RATE_LIMITED);
+        assertEquals(Duration.ofSeconds(30), limited.failure().retryAfter().orElse(null));
     }
 }

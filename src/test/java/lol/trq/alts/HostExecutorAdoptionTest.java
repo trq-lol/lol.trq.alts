@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
@@ -12,23 +13,27 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import lol.trq.alts.account.Entitlements;
-import lol.trq.alts.auth.AltAccountServiceImpl;
-import lol.trq.alts.auth.AltLoginCallback.LoginResult;
-import lol.trq.alts.auth.AltLoginServiceImpl;
-import lol.trq.alts.bulk.BulkOperationsImpl;
+import lol.trq.alts.auth.LoginResult;
 import lol.trq.alts.bulk.BulkOptions;
 import lol.trq.alts.bulk.BulkProgress;
 import lol.trq.alts.bulk.BulkReport;
 import lol.trq.alts.cache.AsyncCache;
+import lol.trq.alts.internal.auth.AltAccountServiceImpl;
+import lol.trq.alts.internal.auth.AltLoginServiceImpl;
+import lol.trq.alts.internal.bulk.BulkOperationsImpl;
+import lol.trq.alts.internal.net.HttpTransport;
+import lol.trq.alts.internal.net.TestTransports;
+import lol.trq.alts.internal.skin.SkinAccess;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
-import lol.trq.alts.net.IoExecutor;
-import lol.trq.alts.net.NetTestHooks;
 import lol.trq.alts.skin.SkinAvatarCache;
+import lol.trq.alts.store.AccountStore;
+import lol.trq.alts.store.StoreTestHooks;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * A host that names its own executor gets the library's blocking work on it. The seam is worthless if
@@ -48,14 +53,21 @@ class HostExecutorAdoptionTest {
         Thread.ofPlatform().daemon().name(HOST_THREAD_PREFIX + id).start(task);
     };
 
+    @TempDir
+    Path storeDir;
+
+    private AccountStore store;
+    private HttpTransport transport;
+
     @BeforeEach
-    void bindHostExecutor() {
-        IoExecutor.bind(host);
+    void openStore() {
+        store = StoreTestHooks.openAccountStore(storeDir);
+        transport = TestTransports.on(null, host);
     }
 
     @AfterEach
     void restoreDefault() {
-        NetTestHooks.resetExecutor();
+        StoreTestHooks.close(store);
     }
 
     /** Records the current thread if it is not one of the host's. */
@@ -68,7 +80,7 @@ class HostExecutorAdoptionTest {
 
     @Test
     void aCacheLoaderRunsOnTheHostExecutor() throws Exception {
-        AsyncCache<String, String> cache = new AsyncCache<>(key -> {
+        AsyncCache<String, String> cache = new AsyncCache<>(host, key -> {
             onHostThread();
             return "value";
         });
@@ -85,13 +97,15 @@ class HostExecutorAdoptionTest {
 
     @Test
     void anAvatarDownloadRunsOnTheHostExecutor() throws Exception {
-        SkinAvatarCache<String> cache = new SkinAvatarCache<>(
-                (uuid, size) -> {
-                    onHostThread();
-                    return new byte[] {1};
-                },
-                bytes -> "handle",
-                Runnable::run);
+        SkinAvatarCache<String> cache = SkinAccess.bridge()
+                .cache(
+                        (uuid, size) -> {
+                            onHostThread();
+                            return new byte[] {1};
+                        },
+                        bytes -> "handle",
+                        Runnable::run,
+                        host);
 
         cache.get("uuid-1");
         for (int i = 0; i < 400 && cache.get("uuid-1") == null; i++) {
@@ -105,7 +119,7 @@ class HostExecutorAdoptionTest {
 
     @Test
     void aLoginResolvesOnTheHostExecutor() throws Exception {
-        AltLoginServiceImpl logins = new AltLoginServiceImpl(session -> {}, null);
+        AltLoginServiceImpl logins = new AltLoginServiceImpl(store, session -> {}, null, transport);
 
         // An empty token is refused before any request, but only after the route has gone off-thread.
         LoginResult result = logins.loginSession("", LoginMode.DIRECT).get(5, TimeUnit.SECONDS);
@@ -116,15 +130,19 @@ class HostExecutorAdoptionTest {
 
     @Test
     void aBulkSweepRunsItsEntriesOnTheHostExecutor() throws Exception {
-        AltLoginServiceImpl logins = new AltLoginServiceImpl(session -> {}, null);
-        BulkOperationsImpl bulk = new BulkOperationsImpl(logins, new AltAccountServiceImpl(null), account -> () -> {
-            onHostThread();
-            return new Entitlements(Set.of());
-        });
+        AltLoginServiceImpl logins = new AltLoginServiceImpl(store, session -> {}, null, transport);
+        BulkOperationsImpl bulk = new BulkOperationsImpl(
+                logins,
+                new AltAccountServiceImpl(store, null, transport),
+                account -> () -> {
+                    onHostThread();
+                    return new Entitlements(Set.of());
+                },
+                transport);
         List<AltAccount> accounts = List.of(
                 AltAccount.of("00000000-0000-4000-8000-000000000001", "AltOne", "token", AccountType.MICROSOFT),
                 AltAccount.of("00000000-0000-4000-8000-000000000002", "AltTwo", "token", AccountType.MICROSOFT));
-        BulkOptions spaced = new BulkOptions(1, Duration.ofMillis(5), 0, Duration.ZERO, true);
+        BulkOptions spaced = BulkOptions.of(1, Duration.ofMillis(5), 0, Duration.ZERO, true);
 
         BulkReport report = bulk.entitlementsAll(accounts, spaced, BulkProgress.NONE)
                 .report()

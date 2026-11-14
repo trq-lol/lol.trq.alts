@@ -1,6 +1,7 @@
 package lol.trq.alts.account;
 
 import com.google.gson.annotations.SerializedName;
+import lol.trq.alts.internal.account.Uuids;
 
 /**
  * A player's public identity — the name and UUID anyone can look up, with nothing an account owner alone
@@ -15,7 +16,11 @@ public record PublicProfile(
         @SerializedName("id") String uuid,
         @SerializedName("name") String name) {
 
-    /** Normalises the id to dashed form, whichever way it arrived. */
+    /**
+     * Normalises the id to dashed form, whichever way it arrived.
+     *
+     * @since 0.12.0
+     */
     public PublicProfile {
         uuid = Uuids.dashed(uuid);
     }

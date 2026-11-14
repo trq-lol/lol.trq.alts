@@ -1,0 +1,7 @@
+{
+  "ed25519PublicKey": "mGY/Zog6bZDCkJf/UG34c7gtbfKvIpuzrVjmjR9WWBc\u003d",
+  "x25519PublicKey": "aCE+cgWXcz/Gk9OHYVXGJ2P+FHIoPUDeUQmXaoOpDl8\u003d",
+  "kdfSalt": "NcwITaSUdAtyIqRqpWYL+A\u003d\u003d",
+  "kdfIterations": 600000,
+  "wrappedPrivateMaterial": "hTKgmhYD+EIPkqrS7PC77xl+e3WfgTdS1+aKlxz/r/97e2YdI7bv/RsNF1Ufx42s9WEkf+40hiRC7qoNZofVHvZ1sIQPErlRUoSWMull79NHr8NyjY2nw5PaYuY\u003d"
+}

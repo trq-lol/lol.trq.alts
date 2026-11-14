@@ -1,0 +1,20 @@
+{
+  "repoId": "ad37d5ef-f3b6-4fa4-9067-736222e7f32f",
+  "schemeId": "X25519-HKDF-SHA256-AESGCM-v1",
+  "keyEpoch": 1,
+  "payloadVersion": 2,
+  "members": [
+    {
+      "ed25519PublicKey": "affkROlGcDEAJ+buMH29BGsD4p/cLfsvV76m2jIjUbo\u003d",
+      "x25519PublicKey": "5kUpASnxIVehTP8tYq0QQtUMiMlnv8sQQIujY2U2PyU\u003d",
+      "wrappedDataKey": {
+        "schemeId": "X25519-HKDF-SHA256-AESGCM-v1",
+        "ephemeralPublicKey": "Pj6C69gSLS9mtWYVK1huaBmGMYfq/Dkt3ODt5Mx/4xs\u003d",
+        "iv": "kVWlbfRALAT2lVZW",
+        "ciphertext": "L82DrvmEx+ZMEEKNIFag8Qb6yZlwERiKXOIx1hEbEtzBHGqJcAYgmSQxOK71XvCl"
+      },
+      "keyEpoch": 1
+    }
+  ],
+  "shareRefreshTokens": true
+}

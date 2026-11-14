@@ -8,8 +8,9 @@ import java.util.List;
  * UUID an authentication flow needs, but the skins, capes, and any pending moderation actions on the
  * account.
  *
- * <p>Distinct from {@code MinecraftProfile}, which is the auth chain's internal result (identity plus
- * credentials). This is the read a host performs on a live account to show what it looks like and owns.
+ * <p>Distinct from the identity a sign-in resolves, which reaches a host as the account on its
+ * {@link lol.trq.alts.auth.LoginResult}. This is the read a host performs on a live account to show what it
+ * looks like and owns.
  *
  * @param uuid the account UUID (undashed, as the endpoint returns it)
  * @param name the current username
@@ -17,7 +18,7 @@ import java.util.List;
  * @param capes the capes the account owns, at most one {@link Cape.State#ACTIVE}
  * @param profileActions pending moderation actions (empty for an account in good standing)
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public record PlayerProfile(
         @SerializedName("id") String uuid,
@@ -26,7 +27,11 @@ public record PlayerProfile(
         @SerializedName("capes") List<Cape> capes,
         @SerializedName("profileActions") List<String> profileActions) {
 
-    /** Normalises the collections to non-null empties, so a caller never has to null-check them. */
+    /**
+     * Normalises the collections to non-null empties, so a caller never has to null-check them.
+     *
+     * @since 0.11.0
+     */
     public PlayerProfile {
         skins = skins == null ? List.of() : List.copyOf(skins);
         capes = capes == null ? List.of() : List.copyOf(capes);
@@ -37,7 +42,7 @@ public record PlayerProfile(
      * Returns the active skin, if the account has one.
      *
      * @return the active skin, or {@code null} when none is active
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public Skin activeSkin() {
         return skins.stream()
@@ -50,7 +55,7 @@ public record PlayerProfile(
      * Returns the active cape, if the account has one shown.
      *
      * @return the active cape, or {@code null} when none is active
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public Cape activeCape() {
         return capes.stream()
@@ -64,7 +69,7 @@ public record PlayerProfile(
      * about before relying on the account.
      *
      * @return true if a profile action is pending
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public boolean hasPendingActions() {
         return !profileActions.isEmpty();

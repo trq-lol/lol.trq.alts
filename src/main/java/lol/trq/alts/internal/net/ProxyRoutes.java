@@ -1,0 +1,56 @@
+package lol.trq.alts.internal.net;
+
+import java.net.InetSocketAddress;
+import java.net.Proxy;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Base64;
+import lol.trq.alts.net.ProxyRoute;
+
+/**
+ * What the transport makes of a {@link ProxyRoute}: the JDK proxy and the credential header. Kept out of the
+ * public record, because building either is the transport's job, not a host's.
+ *
+ * @author trq
+ * @since 1.0.0
+ */
+public final class ProxyRoutes {
+
+    private ProxyRoutes() {}
+
+    /**
+     * Returns a route as a JDK proxy.
+     *
+     * @param route the route
+     * @return the proxy, or {@link Proxy#NO_PROXY} for the direct route
+     */
+    public static Proxy toProxy(ProxyRoute route) {
+        if (route.isDirect()) {
+            return Proxy.NO_PROXY;
+        }
+        Proxy.Type type = route.kind() == ProxyRoute.Kind.SOCKS5 ? Proxy.Type.SOCKS : Proxy.Type.HTTP;
+        return new Proxy(type, InetSocketAddress.createUnresolved(route.host(), route.port()));
+    }
+
+    /**
+     * Returns the {@code Proxy-Authorization} value for a route. Set per connection, so no global
+     * authenticator is installed.
+     *
+     * @param route the route
+     * @return the header value, or {@code null} when the route does not authenticate
+     */
+    public static String authorizationHeader(ProxyRoute route) {
+        if (!route.authenticated()) {
+            return null;
+        }
+        char[] password = route.password();
+        try {
+            String pair = route.username() + ":" + (password == null ? "" : new String(password));
+            return "Basic " + Base64.getEncoder().encodeToString(pair.getBytes(StandardCharsets.UTF_8));
+        } finally {
+            if (password != null) {
+                Arrays.fill(password, '\0');
+            }
+        }
+    }
+}

@@ -54,11 +54,21 @@ jobs:
           name: lol.trq.alts-${{ github.ref_name }}
           path: build/libs/*.jar
 
+  # The neutrality scan, run again in this workflow so the release below can depend on it: the
+  # standalone no-leak workflow is a separate run that no job here can wait on.
+  no-leak:
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/no-leak.yml
+    secrets: inherit
+    permissions:
+      contents: read
+
   # Tagging is the whole release ceremony, so a tag that builds green publishes itself. Releases used to
   # be created by hand, which meant they simply were not: six versions shipped with tags and no release.
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    # Never publish a tag whose tree failed the no-leak scan.
+    needs: [ build, no-leak ]
     runs-on: ubuntu-latest
 
     # Only this job may write to the repository, which is why it is separate from the build.
@@ -76,9 +86,10 @@ jobs:
           java-version: '25'
 
       # Tests already ran in the build job this depends on; re-running them here would only delay a
-      # release that is already known to be green.
+      # release that is already known to be green. All three suites are skipped (the class-path suite, the
+      # module-path suite and the API gate's own tests); apiCheck and javadocCheck still run.
       - name: Assemble jars
-        run: ./gradlew build -x test --no-daemon
+        run: ./gradlew build -x test -x moduleTest -x apiToolTest --no-daemon
 
       # Matched by prefix rather than regex: a version is dotted, and the headings carry brackets, so a
       # dynamic pattern needs escaping that does not survive the trip through the shell.

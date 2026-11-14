@@ -15,7 +15,9 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
-import lol.trq.alts.net.NetTestHooks;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure.Kind;
+import lol.trq.alts.internal.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,7 +40,6 @@ class AccountServicesTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        NetTestHooks.resetHttp();
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/", exchange -> {
             lastMethod.set(exchange.getRequestMethod());
@@ -68,7 +69,7 @@ class AccountServicesTest {
     }
 
     private AccountServices services() {
-        return AccountServices.of("test-token", "uuid-1", new AccountEndpoints(base));
+        return AccountServices.create(TestTransports.direct(), "test-token", "uuid-1", new AccountEndpoints(base));
     }
 
     private void canned(int status, String body) {
@@ -107,15 +108,14 @@ class AccountServicesTest {
     }
 
     @Test
-    void aRefusedTokenIsAnExceptionCarryingItsStatus() {
+    void aRefusedTokenIsAnExceptionCarryingItsKind() {
         canned(401, "{\"errorMessage\":\"Invalid token\"}");
 
-        AccountException thrown =
-                assertThrows(AccountException.class, () -> services().profile().fetch());
+        AltsException thrown =
+                assertThrows(AltsException.class, () -> services().profile().fetch());
 
-        assertEquals(401, thrown.status());
-        assertTrue(thrown.tokenRefused());
-        assertTrue(thrown.getMessage().contains("Invalid token"), "the service's own message is surfaced");
+        assertEquals(Kind.UNAUTHORIZED, thrown.kind());
+        assertFalse(thrown.getMessage().contains("Invalid token"), "the service's own text is never repeated");
     }
 
     @Test
@@ -155,14 +155,19 @@ class AccountServicesTest {
                 services().name().change("Taken").outcome());
 
         canned(404, "{}");
-        assertEquals(
-                NameChangeResult.Outcome.NOT_ENTITLED,
-                services().name().change("Any").outcome());
+        NameChangeResult unentitled = services().name().change("Any");
+        assertEquals(NameChangeResult.Outcome.FAILED, unentitled.outcome());
+        assertEquals(Kind.NOT_ENTITLED, unentitled.failure().orElseThrow().kind());
+
+        canned(401, "{}");
+        NameChangeResult refused = services().name().change("Any");
+        assertEquals(NameChangeResult.Outcome.FAILED, refused.outcome());
+        assertEquals(Kind.UNAUTHORIZED, refused.failure().orElseThrow().kind());
 
         canned(429, "{}");
-        assertEquals(
-                NameChangeResult.Outcome.RATE_LIMITED,
-                services().name().change("Any").outcome());
+        NameChangeResult limited = services().name().change("Any");
+        assertEquals(NameChangeResult.Outcome.FAILED, limited.outcome());
+        assertEquals(Kind.RATE_LIMITED, limited.failure().orElseThrow().kind());
     }
 
     @Test
@@ -217,8 +222,8 @@ class AccountServicesTest {
     void anErrorMessageNeverLeaksAQueryString() {
         // The availability URL has no query today, but the guard that strips one must hold regardless.
         canned(500, "{}");
-        AccountException thrown =
-                assertThrows(AccountException.class, () -> services().name().checkAvailability("X"));
+        AltsException thrown =
+                assertThrows(AltsException.class, () -> services().name().checkAvailability("X"));
         assertFalse(thrown.getMessage().contains("?"), thrown.getMessage());
     }
 

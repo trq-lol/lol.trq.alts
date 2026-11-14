@@ -6,10 +6,14 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.internal.auth.CookieAuthUtil;
 
 /**
  * Reads exported browser cookies off disk into the text {@link CookieAuthUtil} parses.
@@ -32,6 +36,8 @@ public final class CookieFile {
      * Largest cookie export accepted. Netscape exports of a full browser profile run to tens of
      * kilobytes; a megabyte is far past any real one and keeps a mistakenly picked archive or disk
      * image from being read into memory.
+     *
+     * @since 0.7.0
      */
     public static final long MAX_BYTES = 1L << 20;
 
@@ -59,24 +65,35 @@ public final class CookieFile {
      *
      * @param file the file to read
      * @return the file's text content, byte-order mark stripped
-     * @throws IOException if the file is missing, is not a regular file, is larger than
-     *     {@link #MAX_BYTES}, holds no text, or cannot be read
+     * @throws AltsException of kind {@link AltsFailure.Kind#INVALID_INPUT} if the file is missing, is not
+     *     a regular file, is larger than {@link #MAX_BYTES}, holds no text, or cannot be read; the
+     *     message names the file, never its path, and no exception carrying the path rides along
+     * @since 0.7.0
      */
-    public static String read(Path file) throws IOException {
+    public static String read(Path file) {
         Objects.requireNonNull(file, "file");
 
         String name = displayName(file);
+        try {
+            return readChecked(file, name);
+        } catch (SecurityException | InvalidPathException denied) {
+            // A security manager's or a path parser's message can name the path; neither is kept.
+            throw refused(name + ": could not be read");
+        }
+    }
 
+    /** The checks and the read, any of which may fail with a refusal naming the file only. */
+    private static String readChecked(Path file, String name) {
         // isRegularFile answers both questions at once, and answers them false for a directory, a device,
         // a named pipe, and anything else that would otherwise be opened and read until it felt like
         // stopping. A symlink to a regular file is followed, which is what a user picking one intends.
         if (!Files.isRegularFile(file)) {
-            throw new IOException(name + (Files.exists(file) ? ": not a file" : ": no such file"));
+            throw refused(name + (Files.exists(file) ? ": not a file" : ": no such file"));
         }
 
         String text = decode(readCapped(file, name));
         if (text.isBlank()) {
-            throw new IOException(name + ": file is empty");
+            throw refused(name + ": file is empty");
         }
         return text;
     }
@@ -88,19 +105,26 @@ public final class CookieFile {
      * @param file the file to read
      * @param name the file's display name, for the failure message
      * @return the file's bytes
-     * @throws IOException if the file is over the cap or cannot be read
+     * @throws AltsException of kind {@link AltsFailure.Kind#INVALID_INPUT} if the file is over the cap or
+     *     cannot be read
      */
-    private static byte[] readCapped(Path file, String name) throws IOException {
+    private static byte[] readCapped(Path file, String name) {
         byte[] bytes;
         try (InputStream in = Files.newInputStream(file)) {
             bytes = in.readNBytes((int) MAX_BYTES + 1);
         } catch (IOException unreadable) {
-            throw new IOException(name + ": " + reason(unreadable), unreadable);
+            // Not kept as the cause: a file-system exception's message is the absolute path.
+            throw refused(name + ": " + reason(unreadable));
         }
         if (bytes.length > MAX_BYTES) {
-            throw new IOException(name + ": too large (max " + (MAX_BYTES / 1024) + " KiB)");
+            throw refused(name + ": too large (max " + (MAX_BYTES / 1024) + " KiB)");
         }
         return bytes;
+    }
+
+    /** A refusal of the file as input, of kind {@link AltsFailure.Kind#INVALID_INPUT}. */
+    private static AltsException refused(String message) {
+        return new AltsException(AltsFailure.Kind.INVALID_INPUT, message);
     }
 
     /**

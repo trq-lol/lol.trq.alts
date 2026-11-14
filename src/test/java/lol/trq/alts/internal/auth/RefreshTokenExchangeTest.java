@@ -1,0 +1,305 @@
+package lol.trq.alts.internal.auth;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicReference;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure.Kind;
+import lol.trq.alts.auth.MicrosoftAuthConfig;
+import lol.trq.alts.internal.net.TestTransports;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+
+@org.junit.jupiter.api.Timeout(value = 60, unit = java.util.concurrent.TimeUnit.SECONDS)
+class RefreshTokenExchangeTest {
+
+    /** A client id that injects a second form parameter unless it is encoded. */
+    private static final String HOSTILE_CLIENT_ID = "id&grant_type=password";
+
+    private static final String ENCODED_HOSTILE_CLIENT_ID = "id%26grant_type%3Dpassword";
+
+    private HttpServer server;
+    private final AtomicReference<String> tokenRequestBody = new AtomicReference<>();
+    private final AtomicReference<String> xboxLiveRequestBody = new AtomicReference<>();
+    private int tokenStatus = 200;
+    private String tokenBody = "{\"access_token\":\"ms-access\",\"refresh_token\":\"rotated\",\"expires_in\":3600}";
+
+    @AfterEach
+    void stopServer() {
+        if (server != null) {
+            server.stop(0);
+        }
+    }
+
+    private MicrosoftAuthConfig startServer() throws IOException {
+        return startServer("test-client-id");
+    }
+
+    private MicrosoftAuthConfig startServer(String clientId) throws IOException {
+        return startServer(MicrosoftAuthConfig.of(clientId));
+    }
+
+    private MicrosoftAuthConfig startServer(MicrosoftAuthConfig config) throws IOException {
+        server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        server.createContext("/token", exchange -> {
+            tokenRequestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            respond(exchange, tokenStatus, tokenBody);
+        });
+        server.createContext("/xbl", exchange -> {
+            xboxLiveRequestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            respond(exchange, 200, "{\"Token\":\"xbl\"}");
+        });
+        server.createContext(
+                "/xsts",
+                exchange -> respond(
+                        exchange, 200, "{\"Token\":\"xsts\",\"DisplayClaims\":{\"xui\":[{\"uhs\":\"hash\"}]}}"));
+        server.createContext(
+                "/mclogin",
+                exchange -> respond(exchange, 200, "{\"access_token\":\"mc-access\",\"expires_in\":86400}"));
+        server.createContext(
+                "/mcprofile",
+                exchange -> respond(exchange, 200, "{\"id\":\"00000000000040008000000000000001\",\"name\":\"Alex\"}"));
+        server.start();
+
+        String base = "http://" + InetAddress.getLoopbackAddress().getHostAddress() + ":"
+                + server.getAddress().getPort();
+        return config.withEndpoints(
+                base + "/authorize",
+                base + "/token",
+                base + "/xbl",
+                base + "/xsts",
+                base + "/mclogin",
+                base + "/mcprofile");
+    }
+
+    /** Counts how many distinct {@code grant_type} parameters a form body actually declares. */
+    private static long grantTypeParameters(String formBody) {
+        return Arrays.stream(formBody.split("&"))
+                .filter(parameter -> parameter.startsWith("grant_type="))
+                .count();
+    }
+
+    /**
+     * Redeems a token against the configured endpoint and returns the rejection it failed with, so a
+     * classification assertion reads as one line.
+     */
+    private static AltsException rejectionFor(MicrosoftAuthConfig config) {
+        ExecutionException thrown = assertThrows(
+                ExecutionException.class,
+                () -> new MicrosoftAuthUtil(TestTransports.direct())
+                        .authenticateWithRefreshToken(config, "still-good")
+                        .get());
+        return assertInstanceOf(AltsException.class, thrown.getCause());
+    }
+
+    private static void respond(HttpExchange exchange, int status, String body) throws IOException {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.sendResponseHeaders(status, bytes.length);
+        exchange.getResponseBody().write(bytes);
+        exchange.close();
+    }
+
+    @Test
+    void sendsRefreshGrantAndReturnsRotatedToken() throws Exception {
+        MicrosoftAuthConfig config = startServer();
+
+        MinecraftProfile profile = new MicrosoftAuthUtil(TestTransports.direct())
+                .authenticateWithRefreshToken(config, "original-refresh")
+                .get();
+
+        String body = tokenRequestBody.get();
+        assertTrue(body.contains("grant_type=refresh_token"), "must use the refresh grant: " + body);
+        assertTrue(body.contains("refresh_token=original-refresh"), "must send the stored token: " + body);
+        assertTrue(body.contains("client_id=test-client-id"), "must send the host client id: " + body);
+        assertFalse(body.contains("grant_type=authorization_code"), "must not use the code grant: " + body);
+
+        assertEquals("Alex", profile.username());
+        assertEquals("00000000-0000-4000-8000-000000000001", profile.uuid());
+        assertEquals("mc-access", profile.accessToken());
+        assertEquals("rotated", profile.refreshToken(), "the rotated token must survive, not the original");
+
+        // The Minecraft token lives ~24h and the Microsoft OAuth token ~1h. The stamped expiry must
+        // describe the token actually stored on the account, which is the Minecraft one.
+        long fromNow = profile.expiresAt() - System.currentTimeMillis();
+        assertTrue(
+                fromNow > 80_000_000L, "expiry must come from the Minecraft lifetime, not the OAuth one: " + fromNow);
+        assertTrue(fromNow <= 86_400_000L, "expiry must not exceed the advertised lifetime: " + fromNow);
+    }
+
+    @Test
+    void aModernAppSendsNoRedirectUriAndADelegatedTicket() throws Exception {
+        MicrosoftAuthConfig config = startServer();
+
+        new MicrosoftAuthUtil(TestTransports.direct())
+                .authenticateWithRefreshToken(config, "original-refresh")
+                .get();
+
+        assertFalse(
+                tokenRequestBody.get().contains("redirect_uri="),
+                "an OAuth refresh grant carries no redirect uri: " + tokenRequestBody.get());
+        assertTrue(
+                xboxLiveRequestBody.get().contains("\"RpsTicket\":\"d=ms-access\""),
+                "an OAuth access token goes up delegated: " + xboxLiveRequestBody.get());
+    }
+
+    /**
+     * A legacy MSA app rejects the OAuth-shaped grant outright with a 400. It wants the desktop
+     * redirect and the MBI_SSL scope, and its access token is an RPS ticket rather than a delegated
+     * one.
+     */
+    @Test
+    void aLegacyMsaAppSendsTheDesktopRedirectTheMbiScopeAndAnRpsTicket() throws Exception {
+        MicrosoftAuthConfig config = startServer(MicrosoftAuthConfig.legacyMsa("legacy-app-id"));
+
+        new MicrosoftAuthUtil(TestTransports.direct())
+                .authenticateWithRefreshToken(config, "original-refresh")
+                .get();
+
+        String body = tokenRequestBody.get();
+        assertTrue(
+                body.contains("redirect_uri="
+                        + URLEncoder.encode(MicrosoftAuthConfig.LEGACY_MSA_REDIRECT_URI, StandardCharsets.UTF_8)),
+                "a legacy app requires the desktop redirect: " + body);
+        assertTrue(
+                body.contains(
+                        "scope=" + URLEncoder.encode(MicrosoftAuthConfig.LEGACY_MSA_SCOPE, StandardCharsets.UTF_8)),
+                "a legacy app requires the MBI_SSL scope: " + body);
+        assertEquals(1, grantTypeParameters(body), "the grant must stay a single refresh_token grant: " + body);
+        assertTrue(
+                xboxLiveRequestBody.get().contains("\"RpsTicket\":\"t=ms-access\""),
+                "a legacy access token goes up as an RPS ticket: " + xboxLiveRequestBody.get());
+    }
+
+    @Test
+    void keepsTheOriginalTokenWhenMicrosoftOmitsARotation() throws Exception {
+        tokenBody = "{\"access_token\":\"ms-access\",\"expires_in\":3600}";
+        MicrosoftAuthConfig config = startServer();
+
+        MinecraftProfile profile = new MicrosoftAuthUtil(TestTransports.direct())
+                .authenticateWithRefreshToken(config, "original-refresh")
+                .get();
+
+        assertEquals("original-refresh", profile.refreshToken(), "omitted rotation must not clear the token");
+    }
+
+    @Test
+    void clientErrorIsAPermanentRejection() throws Exception {
+        tokenStatus = 400;
+        tokenBody = "{\"error\":\"invalid_grant\"}";
+        MicrosoftAuthConfig config = startServer();
+
+        ExecutionException thrown = assertThrows(
+                ExecutionException.class,
+                () -> new MicrosoftAuthUtil(TestTransports.direct())
+                        .authenticateWithRefreshToken(config, "revoked")
+                        .get());
+
+        AltsException rejection = assertInstanceOf(AltsException.class, thrown.getCause());
+        assertEquals(Kind.REAUTH_REQUIRED, rejection.kind(), "a stated invalid_grant means the token is spent");
+    }
+
+    @Test
+    void theRefreshExchangeEncodesTheClientIdSoItCannotInjectFormParameters() throws Exception {
+        MicrosoftAuthConfig config = startServer(HOSTILE_CLIENT_ID);
+
+        new MicrosoftAuthUtil(TestTransports.direct())
+                .authenticateWithRefreshToken(config, "original-refresh")
+                .get();
+
+        String body = tokenRequestBody.get();
+        assertTrue(body.contains("client_id=" + ENCODED_HOSTILE_CLIENT_ID), "the client id must be encoded: " + body);
+        assertEquals(1, grantTypeParameters(body), "a client id must not smuggle in a second grant_type: " + body);
+    }
+
+    @Test
+    void theAuthorizationCodeExchangeEncodesTheClientIdToo() throws Exception {
+        MicrosoftAuthConfig config = startServer(HOSTILE_CLIENT_ID);
+
+        CompletableFuture<?> exchange = new MicrosoftAuthUtil(TestTransports.direct())
+                .exchangeCodeForToken(config, "auth-code", "http://127.0.0.1/callback", "verifier");
+        exchange.get();
+
+        String body = tokenRequestBody.get();
+        assertTrue(body.contains("client_id=" + ENCODED_HOSTILE_CLIENT_ID), "the client id must be encoded: " + body);
+        assertEquals(1, grantTypeParameters(body), "a client id must not smuggle in a second grant_type: " + body);
+    }
+
+    @Test
+    void throttlingIsTransientEvenWhenTheBodyClaimsAnInvalidGrant() throws Exception {
+        tokenStatus = 429;
+        tokenBody = "{\"error\":\"invalid_grant\"}";
+        MicrosoftAuthConfig config = startServer();
+
+        assertEquals(
+                Kind.RATE_LIMITED,
+                rejectionFor(config).kind(),
+                "a rate limit is the service asking to wait, never a reason to destroy a credential");
+    }
+
+    @Test
+    void requestTimeoutIsTransient() throws Exception {
+        tokenStatus = 408;
+        tokenBody = "{\"error\":\"invalid_grant\"}";
+        MicrosoftAuthConfig config = startServer();
+
+        assertEquals(Kind.NETWORK, rejectionFor(config).kind(), "a request timeout is retryable, not a spent token");
+    }
+
+    @Test
+    void hostMisconfigurationDoesNotDestroyTheCredential() throws Exception {
+        for (String error : new String[] {"invalid_client", "unauthorized_client"}) {
+            tokenStatus = 400;
+            tokenBody = "{\"error\":\"" + error + "\"}";
+            MicrosoftAuthConfig config = startServer();
+
+            assertEquals(
+                    Kind.NOT_CONFIGURED,
+                    rejectionFor(config).kind(),
+                    "a wrong client id is the host's mistake; the user's refresh token is still good");
+            stopServer();
+            server = null;
+        }
+    }
+
+    @Test
+    void anUnreadableClientErrorIsARefusalThatKeepsTheToken() throws Exception {
+        tokenStatus = 400;
+        tokenBody = "not json at all";
+        MicrosoftAuthConfig config = startServer();
+
+        assertEquals(
+                Kind.UNAUTHORIZED,
+                rejectionFor(config).kind(),
+                "only a stated invalid_grant proves the token is spent");
+    }
+
+    @Test
+    void serverErrorIsATransientRejection() throws Exception {
+        tokenStatus = 503;
+        tokenBody = "unavailable";
+        MicrosoftAuthConfig config = startServer();
+
+        ExecutionException thrown = assertThrows(
+                ExecutionException.class,
+                () -> new MicrosoftAuthUtil(TestTransports.direct())
+                        .authenticateWithRefreshToken(config, "fine")
+                        .get());
+
+        AltsException rejection = assertInstanceOf(AltsException.class, thrown.getCause());
+        assertEquals(Kind.NETWORK, rejection.kind(), "a 5xx must not cost the user their refresh token");
+    }
+}

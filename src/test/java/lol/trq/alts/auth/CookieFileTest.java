@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure.Kind;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -76,30 +78,32 @@ class CookieFileTest {
 
     @Test
     void rejectsMissingFile() {
-        IOException thrown = assertThrows(IOException.class, () -> CookieFile.read(dir.resolve("absent.txt")));
-
-        assertTrue(thrown.getMessage().contains("absent.txt"), thrown.getMessage());
+        AltsException thrown = assertThrows(AltsException.class, () -> CookieFile.read(dir.resolve("absent.txt")));
+        assertEquals(Kind.INVALID_INPUT, thrown.kind());
     }
 
     @Test
     void rejectsDirectory() {
-        assertThrows(IOException.class, () -> CookieFile.read(dir));
+        assertEquals(
+                Kind.INVALID_INPUT,
+                assertThrows(AltsException.class, () -> CookieFile.read(dir)).kind());
     }
 
     @Test
     void rejectsBlankFile() throws IOException {
         Path file = write("blank.txt", "   \n\t\n".getBytes(StandardCharsets.UTF_8));
 
-        assertThrows(IOException.class, () -> CookieFile.read(file));
+        assertEquals(
+                Kind.INVALID_INPUT,
+                assertThrows(AltsException.class, () -> CookieFile.read(file)).kind());
     }
 
     @Test
     void rejectsOversizedFile() throws IOException {
         Path file = write("huge.txt", new byte[(int) CookieFile.MAX_BYTES + 1]);
 
-        IOException thrown = assertThrows(IOException.class, () -> CookieFile.read(file));
-
-        assertTrue(thrown.getMessage().contains("too large"), thrown.getMessage());
+        AltsException thrown = assertThrows(AltsException.class, () -> CookieFile.read(file));
+        assertEquals(Kind.INVALID_INPUT, thrown.kind());
     }
 
     /**
@@ -110,9 +114,8 @@ class CookieFileTest {
     void readsNoMoreThanOneByteBeyondTheCap() throws IOException {
         Path file = write("huge.txt", new byte[(int) CookieFile.MAX_BYTES * 2]);
 
-        IOException thrown = assertThrows(IOException.class, () -> CookieFile.read(file));
-
-        assertTrue(thrown.getMessage().contains("too large"), thrown.getMessage());
+        AltsException thrown = assertThrows(AltsException.class, () -> CookieFile.read(file));
+        assertEquals(Kind.INVALID_INPUT, thrown.kind());
     }
 
     /**
@@ -124,19 +127,64 @@ class CookieFileTest {
     void aFailureNamesTheFileAndNeverThePathToIt() {
         Path absent = dir.resolve("absent.txt");
 
-        IOException thrown = assertThrows(IOException.class, () -> CookieFile.read(absent));
+        AltsException thrown = assertThrows(AltsException.class, () -> CookieFile.read(absent));
+        assertEquals(Kind.INVALID_INPUT, thrown.kind());
 
-        assertTrue(thrown.getMessage().contains("absent.txt"), thrown.getMessage());
         assertFalse(
                 thrown.getMessage().contains(dir.toString()),
                 "the containing directory must not travel into a message: " + thrown.getMessage());
     }
 
+    /**
+     * A file that exists but cannot be opened: the JDK's own exception names the absolute path, so it
+     * must neither be repeated in the message nor ride along as the cause. Read access is taken away
+     * with POSIX permissions where there are some, and with an empty ACL on Windows.
+     */
+    @Test
+    void aFileThatCannotBeReadIsInvalidInputWithoutThePath() throws IOException {
+        Path file = write("locked.txt", NETSCAPE.getBytes(StandardCharsets.UTF_8));
+        java.nio.file.attribute.PosixFileAttributeView posix =
+                Files.getFileAttributeView(file, java.nio.file.attribute.PosixFileAttributeView.class);
+        java.nio.file.attribute.AclFileAttributeView acl =
+                Files.getFileAttributeView(file, java.nio.file.attribute.AclFileAttributeView.class);
+        java.util.List<java.nio.file.attribute.AclEntry> granted = acl == null ? null : acl.getAcl();
+        if (posix != null) {
+            Files.setPosixFilePermissions(file, java.util.Set.of());
+        } else {
+            org.junit.jupiter.api.Assumptions.assumeTrue(acl != null, "no way to take read access away here");
+            acl.setAcl(java.util.List.of());
+        }
+        try {
+            org.junit.jupiter.api.Assumptions.assumeFalse(
+                    canOpen(file), "this user can read the file anyway (for example root)");
+
+            AltsException thrown = assertThrows(AltsException.class, () -> CookieFile.read(file));
+
+            assertEquals(Kind.INVALID_INPUT, thrown.kind());
+            assertFalse(thrown.getMessage().contains(dir.toString()), thrown.getMessage());
+            assertEquals(null, thrown.getCause(), "no exception carrying the path rides along");
+        } finally {
+            if (posix != null) {
+                Files.setPosixFilePermissions(
+                        file, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+            } else {
+                acl.setAcl(granted);
+            }
+        }
+    }
+
+    private static boolean canOpen(Path file) {
+        try (java.io.InputStream in = Files.newInputStream(file)) {
+            return true;
+        } catch (IOException refused) {
+            return false;
+        }
+    }
+
     @Test
     void aDirectoryIsRejectedAsNotAFileRatherThanAsMissing() {
-        IOException thrown = assertThrows(IOException.class, () -> CookieFile.read(dir));
-
-        assertTrue(thrown.getMessage().contains("not a file"), thrown.getMessage());
+        AltsException thrown = assertThrows(AltsException.class, () -> CookieFile.read(dir));
+        assertEquals(Kind.INVALID_INPUT, thrown.kind());
     }
 
     @Test

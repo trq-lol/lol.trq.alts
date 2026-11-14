@@ -4,33 +4,63 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
+import lol.trq.alts.internal.store.EncryptionUtil;
+import lol.trq.alts.internal.store.StoreFile;
+import lol.trq.alts.internal.store.StoreFileSeams;
 
 /**
- * Reaches the stores' package-private test seams from tests in other packages. It lives in the test
- * sources, in the stores' own package, so the seams themselves never have to be public in the library.
+ * Reads what the stores leave on disk, for tests in any package. Each test owns its stores (or its
+ * runtime) and closes them, so there is no process-wide state left to reset.
  */
 public final class StoreTestHooks {
 
     private StoreTestHooks() {}
 
-    /**
-     * Returns both stores to the state of a process that never installed a key provider or loaded a
-     * file. An installed key provider is otherwise permanent, and would follow the next test class.
-     */
-    public static void reset() {
-        AltStore.resetForTests();
-        SecretStore.resetForTests();
+    /** Opens an account store in {@code directory} with synchronous writes and the machine key. */
+    public static AccountStore openAccountStore(Path directory) {
+        return AccountStore.open(directory);
+    }
+
+    /** Opens the host secrets in {@code directory} with synchronous writes and the machine key. */
+    public static HostSecrets openHostSecrets(Path directory) {
+        return HostSecrets.open(directory);
+    }
+
+    /** Returns the coalescing window {@code store} was opened with. */
+    public static Duration writeDelayOf(AccountStore store) {
+        return StoreFileSeams.writeDelay(store.fileForTests());
+    }
+
+    /** Returns the coalescing window {@code secrets} were opened with. */
+    public static Duration writeDelayOf(HostSecrets secrets) {
+        return StoreFileSeams.writeDelay(secrets.fileForTests());
+    }
+
+    /** Returns the write delay a runtime opens its stores with. */
+    public static Duration runtimeWriteDelay() {
+        return StoreFile.DEFAULT_WRITE_DELAY;
+    }
+
+    /** Closes a store a test opened, releasing its lock. */
+    public static void close(AccountStore store) {
+        store.close();
+    }
+
+    /** Closes host secrets a test opened, releasing their lock. */
+    public static void close(HostSecrets secrets) {
+        secrets.close();
     }
 
     /** Returns the content of every unreadable copy kept beside {@code fileName}, oldest first. */
     public static List<byte[]> unreadableCopies(Path directory, String fileName) throws IOException {
         List<Path> copies;
         try (Stream<Path> entries = Files.list(directory)) {
-            copies = entries.filter(
-                            entry -> entry.getFileName().toString().startsWith(fileName + StoreFile.UNREADABLE_SUFFIX))
+            copies = entries.filter(entry ->
+                            entry.getFileName().toString().startsWith(fileName + StoreFileSeams.UNREADABLE_SUFFIX))
                     .sorted()
                     .toList();
         }
@@ -52,11 +82,16 @@ public final class StoreTestHooks {
         }
     }
 
-    /** Returns every file in {@code directory} that opens under the machine-derived key. */
+    /**
+     * Returns every file in {@code directory} that opens under the machine-derived key. The lock files
+     * are left out: they hold nothing, and an open store's lock file cannot be read on every platform.
+     */
     public static List<Path> filesOpeningUnderMachineKey(Path directory, String keyBinding) throws IOException {
         List<Path> files;
         try (Stream<Path> entries = Files.list(directory)) {
-            files = entries.filter(Files::isRegularFile).toList();
+            files = entries.filter(Files::isRegularFile)
+                    .filter(file -> !isLockFile(file))
+                    .toList();
         }
         List<Path> open = new ArrayList<>();
         for (Path file : files) {
@@ -65,5 +100,10 @@ public final class StoreTestHooks {
             }
         }
         return open;
+    }
+
+    /** Returns whether {@code file} is a store's sidecar lock file. */
+    public static boolean isLockFile(Path file) {
+        return file.getFileName().toString().endsWith(StoreFileSeams.LOCK_SUFFIX);
     }
 }

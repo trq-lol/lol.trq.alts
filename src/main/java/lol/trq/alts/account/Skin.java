@@ -10,7 +10,7 @@ import com.google.gson.annotations.SerializedName;
  * @param url the skin texture URL
  * @param variant the arm model this skin uses
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public record Skin(
         @SerializedName("id") String id,
@@ -22,14 +22,22 @@ public record Skin(
      * Whether a skin is the one currently shown.
      *
      * @author trq
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public enum State {
-        /** The skin currently worn. */
+        /**
+         * The skin currently worn.
+         *
+         * @since 0.11.0
+         */
         @SerializedName("ACTIVE")
         ACTIVE,
 
-        /** A skin the account has but is not wearing. */
+        /**
+         * A skin the account has but is not wearing.
+         *
+         * @since 0.11.0
+         */
         @SerializedName("INACTIVE")
         INACTIVE
     }

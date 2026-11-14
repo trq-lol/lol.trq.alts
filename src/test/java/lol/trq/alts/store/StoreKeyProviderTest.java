@@ -3,13 +3,16 @@ package lol.trq.alts.store;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
+import lol.trq.alts.internal.store.StoreFile;
+import lol.trq.alts.internal.store.StoreFileSeams;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.spi.StoreKeyProvider;
@@ -34,16 +37,17 @@ class StoreKeyProviderTest {
     @TempDir
     Path storeDir;
 
+    private AccountStore store;
+
     @BeforeEach
-    void bindStore() {
-        StoreTestHooks.reset();
-        AltStore.bind(() -> storeDir);
-        AltStore.load();
+    void openStore() {
+        store = AccountStore.open(storeDir);
+        store.load();
     }
 
     @AfterEach
-    void forgetTheHostKey() {
-        StoreTestHooks.reset();
+    void closeStore() {
+        store.close();
     }
 
     private Path storeFile() {
@@ -58,75 +62,108 @@ class StoreKeyProviderTest {
         return AltAccount.of(OTHER_UUID, "Steve", "b", AccountType.OFFLINE);
     }
 
-    private static void reload() {
-        AltStore.accounts().clear();
-        AltStore.load();
+    private void reload() {
+        store.accounts().clear();
+        store.load();
     }
 
     /** Starts over as a new process would: nothing in memory, and only the given key and opt-in. */
     private void restart(StoreKeyProvider key, boolean migrateFromMachineKey) {
-        StoreTestHooks.reset();
-        AltStore.bind(() -> storeDir, key, migrateFromMachineKey);
-        AltStore.load();
+        store.close();
+        store = AccountStore.open(storeDir, null, null, key, migrateFromMachineKey, null);
+        store.load();
     }
 
     private boolean holds(String uuid) {
-        return AltStore.accounts().stream().anyMatch(account -> uuid.equals(account.uuid()));
+        return store.accounts().stream().anyMatch(account -> uuid.equals(account.uuid()));
+    }
+
+    @Test
+    void closingAStoreDropsTheHostKeyItHeld() {
+        restart(HOST_KEY, false);
+        store.addAccount(alex());
+        store.save();
+        StoreFile file = store.fileForTests();
+        assertTrue(StoreFileSeams.holdsKeyMaterial(file), "a store that has written holds its key until it closes");
+
+        store.close();
+
+        assertFalse(StoreFileSeams.holdsKeyMaterial(file), "a closed store keeps no key material reachable");
     }
 
     @Test
     void aStoreRoundTripsUnderAHostKey() {
-        AltStore.keyProvider(HOST_KEY);
-        AltStore.addAccount(alex());
+        restart(HOST_KEY, false);
+        store.addAccount(alex());
 
         reload();
 
-        assertTrue(AltStore.loadError().isEmpty());
-        assertEquals(1, AltStore.accounts().size());
+        assertTrue(store.loadError().isEmpty());
+        assertEquals(1, store.accounts().size());
     }
 
     @Test
     void aStoreWrittenUnderAHostKeyDoesNotOpenWithoutIt() throws Exception {
-        AltStore.keyProvider(HOST_KEY);
-        AltStore.addAccount(alex());
+        restart(HOST_KEY, false);
+        store.addAccount(alex());
         byte[] sealed = Files.readAllBytes(storeFile());
 
         restart(null, false);
 
-        assertTrue(AltStore.loadError().isPresent(), "without the host key the file is unreadable, and says so");
-        assertTrue(AltStore.accounts().isEmpty());
+        assertTrue(store.loadError().isPresent(), "without the host key the file is unreadable, and says so");
+        assertTrue(store.accounts().isEmpty());
         assertArrayEquals(sealed, Files.readAllBytes(storeFile()), "a failed load must leave the file as it was");
 
-        AltStore.addAccount(steve());
-
         List<byte[]> kept = StoreTestHooks.unreadableCopies(storeDir, FILE_NAME);
-        assertEquals(1, kept.size(), "a later save must keep the sealed file rather than destroy it");
+        assertEquals(1, kept.size(), "the failed load copies the sealed file aside");
         assertArrayEquals(sealed, kept.get(0));
+
+        store.addAccount(steve());
+        store.save();
+        store.close();
+
+        assertArrayEquals(
+                sealed,
+                Files.readAllBytes(storeFile()),
+                "a store without the key must not write a machine-keyed store over the host-keyed one");
+        assertFalse(StoreTestHooks.opensUnderMachineKey(storeFile(), KEY_BINDING));
+
+        restart(HOST_KEY, false);
+        assertTrue(holds(UUID), "the host-keyed store is still there for the runtime that has the key");
     }
 
     @Test
-    void aStoreWrittenUnderADifferentHostKeyDoesNotOpen() {
-        AltStore.keyProvider(HOST_KEY);
-        AltStore.addAccount(alex());
+    void aStoreWrittenUnderADifferentHostKeyDoesNotOpen() throws Exception {
+        restart(HOST_KEY, false);
+        store.addAccount(alex());
+        byte[] sealed = Files.readAllBytes(storeFile());
 
-        AltStore.keyProvider(() -> "another-host-key-of-enough-bytes".getBytes());
-        reload();
+        restart(() -> "another-host-key-of-enough-bytes".getBytes(), false);
 
-        assertTrue(AltStore.loadError().isPresent());
-        assertTrue(AltStore.accounts().isEmpty());
+        assertTrue(store.loadError().isPresent());
+        assertTrue(store.accounts().isEmpty());
+
+        store.addAccount(steve());
+        store.save();
+        store.close();
+
+        assertArrayEquals(sealed, Files.readAllBytes(storeFile()), "the wrong key writes nothing over the file");
+        restart(HOST_KEY, false);
+        assertTrue(store.loadError().isEmpty(), "and it still opens under the key that sealed it");
+        assertTrue(holds(UUID) && !holds(OTHER_UUID));
     }
 
     @Test
     void aFileFromBeforeTheHostKeyDoesNotLoadUnlessTheHostAsksForTheMigration() throws Exception {
-        AltStore.addAccount(alex());
+        store.addAccount(alex());
         byte[] machineKeyed = Files.readAllBytes(storeFile());
 
         restart(HOST_KEY, false);
 
         assertTrue(
-                AltStore.loadError().isPresent(),
+                store.loadError().isPresent(),
                 "a store sealed under the machine key must not load under a host key by default");
-        assertTrue(AltStore.accounts().isEmpty());
+        assertTrue(store.accounts().isEmpty());
         assertArrayEquals(machineKeyed, Files.readAllBytes(storeFile()), "and it is left exactly as it was");
     }
 
@@ -134,16 +171,16 @@ class StoreKeyProviderTest {
     void migratingToAHostKeyLeavesNothingInTheDirectoryThatOpensUnderTheMachineKey() throws Exception {
         // Two writes, so the rolling backup exists and is sealed under the machine key as well, plus an
         // unreadable copy from some earlier incident that happens to be a machine-keyed store.
-        AltStore.addAccount(alex());
-        AltStore.addAccount(steve());
+        store.addAccount(alex());
+        store.addAccount(steve());
         Files.copy(storeFile(), storeDir.resolve(FILE_NAME + ".unreadable.1"));
         assertTrue(Files.exists(storeDir.resolve(FILE_NAME + ".bak")), "the test needs a machine-keyed backup");
 
         restart(HOST_KEY, true);
-        AltStore.flush();
+        store.flush();
 
-        assertTrue(AltStore.loadError().isEmpty(), "the migration must not strand the existing accounts");
-        assertEquals(2, AltStore.accounts().size());
+        assertTrue(store.loadError().isEmpty(), "the migration must not strand the existing accounts");
+        assertEquals(2, store.accounts().size());
         assertEquals(
                 List.of(),
                 StoreTestHooks.filesOpeningUnderMachineKey(storeDir, KEY_BINDING),
@@ -151,64 +188,46 @@ class StoreKeyProviderTest {
 
         restart(HOST_KEY, false);
 
-        assertTrue(AltStore.loadError().isEmpty(), "the migrated store is sealed under the host key");
-        assertEquals(2, AltStore.accounts().size());
+        assertTrue(store.loadError().isEmpty(), "the migrated store is sealed under the host key");
+        assertEquals(2, store.accounts().size());
     }
 
     @Test
     void aMachineKeyedFilePlantedOverAHostKeyedStoreDoesNotLoad() throws Exception {
-        AltStore.addAccount(steve());
+        store.addAccount(steve());
         byte[] planted = Files.readAllBytes(storeFile());
         Files.delete(storeFile());
 
         restart(HOST_KEY, false);
-        AltStore.addAccount(alex());
+        store.addAccount(alex());
         Files.write(storeFile(), planted);
 
         restart(HOST_KEY, false);
 
-        assertTrue(AltStore.loadError().isPresent(), "a file anyone on the machine could have sealed is not trusted");
+        assertTrue(store.loadError().isPresent(), "a file anyone on the machine could have sealed is not trusted");
         assertFalse(holds(OTHER_UUID), "the planted account must not reach the list");
     }
 
     @Test
-    void aNullProviderNeverRemovesAnInstalledOne() throws Exception {
-        AltStore.keyProvider(HOST_KEY);
-        AltStore.addAccount(alex());
-
-        AltStore.keyProvider(null);
-        AltStore.bind(() -> storeDir);
-        AltStore.bind(() -> storeDir, null, false);
-        reload();
-
-        assertTrue(AltStore.loadError().isEmpty(), "the store is still read under the host key");
-        assertTrue(holds(UUID));
-
-        AltStore.addAccount(steve());
-
-        assertFalse(
-                StoreTestHooks.opensUnderMachineKey(storeFile(), KEY_BINDING),
-                "and still written under it: binding again must not downgrade the store to the machine key");
-    }
-
-    @Test
     void aProviderThatCannotAnswerFailsClosed() throws Exception {
-        AltStore.addAccount(alex());
+        store.addAccount(alex());
         byte[] machineKeyed = Files.readAllBytes(storeFile());
 
-        AltStore.keyProvider(() -> {
-            throw new IllegalStateException("keystore locked");
-        });
-        reload();
+        restart(
+                () -> {
+                    throw new IllegalStateException("keystore locked");
+                },
+                false);
 
-        String loadError = AltStore.loadError().orElseThrow();
+        AltsFailure loadErrorFailure = store.loadError().orElseThrow();
+        assertEquals(Kind.STORAGE, loadErrorFailure.kind());
+        String loadError = loadErrorFailure.message();
         assertFalse(loadError.contains("keystore locked"), "a provider's message is not ours to publish: " + loadError);
-        assertTrue(AltStore.accounts().isEmpty(), "no fallback to the machine key while a provider is installed");
+        assertTrue(store.accounts().isEmpty(), "no fallback to the machine key while a provider is installed");
 
-        AltStore.addAccount(alex());
+        store.addAccount(alex());
 
-        assertTrue(
-                AltStore.saveError().isPresent(), "nothing may be written under a weaker key than the host asked for");
+        assertTrue(store.saveError().isPresent(), "nothing may be written under a weaker key than the host asked for");
         assertArrayEquals(machineKeyed, Files.readAllBytes(storeFile()));
     }
 
@@ -221,69 +240,75 @@ class StoreKeyProviderTest {
             }
             return HOST_KEY.keyMaterial();
         };
-        AltStore.keyProvider(keychain);
-        AltStore.addAccount(alex());
+        restart(keychain, false);
+        store.addAccount(alex());
         byte[] real = Files.readAllBytes(storeFile());
 
         // The next launch starts with the keychain locked; it is unlocked a moment later.
         locked.set(true);
         restart(keychain, false);
-        assertTrue(AltStore.loadError().isPresent());
+        assertTrue(store.loadError().isPresent());
         locked.set(false);
 
-        AltStore.addAccount(steve());
-        AltStore.save();
+        store.addAccount(steve());
+        store.save();
 
-        assertTrue(AltStore.saveError().isPresent(), "a refused write must say so");
+        assertTrue(store.saveError().isPresent(), "a refused write must say so");
         assertArrayEquals(
                 real,
                 Files.readAllBytes(storeFile()),
                 "the store was never read, so a list holding only what was added since must not replace it");
         assertEquals(List.of(storeFile()), listDirectory(), "and nothing else may appear on disk either");
 
-        AltStore.load();
+        store.load();
+        store.flush();
 
-        assertTrue(AltStore.loadError().isEmpty(), "a load that works retracts the failure");
-        assertTrue(AltStore.saveError().isEmpty(), "and with it the refusal");
+        assertArrayEquals(
+                real,
+                Files.readAllBytes(storeFile()),
+                "the snapshot held back while refused is stale once the load replaced memory; it is never written");
+        assertTrue(store.loadError().isEmpty(), "a load that works retracts the failure");
+        assertTrue(store.saveError().isEmpty(), "and with it the refusal");
         assertTrue(holds(UUID), "the real store is what the list holds now");
 
-        AltStore.addAccount(steve());
+        store.addAccount(steve());
         reload();
 
         assertTrue(holds(UUID) && holds(OTHER_UUID), "and from here on writes land again");
     }
 
     @Test
-    void outsideTheTestSuiteAnInstalledKeyCannotBeRemoved() throws Exception {
-        AltStore.keyProvider(HOST_KEY);
-        AltStore.addAccount(alex());
-        System.clearProperty("lol.trq.alts.testSeams");
-        try {
-            assertThrows(IllegalStateException.class, StoreTestHooks::reset);
-        } finally {
-            System.setProperty("lol.trq.alts.testSeams", "true");
-        }
+    void discardingAFileUnreadForWantOfTheKeyKeepsACopyOfIt() throws Exception {
+        restart(HOST_KEY, false);
+        store.addAccount(alex());
+        byte[] real = Files.readAllBytes(storeFile());
+        restart(
+                () -> {
+                    throw new IllegalStateException("keychain gone for good");
+                },
+                false);
+        assertEquals(List.of(), StoreTestHooks.unreadableCopies(storeDir, FILE_NAME), "intact, so not copied yet");
 
-        AltStore.addAccount(steve());
+        store.discardUnreadable();
 
-        assertFalse(
-                StoreTestHooks.opensUnderMachineKey(storeFile(), KEY_BINDING),
-                "the reset is a test seam; in an application it must not be a way to drop the host key");
+        List<byte[]> kept = StoreTestHooks.unreadableCopies(storeDir, FILE_NAME);
+        assertEquals(1, kept.size(), "giving up on the file must not cost it");
+        assertArrayEquals(real, kept.get(0));
     }
 
     @Test
     void tooLittleKeyMaterialIsRefused() {
-        AltStore.keyProvider(() -> new byte[StoreKeyProvider.MIN_LENGTH - 1]);
+        restart(() -> new byte[StoreKeyProvider.MIN_LENGTH - 1], false);
 
-        AltStore.addAccount(alex());
+        store.addAccount(alex());
 
-        assertTrue(AltStore.saveError().isPresent());
+        assertTrue(store.saveError().isPresent());
         assertFalse(Files.exists(storeFile()));
     }
 
     private List<Path> listDirectory() throws Exception {
         try (var entries = Files.list(storeDir)) {
-            return entries.toList();
+            return entries.filter(file -> !StoreTestHooks.isLockFile(file)).toList();
         }
     }
 }

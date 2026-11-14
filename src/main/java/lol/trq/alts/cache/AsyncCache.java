@@ -7,9 +7,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
-import lol.trq.alts.net.IoExecutor;
 
 /**
  * A lazy, non-blocking, per-key value cache. {@link #get(Object)} never blocks: on a cache miss it
@@ -40,8 +40,8 @@ import lol.trq.alts.net.IoExecutor;
  * that looks up an ever-growing set of keys holds a fixed amount rather than all of them for the life of
  * the process.
  *
- * <p>The {@code loader} runs on {@link IoExecutor#executor()} — a virtual thread per fetch unless the
- * host bound its own executor — so it may block. It must be thread-safe and should return {@code null}
+ * <p>The {@code loader} runs on the executor the cache was given (for the runtime's game-stats caches,
+ * the runtime's executor), so it may block. It must be thread-safe and should return {@code null}
  * (or throw) to signal failure.
  *
  * @param <K> the lookup key (e.g. a player UUID string)
@@ -65,6 +65,7 @@ public final class AsyncCache<K, V> {
     private static final long RETRY_MAX_MILLIS = 5 * 60_000L;
 
     private final ConcurrentHashMap<K, Entry> entries = new ConcurrentHashMap<>();
+    private final Executor executor;
     private final Function<K, V> loader;
     private final long ttlMillis;
     private final int maxEntries;
@@ -73,39 +74,45 @@ public final class AsyncCache<K, V> {
     /**
      * Creates a cache whose entries never expire (refresh only via {@link #invalidate(Object)}).
      *
+     * @param executor the executor the loader runs on; never the common pool unless the caller says so
      * @param loader the background fetch; returns {@code null} or throws to mark a key failed
+     * @since 1.0.0
      */
-    public AsyncCache(Function<K, V> loader) {
-        this(loader, 0L);
+    public AsyncCache(Executor executor, Function<K, V> loader) {
+        this(executor, loader, 0L);
     }
 
     /**
      * Creates a cache with stale-while-revalidate expiry, holding at most {@link #DEFAULT_MAX_ENTRIES}.
      *
+     * @param executor the executor the loader runs on
      * @param loader the background fetch; returns {@code null} or throws to mark a key failed
      * @param ttlMillis how long a fetched value is fresh, in milliseconds; {@code <= 0} never expires
+     * @since 1.0.0
      */
-    public AsyncCache(Function<K, V> loader, long ttlMillis) {
-        this(loader, ttlMillis, DEFAULT_MAX_ENTRIES);
+    public AsyncCache(Executor executor, Function<K, V> loader, long ttlMillis) {
+        this(executor, loader, ttlMillis, DEFAULT_MAX_ENTRIES);
     }
 
     /**
      * Creates a cache with stale-while-revalidate expiry and a given entry bound.
      *
+     * @param executor the executor the loader runs on
      * @param loader the background fetch; returns {@code null} or throws to mark a key failed
      * @param ttlMillis how long a fetched value is fresh, in milliseconds; {@code <= 0} never expires
      * @param maxEntries the most entries to hold before the least recently read are dropped; at least 1
-     * @since 0.12.0
+     * @since 1.0.0
      */
-    public AsyncCache(Function<K, V> loader, long ttlMillis, int maxEntries) {
-        this(loader, ttlMillis, maxEntries, System::currentTimeMillis);
+    public AsyncCache(Executor executor, Function<K, V> loader, long ttlMillis, int maxEntries) {
+        this(executor, loader, ttlMillis, maxEntries, System::currentTimeMillis);
     }
 
     // Exists so expiry, the retry backoff and eviction order can be exercised against a controllable clock.
-    AsyncCache(Function<K, V> loader, long ttlMillis, int maxEntries, LongSupplier clock) {
+    AsyncCache(Executor executor, Function<K, V> loader, long ttlMillis, int maxEntries, LongSupplier clock) {
         if (maxEntries < 1) {
             throw new IllegalArgumentException("maxEntries must be at least 1");
         }
+        this.executor = Objects.requireNonNull(executor, "executor");
         this.loader = Objects.requireNonNull(loader, "loader");
         this.ttlMillis = ttlMillis;
         this.maxEntries = maxEntries;
@@ -120,6 +127,7 @@ public final class AsyncCache<K, V> {
      * @param key the lookup key
      * @return the value if ready (possibly stale), or {@code null} while pending, failed, or just
      *     requested
+     * @since 0.1.0
      */
     @SuppressWarnings("unchecked")
     public V get(K key) {
@@ -175,7 +183,7 @@ public final class AsyncCache<K, V> {
     private void fetch(K key, Entry marker) {
         CompletableFuture<V> loading;
         try {
-            loading = CompletableFuture.supplyAsync(() -> loader.apply(key), IoExecutor.executor());
+            loading = CompletableFuture.supplyAsync(() -> loader.apply(key), executor);
         } catch (RuntimeException rejected) {
             // The executor refused the task. Resolve the marker anyway, or the key would stay pending forever.
             entries.replace(key, marker, marker.failed(clock.getAsLong()));
@@ -229,12 +237,17 @@ public final class AsyncCache<K, V> {
      * refresh, or to retry a failed key without waiting out its backoff.
      *
      * @param key the key to evict
+     * @since 0.1.0
      */
     public void invalidate(K key) {
         entries.remove(key);
     }
 
-    /** Drops every entry. */
+    /**
+     * Drops every entry.
+     *
+     * @since 0.1.0
+     */
     public void clear() {
         entries.clear();
     }

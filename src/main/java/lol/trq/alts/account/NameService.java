@@ -7,8 +7,10 @@ import java.util.concurrent.CompletableFuture;
  * Everything an account can do about its name: check whether one is free, learn whether it may change
  * now, change it, and — for a name dropping at a known time — claim it the instant it opens.
  *
+ * <p>Not designed for host implementation; methods may be added in minor releases.
+ *
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public interface NameService {
 
@@ -17,30 +19,31 @@ public interface NameService {
      *
      * @param name the username to check
      * @return whether it is available, taken, or disallowed
-     * @throws AccountException if the token was refused or the service failed
-     * @since 1.0.0
+     * @throws lol.trq.alts.AltsException if the token was refused or the service failed
+     * @since 0.11.0
      */
-    NameAvailability checkAvailability(String name) throws AccountException;
+    NameAvailability checkAvailability(String name);
 
     /**
      * Reads whether this account may change its name now, and when it was created.
      *
      * @return the eligibility
-     * @throws AccountException if the token was refused or the service failed
-     * @since 1.0.0
+     * @throws lol.trq.alts.AltsException if the token was refused or the service failed
+     * @since 0.11.0
      */
-    NameEligibility eligibility() throws AccountException;
+    NameEligibility eligibility();
 
     /**
      * Changes the account's username.
      *
+     * <p>Never throws for a refusal or an unreachable service: each is a {@link NameChangeResult}, a
+     * failure being {@link NameChangeResult.Outcome#FAILED} with its kind.
+     *
      * @param name the new username
      * @return the classified outcome, carrying the updated profile on success
-     * @throws AccountException only on a transport failure the call could not classify; a refused or
-     *     rejected change is a {@link NameChangeResult}, not an exception
-     * @since 1.0.0
+     * @since 0.11.0
      */
-    NameChangeResult change(String name) throws AccountException;
+    NameChangeResult change(String name);
 
     /**
      * Claims a name at the instant it drops, firing a bounded burst of change attempts around
@@ -60,7 +63,7 @@ public interface NameService {
      * @param target when the name becomes available
      * @param options how to pace the burst
      * @return a future holding the outcome
-     * @since 1.0.0
+     * @since 0.11.0
      */
     CompletableFuture<ClaimResult> claimAt(String name, Instant target, ClaimOptions options);
 }

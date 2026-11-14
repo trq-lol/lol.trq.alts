@@ -22,6 +22,7 @@ public interface GameStatsSource {
      * {@link GameStats#serverId()} stamp, and looked up by {@link lol.trq.alts.AltsRuntime#gameStats(String)}.
      *
      * @return the server id (stable, non-null)
+     * @since 0.3.0
      */
     String serverId();
 
@@ -31,6 +32,7 @@ public interface GameStatsSource {
      * @param uuid the dashed player UUID
      * @return the player's stats, or {@code null} if unavailable
      * @throws Exception if the lookup fails (treated as "no stats")
+     * @since 0.3.0
      */
     GameStats fetch(String uuid) throws Exception;
 }

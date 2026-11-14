@@ -1,8 +1,9 @@
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure;
 import lol.trq.alts.AltsRuntime;
-import lol.trq.alts.account.AccountException;
 import lol.trq.alts.account.AccountServices;
 import lol.trq.alts.account.ClaimOptions;
 import lol.trq.alts.account.Entitlements;
@@ -11,16 +12,12 @@ import lol.trq.alts.account.NameChangeResult;
 import lol.trq.alts.account.PlayerAttributes;
 import lol.trq.alts.account.PlayerProfile;
 import lol.trq.alts.account.PublicProfile;
-import lol.trq.alts.auth.AltLoginCallback;
 import lol.trq.alts.auth.MicrosoftAuthConfig;
 import lol.trq.alts.bulk.BulkEntryResult;
 import lol.trq.alts.bulk.BulkHandle;
 import lol.trq.alts.bulk.BulkOptions;
 import lol.trq.alts.bulk.BulkProgress;
 import lol.trq.alts.bulk.BulkReport;
-import lol.trq.alts.crypto.CryptoException;
-import lol.trq.alts.crypto.VaultIdentity;
-import lol.trq.alts.crypto.X25519HkdfAesGcmKeyWrap;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.GameStats;
 import lol.trq.alts.model.LoginMode;
@@ -31,14 +28,10 @@ import lol.trq.alts.spi.DeviceCodePrompt;
 import lol.trq.alts.spi.ProxyProvider;
 import lol.trq.alts.spi.StoreKeyProvider;
 import lol.trq.alts.spi.ToastSink;
-import lol.trq.alts.store.AltStore;
-import lol.trq.alts.vault.RepoContext;
-import lol.trq.alts.vault.RepoPin;
+import lol.trq.alts.store.AccountStore;
+import lol.trq.alts.vault.LegacyVaultReader;
 import lol.trq.alts.vault.SharedVault;
-import lol.trq.alts.vault.VaultException;
-import lol.trq.alts.vault.transport.IssuerSignedKeyBindingVerifier;
-import lol.trq.alts.vault.transport.KeyBindingVerifier;
-import lol.trq.alts.vault.transport.VaultManifest;
+import lol.trq.alts.vault.VaultIdentity;
 
 /**
  * The compiled companion to {@code docs/GETTING_STARTED.md}. Every snippet that guide shows is a method
@@ -103,7 +96,7 @@ public final class GettingStartedExample {
         });
 
         // Stored accounts.
-        List<AltAccount> saved = AltStore.accounts();
+        List<AltAccount> saved = alts.store().accounts();
 
         for (AltAccount account : saved) {
             // Lazy, cached avatar. Keyed by UUID, so a renamed account keeps its head; null until the
@@ -125,13 +118,47 @@ public final class GettingStartedExample {
      * @param alts the runtime built by {@link #buildRuntime}
      */
     public static void warnIfTheStoreDidNotLoad(AltsRuntime<MyHandle> alts) {
-        AltStore.loadError()
-                .ifPresent(reason -> alts.toasts()
+        alts.store()
+                .loadError()
+                .ifPresent(failure -> alts.toasts()
                         .toast(
                                 ToastSink.Level.ERROR,
                                 "Accounts not loaded",
-                                "The saved file could not be read: " + reason,
+                                "The saved file could not be read: " + failure.message(),
                                 8000));
+    }
+
+    /**
+     * Section 3: starting a new store when the user says the old file will never open again, for example
+     * after the OS user was renamed or the host key was lost. Until then the store refuses every write, so
+     * an unreadable file is never replaced by an empty one.
+     *
+     * @param alts the runtime built by {@link #buildRuntime}
+     */
+    public static void startOverWithoutTheOldFile(AltsRuntime<MyHandle> alts) {
+        // Only on the user's word. The old file is copied aside first, and the next write starts a new store.
+        if (alts.store().loadError().isPresent() && !alts.store().discardUnreadable()) {
+            // The copy aside failed, so the refusal stands; saveError() says why.
+            alts.store().saveError().ifPresent(failure -> showError(failure.message()));
+        }
+    }
+
+    /**
+     * Section "Threads and shutdown": a runtime holds a lock on its two store files until it is closed, so
+     * a host closes it when it is done with it. Closing writes what is still waiting, releases the files,
+     * closes the proxy tunnels and shuts down the executor the runtime created; a host's own executor is
+     * left running.
+     *
+     * @param dataDir the directory the encrypted account file lives in
+     * @param azureClientId the host's own Azure application id
+     */
+    public static void runUntilShutdown(Path dataDir, String azureClientId) {
+        try (AltsRuntime<MyHandle> alts = buildRuntime(dataDir, azureClientId)) {
+            // Open for as long as the host runs. Whatever still waits on the runtime when it closes (a
+            // sign-in, a bulk run, a scheduled claim) ends as a failure.
+            runHostUntilExit(alts);
+        }
+        // The files are released: another runtime may now open the same directory.
     }
 
     /**
@@ -155,18 +182,22 @@ public final class GettingStartedExample {
     }
 
     /**
-     * Section "Checking accounts without logging in": a sweep over everything the store holds. The live
-     * session never moves, which is the whole reason this is not a loop over {@code loginAccount}.
+     * Section "Checking accounts without logging in": a read-only sweep over everything the store holds.
+     * The live session never moves, which is the whole reason this is not a loop over {@code loginAccount},
+     * and no refresh token is redeemed, which is why it is {@code check} and not {@code refresh}.
      *
      * @param alts the runtime built by {@link #buildRuntime}
      */
     public static void sweepStoredAccounts(AltsRuntime<MyHandle> alts) {
-        for (AltAccount account : AltStore.accounts()) {
-            alts.accountService().refresh(account).thenAccept(status -> {
+        // check() only looks: no refresh token is redeemed, so nothing rotates. For more than a handful of
+        // accounts, alts.bulk().checkAll(...) runs the same check paced, with progress and a cancel handle.
+        for (AltAccount account : alts.store().accounts()) {
+            alts.accountService().check(account).thenAccept(status -> {
                 switch (status.state()) {
-                    // Nothing to do; the account is good, and RENEWED already persisted its new token.
-                    case VALID, RENEWED -> render(status.account().username());
-                    // The stored token is spent but recoverable — only a read-only check reports this.
+                    // Nothing to do; the account is good as it is.
+                    case VALID -> render(status.account().username());
+                    // The stored token is spent but a refresh token is held: refresh(account) renews it,
+                    // when the host decides to.
                     case EXPIRED -> render(status.account().username() + " needs refreshing");
                     // The credential is gone for good. Only a fresh interactive login fixes it.
                     case REAUTH_REQUIRED -> promptMicrosoftLogin(status.account());
@@ -175,10 +206,10 @@ public final class GettingStartedExample {
                     // Try again later. Nothing was spent. A rate limit lands here too, and says how long
                     // to wait when the service named a wait.
                     case UNREACHABLE ->
-                        showRetry(
-                                status.rateLimited() && status.retryAfter() != null
-                                        ? "Rate limited for " + status.retryAfter()
-                                        : status.message());
+                        showRetry(status.failure()
+                                .flatMap(AltsFailure::retryAfter)
+                                .map(wait -> "Rate limited for " + wait)
+                                .orElse(status.message()));
                     default -> showError(status.message());
                 }
             });
@@ -194,7 +225,7 @@ public final class GettingStartedExample {
      * @return the handle, so the caller can cancel it
      */
     public static BulkHandle refreshEverything(AltsRuntime<MyHandle> alts) {
-        BulkHandle handle = alts.bulk().refreshAll(AltStore.accounts(), BulkOptions.defaults(), new BulkProgress() {
+        BulkHandle handle = alts.bulk().refreshAll(alts.store().accounts(), BulkOptions.defaults(), new BulkProgress() {
             @Override
             public void started(int index, int total, String label) {
                 render("checking " + label + " (" + (index + 1) + "/" + total + ")");
@@ -259,7 +290,8 @@ public final class GettingStartedExample {
                 render(result.account().username());
                 return;
             }
-            switch (result.reason()) {
+            AltsFailure failure = result.failure().orElseThrow();
+            switch (failure.kind()) {
                 // The user said no. Nothing to retry until they ask again.
                 case DECLINED -> render("Sign-in cancelled");
                 // The code ran out before it was entered; starting again issues a fresh one.
@@ -267,7 +299,9 @@ public final class GettingStartedExample {
                 // The service asked to be left alone. Wait before starting another.
                 case RATE_LIMITED -> showRetry("Too many attempts; try again shortly");
                 // Signed in, but Xbox Live will not authorize the account; xstsError() says why.
-                case XBOX_DENIED -> showError("Xbox Live refused this account: " + result.xstsError());
+                case XBOX_DENIED ->
+                    showError("Xbox Live refused this account: "
+                            + failure.xstsError().orElseThrow());
                 default -> showError(result.message());
             }
         });
@@ -324,7 +358,7 @@ public final class GettingStartedExample {
      * the caller drives nothing.
      *
      * @param alts the runtime built by {@link #buildRuntime}
-     * @param account a stored account, for example one out of {@link AltStore#accounts()}
+     * @param account a stored account, for example one out of {@link AccountStore#accounts()}
      */
     public static void logInStoredAccount(AltsRuntime<MyHandle> alts, AltAccount account) {
         // Reuses the stored session if it is still live; otherwise renews from the refresh token,
@@ -348,7 +382,7 @@ public final class GettingStartedExample {
             if (result.success()) {
                 // Always the rotated value; persist it for any account the store does not hold.
                 persist(result.account().refreshToken());
-            } else if (result.reason() == AltLoginCallback.FailureReason.NOT_CONFIGURED) {
+            } else if (result.failure().orElseThrow().kind() == AltsFailure.Kind.NOT_CONFIGURED) {
                 // Only the routes that talk to Microsoft can report this one.
                 showError("Microsoft login is not configured");
             }
@@ -367,7 +401,7 @@ public final class GettingStartedExample {
             if (result.success()) {
                 return;
             }
-            switch (result.reason()) {
+            switch (result.failure().orElseThrow().kind()) {
                 // The credential is permanently spent and has been discarded. Send the user
                 // through a fresh interactive login.
                 case REAUTH_REQUIRED -> promptMicrosoftLogin(account);
@@ -382,73 +416,46 @@ public final class GettingStartedExample {
     }
 
     /**
-     * Section "Shared vault": constructing the facade with a deliberate answer to "whose word do I take
-     * for another member's keys?". There is no default: the data key is wrapped to whatever keys the
-     * verifier returns, so the choice decides whether a hostile server can read the repository.
+     * Section "Shared vault": reading the accounts of a repository of the 0.4 vault, which 1.0 no longer
+     * speaks, so the owner can carry them into a new AVP 0.5 repository. The importer only reads: it takes
+     * the two documents the 0.4 host served and this member's identity, and talks to nothing.
      *
-     * @param issuerPublicKey the raw Ed25519 public key of the service that signs members' key bindings
-     * @return the facade
-     * @throws CryptoException if the issuer key is not a valid Ed25519 public key
+     * @param identity this member's identity, unlocked from its stored form
+     * @param manifestJson the 0.4 manifest, as the 0.4 host served it
+     * @param envelopeJson the 0.4 envelope, as the 0.4 host served it
+     * @return the accounts, for the owner to review before writing them anywhere
      */
-    public static SharedVault sharedVault(byte[] issuerPublicKey) throws CryptoException {
-        // Member keys arrive through a server, so each one must carry a binding signed by an issuer the
-        // host already trusts. A server that swaps a member's key cannot forge that signature.
-        KeyBindingVerifier verifier = IssuerSignedKeyBindingVerifier.ofRawKey(issuerPublicKey);
-
-        // The explicit alternative is KeyBindingVerifier.trustTransport(), which accepts served keys
-        // as they are. Choose it only when the keys did not come from a server you would not trust
-        // with the accounts themselves: you run the server, or the keys were compared out of band.
-        return new SharedVault(new X25519HkdfAesGcmKeyWrap(), verifier);
+    public static List<AltAccount> importLegacyRepository(
+            VaultIdentity identity, String manifestJson, String envelopeJson) {
+        try {
+            return LegacyVaultReader.read(manifestJson, envelopeJson, identity);
+        } catch (AltsException e) {
+            switch (e.kind()) {
+                // The text the host saved is not strict JSON: fetch or export it again.
+                case INVALID_INPUT -> showError("That is not a saved 0.4 repository");
+                // Not this member's repository, a manifest and envelope that do not belong together, or
+                // not a 0.4 document at all.
+                case PROTOCOL -> showError("This identity cannot read that repository");
+                // The key did not unwrap or the payload did not authenticate: wrong identity, or tampered.
+                case CRYPTO -> showError("The repository could not be decrypted");
+                default -> showError(e.getMessage());
+            }
+            return List.of();
+        }
     }
 
     /**
-     * Section "Shared vault": opening a repository against the rollback floor the host stored last
-     * time, and storing the new floor afterwards. Nothing in a served manifest is signed, so without
-     * this a server could hand back an earlier key epoch — one from before a member was removed.
+     * Section "Sharing policy": a repository withholds refresh tokens until its owner turns sharing on, in
+     * a new owner-signed state that every member verifies.
      *
-     * @param vault the facade from {@link #sharedVault}
-     * @param manifest the manifest the transport served
-     * @param identity this member's unlocked identity
-     * @return the working context
-     * @throws CryptoException if the data key cannot be unwrapped
-     * @throws VaultException if the manifest is older than the stored floor, or this member is not in it
+     * @param vault the owner's copy of the repository
      */
-    public static RepoContext openPinned(SharedVault vault, VaultManifest manifest, VaultIdentity identity)
-            throws CryptoException, VaultException {
-        // RepoPin.none() the first time a repository is opened; whatever was stored after that.
-        RepoPin stored = loadPin(manifest.repoId());
+    public static void shareRefreshTokens(SharedVault vault) {
+        // Withholding is the default for a new repository.
+        render(vault.sharesRefreshTokens() ? "sharing" : "withholding");
 
-        RepoContext context = vault.openRepo(manifest, identity, stored);
-
-        // Persist the floor the open just reached, merged so it can never move backwards. Do the same
-        // whenever the context advances: after a pull, a push, or a key rotation.
-        savePin(manifest.repoId(), stored.advancedTo(context.pin()));
-        return context;
-    }
-
-    /**
-     * Section "Sharing policy": creating a repository that withholds refresh tokens (the default) and
-     * one that shares them with every member. Both overloads throw the checked {@link CryptoException},
-     * as does creating the identity.
-     *
-     * @param vault the facade from {@link #sharedVault}
-     * @param passphrase the passphrase sealing the new identity's private material
-     * @param alts the initial alt payload
-     * @return the repository that shares refresh tokens
-     * @throws CryptoException if identity creation, key generation, or encryption fails
-     */
-    public static SharedVault.CreatedRepo createRepositories(
-            SharedVault vault, char[] passphrase, List<AltAccount> alts) throws CryptoException {
-        // The facade is stateless; the identity is the member's key pair, created once here and
-        // unlocked from its stored form on later runs.
-        VaultIdentity identity = VaultIdentity.create(passphrase);
-
-        // Withholds refresh tokens (the default).
-        SharedVault.CreatedRepo repo = vault.createRepo(identity, alts);
-        render(repo.manifest().repoId());
-
-        // Shares them with every member of this repository.
-        return vault.createRepo(identity, alts, true);
+        // Owner only. What has been shared stays shared: turning it off later stops future sharing only.
+        vault.setShareRefreshTokens(true).join();
     }
 
     /**
@@ -474,9 +481,9 @@ public final class GettingStartedExample {
      *
      * @param alts the runtime built by {@link #buildRuntime}
      * @param account the account to operate on
-     * @throws AccountException if a call was refused or the service failed
+     * @throws AltsException if a call was refused or the service failed; switch on its kind
      */
-    public static void manageAccount(AltsRuntime<MyHandle> alts, AltAccount account) throws AccountException {
+    public static void manageAccount(AltsRuntime<MyHandle> alts, AltAccount account) {
         AccountServices services = alts.accountServices(account);
 
         // What it looks like: name, skins, capes, and any pending moderation action.
@@ -505,9 +512,9 @@ public final class GettingStartedExample {
      *
      * @param alts the runtime built by {@link #buildRuntime}
      * @param account the account to read
-     * @throws AccountException if the call was refused or the service failed
+     * @throws AltsException if the call was refused or the service failed; switch on its kind
      */
-    public static void readAttributes(AltsRuntime<MyHandle> alts, AltAccount account) throws AccountException {
+    public static void readAttributes(AltsRuntime<MyHandle> alts, AltAccount account) {
         PlayerAttributes attributes = alts.accountServices(account).attributes().fetch();
 
         if (!attributes.canPlayMultiplayer()) {
@@ -531,9 +538,9 @@ public final class GettingStartedExample {
      *
      * @param alts the runtime built by {@link #buildRuntime}
      * @param names the usernames to resolve
-     * @throws AccountException if the service refused or could not be reached
+     * @throws AltsException if the service refused or could not be reached; switch on its kind
      */
-    public static void lookUpPlayers(AltsRuntime<MyHandle> alts, List<String> names) throws AccountException {
+    public static void lookUpPlayers(AltsRuntime<MyHandle> alts, List<String> names) {
         // One name: empty when nobody holds it, which is an answer rather than an error.
         alts.profileLookup().byName("DesiredName").ifPresent(player -> render(player.name() + " " + player.uuid()));
 
@@ -542,12 +549,13 @@ public final class GettingStartedExample {
             for (PublicProfile player : alts.profileLookup().byNames(names)) {
                 render(player.name() + " " + player.uuid());
             }
-        } catch (AccountException failure) {
-            if (!failure.rateLimited()) {
+        } catch (AltsException failure) {
+            if (failure.kind() != AltsFailure.Kind.RATE_LIMITED) {
                 throw failure;
             }
             // Not "those players do not exist": come back after the wait, when the service named one.
-            showRetry("Lookup rate limited" + (failure.retryAfter() != null ? " for " + failure.retryAfter() : ""));
+            showRetry("Lookup rate limited"
+                    + failure.failure().retryAfter().map(wait -> " for " + wait).orElse(""));
         }
     }
 
@@ -570,8 +578,11 @@ public final class GettingStartedExample {
                     if (result.claimed()) {
                         render("claimed " + name + " in " + result.attempts() + " attempts");
                     } else {
-                        showError("did not get " + name + ": "
-                                + result.finalResult().message());
+                        // Why the run ended; a terminal failure says what kind it was.
+                        showError("did not get " + name + ": " + result.stopReason()
+                                + result.failure()
+                                        .map(f -> " (" + f.kind() + ")")
+                                        .orElse(""));
                     }
                 });
     }
@@ -590,16 +601,11 @@ public final class GettingStartedExample {
         byte[] loadOrCreate(String alias, int length) throws Exception;
     }
 
-    /** Stands in for the host reading the rollback floor it stored for a repository. */
-    private static RepoPin loadPin(String repoId) {
-        return RepoPin.none();
-    }
-
-    /** Stands in for the host storing a repository's rollback floor next to its other settings. */
-    private static void savePin(String repoId, RepoPin pin) {}
-
     /** Stands in for the host translating a {@link SessionData} into its platform's live session. */
     private static void installSession(SessionData session) {}
+
+    /** Stands in for the host doing its work until it shuts down. */
+    private static void runHostUntilExit(AltsRuntime<MyHandle> alts) {}
 
     /** Stands in for the host's notification UI. */
     private static void show(ToastSink.Level level, String title, String description) {}

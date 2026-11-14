@@ -12,9 +12,14 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import lol.trq.alts.net.NetTestHooks;
+import lol.trq.alts.AltsFailure.Kind;
+import lol.trq.alts.internal.net.HttpTransport;
+import lol.trq.alts.internal.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,6 +31,7 @@ import org.junit.jupiter.api.Test;
  * stops the instant a change succeeds, and a terminal failure ends it rather than hammering a change that
  * can never land.
  */
+@org.junit.jupiter.api.Timeout(value = 60, unit = java.util.concurrent.TimeUnit.SECONDS)
 class ScheduledClaimTest {
 
     private HttpServer server;
@@ -36,7 +42,6 @@ class ScheduledClaimTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        NetTestHooks.resetHttp();
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/", exchange -> {
             if ("PUT".equals(exchange.getRequestMethod())) {
@@ -63,7 +68,33 @@ class ScheduledClaimTest {
     }
 
     private NameService name() {
-        return AccountServices.of("token", "uuid", new AccountEndpoints(base)).name();
+        return AccountServices.create(TestTransports.direct(), "token", "uuid", new AccountEndpoints(base))
+                .name();
+    }
+
+    /**
+     * A claim scheduled an hour ahead must not outlive the runtime: closing it ends the wait at once,
+     * as a terminal failure of kind CANCELLED, and nothing fires afterwards.
+     */
+    @Test
+    void aClaimWaitingWhenTheRuntimeClosesResolves() throws Exception {
+        ExecutorService owned =
+                Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory());
+        HttpTransport transport = TestTransports.on(null, owned);
+        NameService name = AccountServices.create(transport, "token", "uuid", new AccountEndpoints(base))
+                .name();
+        CompletableFuture<ClaimResult> claim =
+                name.claimAt("Wanted", Instant.now().plus(Duration.ofHours(1)), null);
+
+        transport.close();
+        owned.shutdown();
+
+        // Ended with a result, never an exception: the run's failure says the runtime closed.
+        ClaimResult ended = claim.get(2, TimeUnit.SECONDS);
+        assertFalse(ended.claimed());
+        assertEquals(ClaimResult.StopReason.TERMINAL_FAILURE, ended.stopReason());
+        assertEquals(Kind.CANCELLED, ended.failure().orElseThrow().kind(), "the wait ended because the runtime closed");
+        assertEquals(0, changeCalls.get(), "nothing fired");
     }
 
     @Test
@@ -74,7 +105,7 @@ class ScheduledClaimTest {
         status.set(200); // succeeds once it fires, so the run ends promptly
 
         ClaimOptions options =
-                new ClaimOptions(Duration.ofMillis(100), Duration.ofMillis(500), Duration.ofMillis(5), 1, null);
+                ClaimOptions.of(Duration.ofMillis(100), Duration.ofMillis(500), Duration.ofMillis(5), 1, null);
         ClaimResult result = name().claimAt("Wanted", target, options).get();
 
         assertTrue(result.claimed(), "the change succeeds once the window opens");
@@ -87,7 +118,7 @@ class ScheduledClaimTest {
         Instant target = Instant.now(); // already due: fire immediately
         status.set(200);
 
-        ClaimOptions options = new ClaimOptions(Duration.ZERO, Duration.ofSeconds(2), Duration.ofMillis(5), 3, null);
+        ClaimOptions options = ClaimOptions.of(Duration.ZERO, Duration.ofSeconds(2), Duration.ofMillis(5), 3, null);
         long start = System.currentTimeMillis();
         ClaimResult result = name().claimAt("Wanted", target, options).get();
         long elapsed = System.currentTimeMillis() - start;
@@ -104,7 +135,7 @@ class ScheduledClaimTest {
         Instant target = Instant.now();
         status.set(401); // unauthorized: terminal, can never succeed
 
-        ClaimOptions options = new ClaimOptions(Duration.ZERO, Duration.ofSeconds(5), Duration.ofMillis(2), 1, null);
+        ClaimOptions options = ClaimOptions.of(Duration.ZERO, Duration.ofSeconds(5), Duration.ofMillis(2), 1, null);
         long start = System.currentTimeMillis();
         ClaimResult result = name().claimAt("Wanted", target, options).get();
         long elapsed = System.currentTimeMillis() - start;
@@ -113,7 +144,7 @@ class ScheduledClaimTest {
         assertTrue(elapsed < 1_000, "a terminal failure ends the run rather than filling the window: " + elapsed);
         assertTrue(changeCalls.get() <= 2, "a change that can never land is not retried for the window");
         assertEquals(ClaimResult.StopReason.TERMINAL_FAILURE, result.stopReason());
-        assertFalse(result.rateLimited(), "a dead token is not a rate limit");
+        assertEquals(Kind.UNAUTHORIZED, result.failure().orElseThrow().kind(), "a dead token is not a rate limit");
     }
 
     /**
@@ -125,15 +156,15 @@ class ScheduledClaimTest {
         Instant target = Instant.now();
         status.set(429);
 
-        ClaimOptions options = new ClaimOptions(Duration.ZERO, Duration.ofSeconds(5), Duration.ofMillis(2), 3, null);
+        ClaimOptions options = ClaimOptions.of(Duration.ZERO, Duration.ofSeconds(5), Duration.ofMillis(2), 3, null);
         long start = System.currentTimeMillis();
         ClaimResult result = name().claimAt("Wanted", target, options).get();
         long elapsed = System.currentTimeMillis() - start;
 
         assertFalse(result.claimed(), "a rate limit is not a claim");
-        assertEquals(ClaimResult.StopReason.RATE_LIMITED, result.stopReason());
-        assertTrue(result.rateLimited());
-        assertEquals(NameChangeResult.Outcome.RATE_LIMITED, result.finalResult().outcome());
+        assertEquals(ClaimResult.StopReason.TERMINAL_FAILURE, result.stopReason());
+        assertEquals(Kind.RATE_LIMITED, result.failure().orElseThrow().kind());
+        assertEquals(NameChangeResult.Outcome.FAILED, result.finalResult().outcome());
         assertTrue(elapsed < 1_000, "the run stops at the limit rather than filling the window: " + elapsed);
         // Each of the three workers may already have an attempt on the wire when the first 429 lands.
         assertTrue(changeCalls.get() <= 3, "no worker keeps sending after the limit, saw " + changeCalls.get());
@@ -149,12 +180,12 @@ class ScheduledClaimTest {
         Instant target = Instant.now();
         status.set(403); // unavailable: worth retrying until the window closes
 
-        ClaimOptions options = new ClaimOptions(Duration.ZERO, Duration.ofMillis(150), Duration.ofMillis(10), 1, null);
+        ClaimOptions options = ClaimOptions.of(Duration.ZERO, Duration.ofMillis(150), Duration.ofMillis(10), 1, null);
         ClaimResult result = name().claimAt("Wanted", target, options).get();
 
         assertFalse(result.claimed());
         assertEquals(ClaimResult.StopReason.WINDOW_ELAPSED, result.stopReason());
-        assertFalse(result.rateLimited());
+        assertEquals(java.util.Optional.empty(), result.failure());
         assertTrue(result.attempts() > 1, "an ordinary refusal is retried across the window");
     }
 
@@ -165,7 +196,7 @@ class ScheduledClaimTest {
         ClaimResult result = name().claimAt(
                         "Wanted",
                         Instant.now(),
-                        new ClaimOptions(Duration.ZERO, Duration.ofSeconds(2), Duration.ofMillis(5), 1, null))
+                        ClaimOptions.of(Duration.ZERO, Duration.ofSeconds(2), Duration.ofMillis(5), 1, null))
                 .get();
 
         assertTrue(result.claimed());
@@ -177,7 +208,7 @@ class ScheduledClaimTest {
         status.set(200);
         Instant target = Instant.now().plusMillis(300);
 
-        ClaimOptions options = new ClaimOptions(Duration.ZERO, Duration.ofSeconds(2), Duration.ofMillis(5), 3, null);
+        ClaimOptions options = ClaimOptions.of(Duration.ZERO, Duration.ofSeconds(2), Duration.ofMillis(5), 3, null);
         CompletableFuture<ClaimResult> claim = name().claimAt("Wanted", target, options);
         Thread.sleep(50);
         assertTrue(claim.cancel(true));
@@ -191,7 +222,7 @@ class ScheduledClaimTest {
     void cancellingMidBurstStopsTheWorkers() throws Exception {
         status.set(403); // keeps every worker retrying until told to stop
 
-        ClaimOptions options = new ClaimOptions(Duration.ZERO, Duration.ofSeconds(10), Duration.ofMillis(5), 3, null);
+        ClaimOptions options = ClaimOptions.of(Duration.ZERO, Duration.ofSeconds(10), Duration.ofMillis(5), 3, null);
         CompletableFuture<ClaimResult> claim = name().claimAt("Wanted", Instant.now(), options);
         for (int i = 0; i < 200 && changeCalls.get() < 3; i++) {
             Thread.sleep(5);
@@ -207,16 +238,30 @@ class ScheduledClaimTest {
     }
 
     @Test
-    void aResultBuiltWithoutAStopReasonInfersOne() {
-        NameChangeResult limited =
-                new NameChangeResult(NameChangeResult.Outcome.RATE_LIMITED, null, "slow down", Duration.ofSeconds(1));
-        NameChangeResult refused = new NameChangeResult(NameChangeResult.Outcome.UNAUTHORIZED, null, "no", null);
-        NameChangeResult taken = new NameChangeResult(NameChangeResult.Outcome.UNAVAILABLE, null, "taken", null);
+    void aFailureTravelsWithTerminalFailureAndNothingElse() {
+        lol.trq.alts.AltsFailure limited = lol.trq.alts.AltsFailure.rateLimited("slow down", Duration.ofSeconds(1));
+        NameChangeResult failed = NameChangeResult.failed(limited);
 
-        assertEquals(ClaimResult.StopReason.CLAIMED, new ClaimResult(true, 1, null).stopReason());
-        assertEquals(ClaimResult.StopReason.RATE_LIMITED, new ClaimResult(false, 1, limited).stopReason());
-        assertEquals(ClaimResult.StopReason.TERMINAL_FAILURE, new ClaimResult(false, 1, refused).stopReason());
-        assertEquals(ClaimResult.StopReason.WINDOW_ELAPSED, new ClaimResult(false, 9, taken).stopReason());
-        assertEquals(ClaimResult.StopReason.UNKNOWN, new ClaimResult(false, 0, null).stopReason());
+        assertEquals(
+                limited,
+                new ClaimResult(
+                                false,
+                                1,
+                                failed,
+                                ClaimResult.StopReason.TERMINAL_FAILURE,
+                                java.util.Optional.of(limited))
+                        .failure()
+                        .orElseThrow());
+        org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> new ClaimResult(
+                        false, 1, failed, ClaimResult.StopReason.TERMINAL_FAILURE, java.util.Optional.empty()));
+        org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> new ClaimResult(
+                        false, 1, failed, ClaimResult.StopReason.WINDOW_ELAPSED, java.util.Optional.of(limited)));
+        org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> new NameChangeResult(NameChangeResult.Outcome.FAILED, null, "m", java.util.Optional.empty()));
     }
 }

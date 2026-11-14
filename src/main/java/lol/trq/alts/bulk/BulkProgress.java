@@ -9,12 +9,22 @@ package lol.trq.alts.bulk;
  * <p>Reported per entry rather than as a percentage on purpose: a bar tells a user how long to wait,
  * while the thing they actually need to know is <em>which</em> alt failed and why.
  *
+ * <p>A {@link RuntimeException} a callback throws is ignored by the run: {@link #completed} and
+ * {@link #finished} failing changes nothing (the entry stays recorded, the report still completes), and
+ * {@link #started} failing only fails the entry it announced, as that method says. An {@link Error} a
+ * callback throws cuts the run short instead: the entry being reported keeps its result, and every
+ * remaining entry is reported as {@link lol.trq.alts.AltsFailure.Kind#CANCELLED}.
+ *
  * @author trq
  * @since 0.9.0
  */
 public interface BulkProgress {
 
-    /** A progress sink that discards everything, for a caller that only wants the report. */
+    /**
+     * A progress sink that discards everything, for a caller that only wants the report.
+     *
+     * @since 0.9.0
+     */
     BulkProgress NONE = new BulkProgress() {
         @Override
         public void started(int index, int total, String label) {}
@@ -25,6 +35,9 @@ public interface BulkProgress {
 
     /**
      * Called as an entry begins.
+     *
+     * <p>If this throws, that entry is not attempted: it fails with kind
+     * {@link lol.trq.alts.AltsFailure.Kind#UNKNOWN}, and the run goes on with the next entry.
      *
      * @param index the entry's position, counting from 0
      * @param total how many entries the run was given
@@ -44,7 +57,8 @@ public interface BulkProgress {
     void completed(int index, int total, BulkEntryResult result);
 
     /**
-     * Called once when the run is over, however it ended.
+     * Called once when the run is over, however it ended, and before {@link BulkHandle#report()}
+     * completes: a caller woken by the report has already had this call, and every call before it.
      *
      * @param report what the run came to
      * @since 0.9.0

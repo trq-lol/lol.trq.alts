@@ -15,6 +15,7 @@ public interface MainThreadExecutor {
      * Schedules {@code task} to run on the main thread.
      *
      * @param task the work to run
+     * @since 0.1.0
      */
     void execute(Runnable task);
 }

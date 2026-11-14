@@ -7,9 +7,17 @@ package lol.trq.alts.model;
  * @since 0.1.0
  */
 public enum LoginMode {
-    /** Adds the account to the stored list and logs in. */
+    /**
+     * Adds the account to the stored list and logs in.
+     *
+     * @since 0.1.0
+     */
     ADD,
 
-    /** Logs in without saving the account to the list. */
+    /**
+     * Logs in without saving the account to the list.
+     *
+     * @since 0.1.0
+     */
     DIRECT
 }

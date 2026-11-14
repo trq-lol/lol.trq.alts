@@ -17,7 +17,7 @@ import java.time.Instant;
  * @param changedAt when the name was last changed, or {@code null} when it never was or the endpoint did
  *     not say; added in 0.12.0
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public record NameEligibility(
         @SerializedName("nameChangeAllowed") boolean nameChangeAllowed,
@@ -37,7 +37,7 @@ public record NameEligibility(
      *
      * @param nameChangeAllowed whether a name change is permitted now
      * @param createdAt when the account was created, or {@code null}
-     * @since 0.12.0
+     * @since 0.11.0
      */
     public NameEligibility(boolean nameChangeAllowed, Instant createdAt) {
         this(nameChangeAllowed, createdAt, null);
@@ -48,7 +48,7 @@ public record NameEligibility(
      *
      * @param now the current instant to measure against
      * @return the account's age, or null
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public Duration ageAt(Instant now) {
         return createdAt == null ? null : Duration.between(createdAt, now);

@@ -38,7 +38,11 @@ public record PlayerAttributes(
      */
     public static final String SCOPE_MULTIPLAYER = "MULTIPLAYER";
 
-    /** Normalises the absent blocks to empties, so a caller never has to null-check them. */
+    /**
+     * Normalises the absent blocks to empties, so a caller never has to null-check them.
+     *
+     * @since 0.12.0
+     */
     public PlayerAttributes {
         privileges = privileges == null ? new Privileges(null, null, null, null, null) : privileges;
         friendsPreferences = friendsPreferences == null ? Map.of() : Map.copyOf(friendsPreferences);

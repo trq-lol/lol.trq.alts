@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -17,13 +19,17 @@ import org.junit.jupiter.api.Test;
  */
 class AsyncCacheEvictionRaceTest {
 
+    private static final Executor IO =
+            Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory());
+
     private static final int BOUND = 512;
     private static final int NEW_KEYS = 400;
 
     @Test
     void readsRacingAnEvictionNeverFailAndNeverStrandAKey() throws Exception {
         AtomicLong clock = new AtomicLong();
-        AsyncCache<Integer, String> cache = new AsyncCache<>(key -> "value-" + key, 0L, BOUND, clock::incrementAndGet);
+        AsyncCache<Integer, String> cache =
+                new AsyncCache<>(IO, key -> "value-" + key, 0L, BOUND, clock::incrementAndGet);
         for (int key = 0; key < BOUND; key++) {
             cache.get(key);
         }

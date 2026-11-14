@@ -11,7 +11,7 @@ import com.google.gson.annotations.SerializedName;
  * @param url the cape texture URL
  * @param alias the cape's human name (for example {@code "Migrator"})
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public record Cape(
         @SerializedName("id") String id,
@@ -23,14 +23,22 @@ public record Cape(
      * Whether a cape is the one currently shown.
      *
      * @author trq
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public enum State {
-        /** The cape currently shown. */
+        /**
+         * The cape currently shown.
+         *
+         * @since 0.11.0
+         */
         @SerializedName("ACTIVE")
         ACTIVE,
 
-        /** A cape the account owns but is not showing. */
+        /**
+         * A cape the account owns but is not showing.
+         *
+         * @since 0.11.0
+         */
         @SerializedName("INACTIVE")
         INACTIVE
     }

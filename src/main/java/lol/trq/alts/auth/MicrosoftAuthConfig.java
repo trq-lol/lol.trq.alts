@@ -1,6 +1,6 @@
 package lol.trq.alts.auth;
 
-import com.google.gson.annotations.SerializedName;
+import java.util.Objects;
 
 /**
  * Microsoft / Xbox Live authentication configuration the host supplies. The {@code clientId} is the
@@ -11,76 +11,103 @@ import com.google.gson.annotations.SerializedName;
  *
  * <p>Build the common case with {@link #of(String)} and adjust with the {@code withX} copy methods.
  * A <em>legacy MSA</em> application is a different protocol dialect and comes from
- * {@link #legacyMsa(String)}.
+ * {@link #legacyMsa(String)}. A blank optional value always falls back to its default.
  *
- * @param clientId the host's Azure application (OAuth) client id; required
- * @param scope the OAuth scope to request
- * @param redirectPath the local callback path the loopback redirect server listens on
- * @param authorizeUrl the OAuth authorize endpoint
- * @param tokenUrl the OAuth token endpoint
- * @param xboxLiveAuthUrl the Xbox Live user-authentication endpoint
- * @param xstsAuthUrl the XSTS authorization endpoint
- * @param minecraftLoginUrl the Minecraft services login-with-Xbox endpoint
- * @param minecraftProfileUrl the Minecraft services profile endpoint
- * @param redirectUri the {@code redirect_uri} the refresh grant must carry, or null to omit it; the
- *     authorization-code grant ignores this and uses the address the callback server actually served
- * @param rpsTicketPrefix the prefix the Microsoft access token carries into the Xbox Live RPS ticket
- * @param deviceCodeUrl the device-authorization endpoint the device-code login starts at; added in 0.12.0
- * @param deviceTokenUrl the token endpoint the device-code login polls; added in 0.12.0
+ * <p>A final class rather than a record since 1.0.0, so a later setting is an addition and not a break.
+ * Two configs are equal when every value is.
+ *
  * @author trq
  * @since 0.2.0
  */
-public record MicrosoftAuthConfig(
-        @SerializedName("clientId") String clientId,
-        @SerializedName("scope") String scope,
-        @SerializedName("redirectPath") String redirectPath,
-        @SerializedName("authorizeUrl") String authorizeUrl,
-        @SerializedName("tokenUrl") String tokenUrl,
-        @SerializedName("xboxLiveAuthUrl") String xboxLiveAuthUrl,
-        @SerializedName("xstsAuthUrl") String xstsAuthUrl,
-        @SerializedName("minecraftLoginUrl") String minecraftLoginUrl,
-        @SerializedName("minecraftProfileUrl") String minecraftProfileUrl,
-        @SerializedName("redirectUri") String redirectUri,
-        @SerializedName("rpsTicketPrefix") String rpsTicketPrefix,
-        @SerializedName("deviceCodeUrl") String deviceCodeUrl,
-        @SerializedName("deviceTokenUrl") String deviceTokenUrl) {
+public final class MicrosoftAuthConfig {
 
-    /** Default OAuth scope for a Minecraft login. */
+    /**
+     * Default OAuth scope for a Minecraft login.
+     *
+     * @since 0.2.0
+     */
     public static final String DEFAULT_SCOPE = "XboxLive.signin XboxLive.offline_access";
 
-    /** Default loopback callback path — intentionally long to reduce accidental screen-share exposure. */
+    /**
+     * Default loopback callback path — intentionally long to reduce accidental screen-share exposure. The
+     * browser sign-in redirects to {@code http://localhost:<port>} followed by this path, so the host's app
+     * registration lists it. Changed in 1.0.0: a registration that lists the 0.12 default keeps working by passing that
+     * path to {@link #withRedirectPath(String)}.
+     *
+     * @since 0.2.0
+     */
     public static final String DEFAULT_REDIRECT_PATH =
-            "/in_game_account_switcher_long_enough_uri_to_prevent_accidental_leaks_on_screensharing_even_if_you_have_like_extremely_big_screen_though_it_might_not_mork_but_we_will_try_it_anyway_to_prevent_funny_things_from_happening_or_something";
+            "/lol_trq_alts_loopback_redirect_long_enough_to_avoid_accidental_leaks_on_screenshare";
 
-    /** Default OAuth authorize endpoint. */
+    /**
+     * Default OAuth authorize endpoint.
+     *
+     * @since 0.2.0
+     */
     public static final String DEFAULT_AUTHORIZE_URL = "https://login.live.com/oauth20_authorize.srf";
 
-    /** Default OAuth token endpoint. */
+    /**
+     * Default OAuth token endpoint.
+     *
+     * @since 0.2.0
+     */
     public static final String DEFAULT_TOKEN_URL = "https://login.live.com/oauth20_token.srf";
 
-    /** Default Xbox Live user-authentication endpoint. */
+    /**
+     * Default Xbox Live user-authentication endpoint.
+     *
+     * @since 0.2.0
+     */
     public static final String DEFAULT_XBOX_LIVE_AUTH_URL = "https://user.auth.xboxlive.com/user/authenticate";
 
-    /** Default XSTS authorization endpoint. */
+    /**
+     * Default XSTS authorization endpoint.
+     *
+     * @since 0.2.0
+     */
     public static final String DEFAULT_XSTS_AUTH_URL = "https://xsts.auth.xboxlive.com/xsts/authorize";
 
-    /** Default Minecraft services login-with-Xbox endpoint. */
+    /**
+     * Default Minecraft services login-with-Xbox endpoint.
+     *
+     * @since 0.2.0
+     */
     public static final String DEFAULT_MINECRAFT_LOGIN_URL =
             "https://api.minecraftservices.com/authentication/login_with_xbox";
 
-    /** Default Minecraft services profile endpoint. */
+    /**
+     * Default Minecraft services profile endpoint.
+     *
+     * @since 0.2.0
+     */
     public static final String DEFAULT_MINECRAFT_PROFILE_URL = "https://api.minecraftservices.com/minecraft/profile";
 
-    /** Prefix marking an OAuth 2.0 access token as delegated when it is exchanged at Xbox Live. */
+    /**
+     * Prefix marking an OAuth 2.0 access token as delegated when it is exchanged at Xbox Live.
+     *
+     * @since 0.7.0
+     */
     public static final String DEFAULT_RPS_TICKET_PREFIX = "d=";
 
-    /** The scope a legacy MSA application authenticates Xbox Live with. */
+    /**
+     * The scope a legacy MSA application authenticates Xbox Live with.
+     *
+     * @since 0.7.0
+     */
     public static final String LEGACY_MSA_SCOPE = "service::user.auth.xboxlive.com::MBI_SSL";
 
-    /** The redirect a legacy MSA application's token grant must declare. */
+    /**
+     * The redirect a legacy MSA application's token grant must declare.
+     *
+     * @since 0.7.0
+     */
     public static final String LEGACY_MSA_REDIRECT_URI = "https://login.live.com/oauth20_desktop.srf";
 
-    /** Prefix marking a legacy MSA access token as an RPS ticket proper. */
+    /**
+     * Prefix marking a legacy MSA access token as an RPS ticket proper.
+     *
+     * @since 0.7.0
+     */
     public static final String LEGACY_MSA_RPS_TICKET_PREFIX = "t=";
 
     /**
@@ -100,44 +127,21 @@ public record MicrosoftAuthConfig(
     public static final String DEFAULT_DEVICE_TOKEN_URL =
             "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
 
-    /** Validates the required client id and substitutes defaults for any blank optional. */
-    public MicrosoftAuthConfig {
-        if (clientId == null || clientId.isBlank()) {
-            throw new IllegalArgumentException("Microsoft clientId is required (supply your own Azure app id)");
-        }
-        scope = blankToDefault(scope, DEFAULT_SCOPE);
-        redirectPath = blankToDefault(redirectPath, DEFAULT_REDIRECT_PATH);
-        authorizeUrl = blankToDefault(authorizeUrl, DEFAULT_AUTHORIZE_URL);
-        tokenUrl = blankToDefault(tokenUrl, DEFAULT_TOKEN_URL);
-        xboxLiveAuthUrl = blankToDefault(xboxLiveAuthUrl, DEFAULT_XBOX_LIVE_AUTH_URL);
-        xstsAuthUrl = blankToDefault(xstsAuthUrl, DEFAULT_XSTS_AUTH_URL);
-        minecraftLoginUrl = blankToDefault(minecraftLoginUrl, DEFAULT_MINECRAFT_LOGIN_URL);
-        minecraftProfileUrl = blankToDefault(minecraftProfileUrl, DEFAULT_MINECRAFT_PROFILE_URL);
-        redirectUri = redirectUri == null || redirectUri.isBlank() ? null : redirectUri;
-        rpsTicketPrefix = blankToDefault(rpsTicketPrefix, DEFAULT_RPS_TICKET_PREFIX);
-        deviceCodeUrl = blankToDefault(deviceCodeUrl, DEFAULT_DEVICE_CODE_URL);
-        deviceTokenUrl = blankToDefault(deviceTokenUrl, DEFAULT_DEVICE_TOKEN_URL);
-    }
+    private final String clientId;
+    private final String scope;
+    private final String redirectPath;
+    private final String authorizeUrl;
+    private final String tokenUrl;
+    private final String xboxLiveAuthUrl;
+    private final String xstsAuthUrl;
+    private final String minecraftLoginUrl;
+    private final String minecraftProfileUrl;
+    private final String redirectUri;
+    private final String rpsTicketPrefix;
+    private final String deviceCodeUrl;
+    private final String deviceTokenUrl;
 
-    /**
-     * Creates a config with the device-code endpoints defaulted. This is the canonical constructor as it
-     * stood before the device-code route existed, kept so positional construction written against an
-     * earlier release still compiles.
-     *
-     * @param clientId the host's Azure application (OAuth) client id; required
-     * @param scope the OAuth scope to request
-     * @param redirectPath the local callback path the loopback redirect server listens on
-     * @param authorizeUrl the OAuth authorize endpoint
-     * @param tokenUrl the OAuth token endpoint
-     * @param xboxLiveAuthUrl the Xbox Live user-authentication endpoint
-     * @param xstsAuthUrl the XSTS authorization endpoint
-     * @param minecraftLoginUrl the Minecraft services login-with-Xbox endpoint
-     * @param minecraftProfileUrl the Minecraft services profile endpoint
-     * @param redirectUri the {@code redirect_uri} the refresh grant must carry, or null to omit it
-     * @param rpsTicketPrefix the prefix the Microsoft access token carries into the Xbox Live RPS ticket
-     * @since 0.12.0
-     */
-    public MicrosoftAuthConfig(
+    private MicrosoftAuthConfig(
             String clientId,
             String scope,
             String redirectPath,
@@ -148,21 +152,25 @@ public record MicrosoftAuthConfig(
             String minecraftLoginUrl,
             String minecraftProfileUrl,
             String redirectUri,
-            String rpsTicketPrefix) {
-        this(
-                clientId,
-                scope,
-                redirectPath,
-                authorizeUrl,
-                tokenUrl,
-                xboxLiveAuthUrl,
-                xstsAuthUrl,
-                minecraftLoginUrl,
-                minecraftProfileUrl,
-                redirectUri,
-                rpsTicketPrefix,
-                null,
-                null);
+            String rpsTicketPrefix,
+            String deviceCodeUrl,
+            String deviceTokenUrl) {
+        if (clientId == null || clientId.isBlank()) {
+            throw new IllegalArgumentException("Microsoft clientId is required (supply your own Azure app id)");
+        }
+        this.clientId = clientId;
+        this.scope = blankToDefault(scope, DEFAULT_SCOPE);
+        this.redirectPath = blankToDefault(redirectPath, DEFAULT_REDIRECT_PATH);
+        this.authorizeUrl = blankToDefault(authorizeUrl, DEFAULT_AUTHORIZE_URL);
+        this.tokenUrl = blankToDefault(tokenUrl, DEFAULT_TOKEN_URL);
+        this.xboxLiveAuthUrl = blankToDefault(xboxLiveAuthUrl, DEFAULT_XBOX_LIVE_AUTH_URL);
+        this.xstsAuthUrl = blankToDefault(xstsAuthUrl, DEFAULT_XSTS_AUTH_URL);
+        this.minecraftLoginUrl = blankToDefault(minecraftLoginUrl, DEFAULT_MINECRAFT_LOGIN_URL);
+        this.minecraftProfileUrl = blankToDefault(minecraftProfileUrl, DEFAULT_MINECRAFT_PROFILE_URL);
+        this.redirectUri = redirectUri == null || redirectUri.isBlank() ? null : redirectUri;
+        this.rpsTicketPrefix = blankToDefault(rpsTicketPrefix, DEFAULT_RPS_TICKET_PREFIX);
+        this.deviceCodeUrl = blankToDefault(deviceCodeUrl, DEFAULT_DEVICE_CODE_URL);
+        this.deviceTokenUrl = blankToDefault(deviceTokenUrl, DEFAULT_DEVICE_TOKEN_URL);
     }
 
     /**
@@ -170,9 +178,11 @@ public record MicrosoftAuthConfig(
      *
      * @param clientId the host's Azure application client id; required
      * @return a fully-defaulted config
+     * @since 0.2.0
      */
     public static MicrosoftAuthConfig of(String clientId) {
-        return new MicrosoftAuthConfig(clientId, null, null, null, null, null, null, null, null, null, null);
+        return new MicrosoftAuthConfig(
+                clientId, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -237,6 +247,7 @@ public record MicrosoftAuthConfig(
      *
      * @param value the new scope, or null/blank to keep the default
      * @return a copy with the scope replaced
+     * @since 0.2.0
      */
     public MicrosoftAuthConfig withScope(String value) {
         return new MicrosoftAuthConfig(
@@ -260,6 +271,7 @@ public record MicrosoftAuthConfig(
      *
      * @param value the new redirect path, or null/blank to keep the default
      * @return a copy with the redirect path replaced
+     * @since 0.2.0
      */
     public MicrosoftAuthConfig withRedirectPath(String value) {
         return new MicrosoftAuthConfig(
@@ -289,6 +301,7 @@ public record MicrosoftAuthConfig(
      * @param minecraftLoginUrl the Minecraft services login-with-Xbox endpoint
      * @param minecraftProfileUrl the Minecraft services profile endpoint
      * @return a copy with the endpoints replaced
+     * @since 0.2.0
      */
     public MicrosoftAuthConfig withEndpoints(
             String authorizeUrl,
@@ -337,6 +350,249 @@ public record MicrosoftAuthConfig(
                 rpsTicketPrefix,
                 deviceCodeUrl,
                 deviceTokenUrl);
+    }
+
+    /**
+     * Returns the host's Azure application (OAuth) client id.
+     *
+     * @return the client id
+     * @since 0.2.0
+     */
+    public String clientId() {
+        return clientId;
+    }
+
+    /**
+     * Returns the OAuth scope to request.
+     *
+     * @return the value, defaulted when none was given
+     * @since 0.2.0
+     */
+    public String scope() {
+        return scope;
+    }
+
+    /**
+     * Returns the local callback path the loopback redirect server listens on.
+     *
+     * @return the value, defaulted when none was given
+     * @since 0.2.0
+     */
+    public String redirectPath() {
+        return redirectPath;
+    }
+
+    /**
+     * Returns the OAuth authorize endpoint.
+     *
+     * @return the value, defaulted when none was given
+     * @since 0.2.0
+     */
+    public String authorizeUrl() {
+        return authorizeUrl;
+    }
+
+    /**
+     * Returns the OAuth token endpoint.
+     *
+     * @return the value, defaulted when none was given
+     * @since 0.2.0
+     */
+    public String tokenUrl() {
+        return tokenUrl;
+    }
+
+    /**
+     * Returns the Xbox Live user-authentication endpoint.
+     *
+     * @return the value, defaulted when none was given
+     * @since 0.2.0
+     */
+    public String xboxLiveAuthUrl() {
+        return xboxLiveAuthUrl;
+    }
+
+    /**
+     * Returns the XSTS authorization endpoint.
+     *
+     * @return the value, defaulted when none was given
+     * @since 0.2.0
+     */
+    public String xstsAuthUrl() {
+        return xstsAuthUrl;
+    }
+
+    /**
+     * Returns the Minecraft services login-with-Xbox endpoint.
+     *
+     * @return the value, defaulted when none was given
+     * @since 0.2.0
+     */
+    public String minecraftLoginUrl() {
+        return minecraftLoginUrl;
+    }
+
+    /**
+     * Returns the Minecraft services profile endpoint.
+     *
+     * @return the value, defaulted when none was given
+     * @since 0.2.0
+     */
+    public String minecraftProfileUrl() {
+        return minecraftProfileUrl;
+    }
+
+    /**
+     * Returns the {@code redirect_uri} the refresh grant must carry; the authorization-code grant ignores this and uses the address the callback server actually served.
+     *
+     * @return the redirect URI, or {@code null} to omit it
+     * @since 0.7.0
+     */
+    public String redirectUri() {
+        return redirectUri;
+    }
+
+    /**
+     * Returns the prefix the Microsoft access token carries into the Xbox Live RPS ticket.
+     *
+     * @return the value, defaulted when none was given
+     * @since 0.7.0
+     */
+    public String rpsTicketPrefix() {
+        return rpsTicketPrefix;
+    }
+
+    /**
+     * Returns the device-authorization endpoint the device-code login starts at.
+     *
+     * @return the value, defaulted when none was given
+     * @since 0.12.0
+     */
+    public String deviceCodeUrl() {
+        return deviceCodeUrl;
+    }
+
+    /**
+     * Returns the token endpoint the device-code login polls.
+     *
+     * @return the value, defaulted when none was given
+     * @since 0.12.0
+     */
+    public String deviceTokenUrl() {
+        return deviceTokenUrl;
+    }
+
+    /**
+     * Returns a copy with the {@code redirect_uri} the refresh grant carries replaced. An OAuth app's
+     * refresh grant carries none; a legacy MSA app's declares {@link #LEGACY_MSA_REDIRECT_URI}.
+     *
+     * @param value the redirect URI, or null/blank to omit it
+     * @return a copy with the redirect URI replaced
+     * @since 1.0.0
+     */
+    public MicrosoftAuthConfig withRedirectUri(String value) {
+        return new MicrosoftAuthConfig(
+                clientId,
+                scope,
+                redirectPath,
+                authorizeUrl,
+                tokenUrl,
+                xboxLiveAuthUrl,
+                xstsAuthUrl,
+                minecraftLoginUrl,
+                minecraftProfileUrl,
+                value,
+                rpsTicketPrefix,
+                deviceCodeUrl,
+                deviceTokenUrl);
+    }
+
+    /**
+     * Returns a copy with the RPS ticket prefix replaced.
+     *
+     * @param value the prefix, or null/blank to keep the default ({@link #DEFAULT_RPS_TICKET_PREFIX})
+     * @return a copy with the prefix replaced
+     * @since 1.0.0
+     */
+    public MicrosoftAuthConfig withRpsTicketPrefix(String value) {
+        return new MicrosoftAuthConfig(
+                clientId,
+                scope,
+                redirectPath,
+                authorizeUrl,
+                tokenUrl,
+                xboxLiveAuthUrl,
+                xstsAuthUrl,
+                minecraftLoginUrl,
+                minecraftProfileUrl,
+                redirectUri,
+                value,
+                deviceCodeUrl,
+                deviceTokenUrl);
+    }
+
+    /**
+     * Returns whether {@code o} is a config with every value equal to this one's.
+     *
+     * @param o the object to compare
+     * @return true when every value is equal
+     * @since 0.2.0
+     */
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof MicrosoftAuthConfig other
+                && Objects.equals(clientId, other.clientId)
+                && Objects.equals(scope, other.scope)
+                && Objects.equals(redirectPath, other.redirectPath)
+                && Objects.equals(authorizeUrl, other.authorizeUrl)
+                && Objects.equals(tokenUrl, other.tokenUrl)
+                && Objects.equals(xboxLiveAuthUrl, other.xboxLiveAuthUrl)
+                && Objects.equals(xstsAuthUrl, other.xstsAuthUrl)
+                && Objects.equals(minecraftLoginUrl, other.minecraftLoginUrl)
+                && Objects.equals(minecraftProfileUrl, other.minecraftProfileUrl)
+                && Objects.equals(redirectUri, other.redirectUri)
+                && Objects.equals(rpsTicketPrefix, other.rpsTicketPrefix)
+                && Objects.equals(deviceCodeUrl, other.deviceCodeUrl)
+                && Objects.equals(deviceTokenUrl, other.deviceTokenUrl);
+    }
+
+    /**
+     * Returns a hash over every value, consistent with {@link #equals(Object)}.
+     *
+     * @return the hash
+     * @since 0.2.0
+     */
+    @Override
+    public int hashCode() {
+        return Objects.hash(
+                clientId,
+                scope,
+                redirectPath,
+                authorizeUrl,
+                tokenUrl,
+                xboxLiveAuthUrl,
+                xstsAuthUrl,
+                minecraftLoginUrl,
+                minecraftProfileUrl,
+                redirectUri,
+                rpsTicketPrefix,
+                deviceCodeUrl,
+                deviceTokenUrl);
+    }
+
+    /**
+     * Returns every value, in the form the record printed them. The config holds no secret.
+     *
+     * @return a description
+     * @since 0.2.0
+     */
+    @Override
+    public String toString() {
+        return "MicrosoftAuthConfig[clientId=" + clientId + ", scope=" + scope + ", redirectPath=" + redirectPath
+                + ", authorizeUrl=" + authorizeUrl + ", tokenUrl=" + tokenUrl + ", xboxLiveAuthUrl=" + xboxLiveAuthUrl
+                + ", xstsAuthUrl=" + xstsAuthUrl + ", minecraftLoginUrl=" + minecraftLoginUrl + ", minecraftProfileUrl="
+                + minecraftProfileUrl + ", redirectUri=" + redirectUri + ", rpsTicketPrefix=" + rpsTicketPrefix
+                + ", deviceCodeUrl=" + deviceCodeUrl + ", deviceTokenUrl=" + deviceTokenUrl + "]";
     }
 
     private static String blankToDefault(String value, String fallback) {

@@ -1,0 +1,9 @@
+{
+  "ed25519PublicKey": "affkROlGcDEAJ+buMH29BGsD4p/cLfsvV76m2jIjUbo\u003d",
+  "x25519PublicKey": "5kUpASnxIVehTP8tYq0QQtUMiMlnv8sQQIujY2U2PyU\u003d",
+  "kdfSalt": "kWORq74qMh5s9vlXaHn7Hg\u003d\u003d",
+  "kdfIterations": 600000,
+  "wrappedPrivateMaterial": "UC3+fEBjsFNGASvisVY2zF05GtIQbiRhssWOPp+CMX8W3Zl6/ReWZUiuVuD3lz+AoddOq+ZXWZr7nF/LBmXd21SyK38ETm97H/97YHYi6c4x4SXWJgVbuSImKeU\u003d",
+  "recoverySalt": "cX001wmToloQMCDIevtWcw\u003d\u003d",
+  "recoveryWrappedPrivateMaterial": "23lgvgSHluAqraAX6I3ZhKRzxShPvItcHsiJX7qyzi1szRN+N0FRQfvpVXzCa+8L17cZHPRY9nXq2ncUQHMoNwMweAHp85ZU01UNxF0uCyVfC20zUqadfawiUKQ\u003d"
+}

@@ -7,6 +7,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import lol.trq.alts.internal.net.TestTransports;
 
 /**
  * A loopback stand-in for the Minecraft services, shared by the account tests: it answers every request
@@ -64,7 +65,8 @@ final class LoopbackServices implements AutoCloseable {
 
     /** Services for a test account over this server. */
     AccountServices services() {
-        return AccountServices.of("test-token", "11111111-2222-3333-4444-555555555555", endpoints());
+        return AccountServices.create(
+                TestTransports.direct(), "test-token", "11111111-2222-3333-4444-555555555555", endpoints());
     }
 
     /** Sets what every following request is answered with. */

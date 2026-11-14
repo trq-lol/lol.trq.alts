@@ -2,6 +2,7 @@ package lol.trq.alts.account;
 
 import com.google.gson.annotations.SerializedName;
 import java.util.List;
+import lol.trq.alts.internal.account.Uuids;
 
 /**
  * The players an account has blocked, from {@code GET /privacy/blocklist}.
@@ -12,7 +13,11 @@ import java.util.List;
  */
 public record Blocklist(@SerializedName("blockedProfiles") List<String> blockedProfiles) {
 
-    /** Normalises a missing list to empty and every id to dashed form. */
+    /**
+     * Normalises a missing list to empty and every id to dashed form.
+     *
+     * @since 0.12.0
+     */
     public Blocklist {
         blockedProfiles = blockedProfiles == null
                 ? List.of()

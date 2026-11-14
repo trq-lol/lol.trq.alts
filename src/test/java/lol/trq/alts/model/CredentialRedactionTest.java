@@ -3,8 +3,8 @@ package lol.trq.alts.model;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import lol.trq.alts.auth.AltLoginCallback;
-import lol.trq.alts.auth.MinecraftProfile;
+import lol.trq.alts.auth.LoginResult;
+import lol.trq.alts.internal.auth.MinecraftProfile;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -34,7 +34,7 @@ class CredentialRedactionTest {
 
     @Test
     void aLoginResultDoesNotLeakTheAccountItCarries() {
-        String printed = AltLoginCallback.LoginResult.success(account()).toString();
+        String printed = LoginResult.success(account()).toString();
 
         assertFalse(printed.contains(ACCESS), "logging a result must not write a credential: " + printed);
         assertFalse(printed.contains(REFRESH), "logging a result must not write a credential: " + printed);

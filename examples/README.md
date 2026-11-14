@@ -8,24 +8,36 @@ cannot drift from the library API) but are not part of the published jar.
 The compiled companion to [`../docs/GETTING_STARTED.md`](../docs/GETTING_STARTED.md). Every snippet
 that guide shows is a method here, one per section:
 
-- `buildRuntime`, `warnIfTheStoreDidNotLoad`: wiring the seams and reporting a store that could not be read.
+- `buildRuntime`, `warnIfTheStoreDidNotLoad`, `startOverWithoutTheOldFile`: wiring the seams, reporting a
+  store that could not be read, and giving up on it with `discardUnreadable()` once the user says so.
 - `buildRuntimeWithHostKey`: sealing the stores under a host-supplied key, with the one-launch migration opt-in.
+- `runUntilShutdown`: closing the runtime with try-with-resources, which releases its store files.
 - `logInAndRead`, `logInWithDeviceCode`, `logInFromCookieFile`: browser, device-code and cookie-file sign-in.
 - `logInStoredAccount`, `importRefreshToken`, `logInStoredAccountWithBranching`: silent renewal, refresh-token
-  import, and branching on the typed failure reason, rate limits included.
+  import, and branching on the failure's kind, rate limits included.
 - `proxyPerAccount`: one proxy route per account.
 - `sweepStoredAccounts`, `refreshEverything`, `importPastedCredentials`: checking and renewing accounts
   without logging in, singly and in bulk.
 - `manageAccount`, `readAttributes`, `claimAtDrop`: profile, entitlements, name change, player attributes
   and bans, and a scheduled name claim.
 - `lookUpPlayers`: anonymous lookup by name and by list, with the rate-limit branch.
-- `sharedVault`, `openPinned`, `createRepositories`: constructing the vault with an explicit key-binding
-  verifier, opening a repository against a stored rollback floor, and both refresh-token sharing policies.
+- `importLegacyRepository`, `shareRefreshTokens`: reading the accounts of a 0.4 repository with the
+  read-only importer, and turning refresh-token sharing on for an AVP 0.5 repository.
 - `readGameStats`: reading one server's stat chips.
 
 The file is compiled with `-Xlint:deprecation -Werror`, so it cannot use deprecated API.
 
-This file is the authoritative copy; the guide inlines from it. Change the library API and the
+## `SharedVaultExample`
+
+The AVP 0.5 shared vault end to end: `createRepository` (a first contact whose host key the user
+confirms out of band before anything is created, the owner key kept as its entropy, the snapshot in the
+host secrets), `requestInvite` and `join` on the joiner's side, `invite` on the owner's after comparing
+fingerprints, `resumeOwner` (the owner key and the snapshot back out of the host secrets), and
+`shareAndSync`, which resumes from the snapshot, shares an account, renews another with `update` (which
+never reverts a field another member changed), syncs and acts on the report. Compiled the same way, and
+inlined into the guide's "Shared vault" section.
+
+Both files are the authoritative copy; the guide inlines from them. Change the library API and the
 build breaks here, which is the point: markdown alone rots silently. Keep the two in step when either
 moves. Spotless formats this directory too, so a snippet pasted into the guide is already house-styled.
 

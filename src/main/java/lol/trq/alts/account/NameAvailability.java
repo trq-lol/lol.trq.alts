@@ -4,23 +4,37 @@ package lol.trq.alts.account;
  * Whether a username can be claimed, from {@code GET /minecraft/profile/name/{name}/available}.
  *
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public enum NameAvailability {
 
-    /** The name is free to claim. */
+    /**
+     * The name is free to claim.
+     *
+     * @since 0.11.0
+     */
     AVAILABLE,
 
-    /** The name is taken. */
+    /**
+     * The name is taken.
+     *
+     * @since 0.11.0
+     */
     DUPLICATE,
 
     /**
      * The name cannot be claimed — blocked, reserved, or otherwise disallowed. The endpoint does not say
      * which, so neither does this; a host reports it as "not allowed" rather than guessing a reason.
+     *
+     * @since 0.11.0
      */
     NOT_ALLOWED,
 
-    /** The endpoint returned a status this release does not recognise. */
+    /**
+     * The endpoint returned a status this release does not recognise.
+     *
+     * @since 0.11.0
+     */
     UNKNOWN;
 
     /**
@@ -28,7 +42,7 @@ public enum NameAvailability {
      *
      * @param status the raw status, or null
      * @return the matching availability, {@link #UNKNOWN} for anything unrecognised
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public static NameAvailability from(String status) {
         if (status == null) {

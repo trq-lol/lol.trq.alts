@@ -11,6 +11,8 @@ import lol.trq.alts.model.LoginMode;
  * {@link lol.trq.alts.auth.AltLoginService#loginAccount} gets fifty session switches and, on account
  * nine, a rate limit it has no way to recognise.
  *
+ * <p>Not designed for host implementation; methods may be added in minor releases.
+ *
  * @author trq
  * @since 0.9.0
  */
@@ -22,7 +24,8 @@ public interface BulkOperations {
      * <p>Each line is classified by {@link CredentialKind#detect} and sent to the route that fits it. A
      * line that cannot be placed fails as that entry rather than being guessed at. With
      * {@link LoginMode#ADD} the resolved accounts are stored; the live session is not touched either
-     * way, so the host chooses afterwards what to log into.
+     * way, so the host chooses afterwards what to log into. Neither is the store's current account, and
+     * no account is stamped as used: a sign-in the user makes while the import runs stays current.
      *
      * @param entries the credential lines, one per account
      * @param mode whether to store what is resolved
@@ -69,7 +72,7 @@ public interface BulkOperations {
      * that owns nothing succeeds with an empty set, because the read worked.
      *
      * <p>Each account is read with the access token it currently holds. One whose token has expired
-     * fails its entry as {@link lol.trq.alts.auth.AltLoginCallback.FailureReason#INVALID_TOKEN}; run
+     * fails its entry as {@link lol.trq.alts.AltsFailure.Kind#UNAUTHORIZED}; run
      * {@link #refreshAll} first when the tokens may be stale. An account with no token at all — an
      * offline one — fails the same way without a request being made.
      *

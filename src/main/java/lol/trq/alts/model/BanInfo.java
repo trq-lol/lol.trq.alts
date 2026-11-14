@@ -31,6 +31,7 @@ public record BanInfo(
      * @param source how the ban was observed
      * @param detail the ban message or reason, or {@code null}
      * @return a {@code banned} record stamped now
+     * @since 0.1.0
      */
     public static BanInfo observed(String source, String detail) {
         return new BanInfo(true, System.currentTimeMillis(), source, detail, null);
@@ -43,6 +44,7 @@ public record BanInfo(
      * @param detail the ban message or reason, or {@code null}
      * @param byMember the member id (Ed25519 identity) that witnessed the ban, or {@code null}
      * @return a {@code banned} record stamped now, attributed to {@code byMember}
+     * @since 0.1.0
      */
     public static BanInfo observed(String source, String detail, String byMember) {
         return new BanInfo(true, System.currentTimeMillis(), source, detail, byMember);

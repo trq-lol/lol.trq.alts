@@ -18,6 +18,9 @@ class XstsErrorTest {
         assertEquals(XstsError.ADULT_VERIFICATION_REQUIRED, XstsError.fromCode(2148916236L));
         assertEquals(XstsError.ADULT_VERIFICATION_REQUIRED_ALT, XstsError.fromCode(2148916237L));
         assertEquals(XstsError.CHILD_ACCOUNT, XstsError.fromCode(2148916238L));
+        assertEquals(XstsError.ACCOUNT_BANNED, XstsError.fromCode(2148916227L));
+        assertEquals(XstsError.ACCOUNT_RESTRICTED, XstsError.fromCode(2148916229L));
+        assertEquals(XstsError.TERMS_NOT_ACCEPTED, XstsError.fromCode(2148916234L));
     }
 
     @Test

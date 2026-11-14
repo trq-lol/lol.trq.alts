@@ -5,13 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import lol.trq.alts.model.GameStats;
-import lol.trq.alts.net.NetTestHooks;
 import lol.trq.alts.spi.StaticGameStatsSource;
-import lol.trq.alts.store.AltStore;
-import lol.trq.alts.store.SecretStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -19,16 +17,17 @@ import org.junit.jupiter.api.io.TempDir;
 /** Wiring tests for the multi-server game-stats cache on {@link AltsRuntime}. */
 class AltsRuntimeGameStatsTest {
 
+    private final List<AltsRuntime<?>> opened = new ArrayList<>();
+
     @AfterEach
-    void settleStores() {
-        // Building a runtime leaves the stores on their coalesced write delay, pointed at this test's
-        // directory. Settle and undo that, or the next class inherits a pending write to a deleted folder.
-        AltStore.flush();
-        AltStore.writeDelay(null);
-        SecretStore.flush();
-        SecretStore.writeDelay(null);
-        NetTestHooks.resetHttp();
-        NetTestHooks.resetExecutor();
+    void closeRuntimes() {
+        // Each runtime holds its store files locked until it is closed.
+        opened.forEach(AltsRuntime::close);
+    }
+
+    private <H> AltsRuntime<H> opened(AltsRuntime<H> alts) {
+        opened.add(alts);
+        return alts;
     }
 
     private static AltsRuntime.Builder<Object> baseBuilder(Path dir) {
@@ -52,10 +51,10 @@ class AltsRuntimeGameStatsTest {
 
     @Test
     void registeredServerYieldsItsChips(@TempDir Path dir) throws Exception {
-        AltsRuntime<Object> alts = baseBuilder(dir)
+        AltsRuntime<Object> alts = opened(baseBuilder(dir)
                 .gameStatsSource(new StaticGameStatsSource(
                         "example.net", Map.of("uuid-1", List.of(new GameStats.Stat("rank", "Veteran")))))
-                .build();
+                .build());
 
         GameStats stats = awaitStats(alts, "example.net", "uuid-1");
         assertEquals("example.net", stats.serverId());
@@ -64,7 +63,7 @@ class AltsRuntimeGameStatsTest {
 
     @Test
     void unknownServerAlwaysNull(@TempDir Path dir) throws Exception {
-        AltsRuntime<Object> alts = baseBuilder(dir).build();
+        AltsRuntime<Object> alts = opened(baseBuilder(dir).build());
         assertNull(alts.gameStats("nope").get("uuid-1"));
         Thread.sleep(100);
         assertNull(alts.gameStats("nope").get("uuid-1"), "an unregistered server never yields stats");
@@ -72,18 +71,18 @@ class AltsRuntimeGameStatsTest {
 
     @Test
     void unknownUuidOnKnownServerStaysNull(@TempDir Path dir) throws Exception {
-        AltsRuntime<Object> alts = baseBuilder(dir)
+        AltsRuntime<Object> alts = opened(baseBuilder(dir)
                 .gameStatsSource(new StaticGameStatsSource("example.net", Map.of()))
-                .build();
+                .build());
         assertNull(alts.gameStats("example.net").get("ghost"));
     }
 
     @Test
     void twoServersAreIndependent(@TempDir Path dir) throws Exception {
-        AltsRuntime<Object> alts = baseBuilder(dir)
+        AltsRuntime<Object> alts = opened(baseBuilder(dir)
                 .gameStatsSource(new StaticGameStatsSource("a", Map.of("u", List.of(new GameStats.Stat("k", "A")))))
                 .gameStatsSource(new StaticGameStatsSource("b", Map.of("u", List.of(new GameStats.Stat("k", "B")))))
-                .build();
+                .build());
 
         assertEquals("A", awaitStats(alts, "a", "u").stats().get(0).value());
         assertEquals("B", awaitStats(alts, "b", "u").stats().get(0).value());

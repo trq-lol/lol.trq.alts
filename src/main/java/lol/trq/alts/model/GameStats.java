@@ -1,6 +1,8 @@
 package lol.trq.alts.model;
 
 import com.google.gson.annotations.SerializedName;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -25,6 +27,16 @@ public record GameStats(
         @SerializedName("uuid") String uuid,
         @SerializedName("stats") List<Stat> stats,
         @SerializedName("fetchedAt") long fetchedAt) {
+
+    /**
+     * Takes its own copy of {@code stats}, unmodifiable, so neither the list it was built from nor the
+     * one {@link #stats()} returns can change the snapshot. {@code null} stays {@code null}.
+     *
+     * @since 0.3.0
+     */
+    public GameStats {
+        stats = stats == null ? null : Collections.unmodifiableList(new ArrayList<>(stats));
+    }
 
     /**
      * A single display chip: a short label and its value, for example {@code ("rank", "Veteran")} or

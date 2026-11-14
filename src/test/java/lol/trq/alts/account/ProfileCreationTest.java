@@ -9,7 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Optional;
-import lol.trq.alts.net.NetTestHooks;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure.Kind;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,7 +30,6 @@ class ProfileCreationTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        NetTestHooks.resetHttp();
         server = new LoopbackServices();
     }
 
@@ -56,12 +56,13 @@ class ProfileCreationTest {
     void fetchStillThrowsForAMissingProfileAndSaysThatIsWhatItWas() {
         server.canned(404, NOT_FOUND);
 
-        AccountException thrown = assertThrows(
-                AccountException.class, () -> server.services().profile().fetch());
+        AltsException thrown = assertThrows(
+                AltsException.class, () -> server.services().profile().fetch());
 
-        assertEquals(404, thrown.status());
-        assertTrue(thrown.notFound(), "the missing-profile state is typed");
-        assertFalse(thrown.tokenRefused(), "and it is not a credential problem");
+        assertEquals(
+                Kind.NOT_ENTITLED,
+                thrown.kind(),
+                "a missing profile is typed as sign-in and check type it, not as a credential problem");
     }
 
     @Test
@@ -76,21 +77,20 @@ class ProfileCreationTest {
     @Test
     void fetchIfPresentDoesNotSwallowOtherFailures() {
         server.canned(401, "{\"errorMessage\":\"Invalid token\"}");
-        AccountException refused = assertThrows(
-                AccountException.class, () -> server.services().profile().fetchIfPresent());
-        assertTrue(refused.tokenRefused());
-        assertFalse(refused.notFound());
+        AltsException refused = assertThrows(
+                AltsException.class, () -> server.services().profile().fetchIfPresent());
+        assertEquals(Kind.UNAUTHORIZED, refused.kind());
 
         server.rateLimited(3);
-        AccountException limited = assertThrows(
-                AccountException.class, () -> server.services().profile().fetchIfPresent());
-        assertTrue(limited.rateLimited());
-        assertEquals(Duration.ofSeconds(3), limited.retryAfter());
+        AltsException limited = assertThrows(
+                AltsException.class, () -> server.services().profile().fetchIfPresent());
+        assertEquals(Kind.RATE_LIMITED, limited.kind());
+        assertEquals(Duration.ofSeconds(3), limited.failure().retryAfter().orElse(null));
 
         server.canned(503, "");
-        AccountException down = assertThrows(
-                AccountException.class, () -> server.services().profile().fetchIfPresent());
-        assertEquals(503, down.status());
+        AltsException down = assertThrows(
+                AltsException.class, () -> server.services().profile().fetchIfPresent());
+        assertEquals(Kind.NETWORK, down.kind());
     }
 
     @Test
@@ -139,7 +139,7 @@ class ProfileCreationTest {
         server.canned(400, refusal("DUPLICATE"));
         ProfileCreationResult duplicate = profile.create("Taken");
         assertEquals(ProfileCreationResult.Outcome.DUPLICATE, duplicate.outcome());
-        assertEquals("Invalid profile name", duplicate.message(), "the service's own message is surfaced");
+        assertFalse(duplicate.message().contains("Invalid profile name"), "the service's own text is not repeated");
 
         server.canned(400, refusal("NOT_ALLOWED"));
         assertEquals(
@@ -148,7 +148,8 @@ class ProfileCreationTest {
 
         server.canned(400, refusal("NOT_ENTITLED"));
         ProfileCreationResult unentitled = profile.create("Wanted");
-        assertEquals(ProfileCreationResult.Outcome.NOT_ENTITLED, unentitled.outcome());
+        assertEquals(ProfileCreationResult.Outcome.FAILED, unentitled.outcome());
+        assertEquals(Kind.NOT_ENTITLED, unentitled.failure().orElseThrow().kind());
         assertFalse(unentitled.success());
     }
 
@@ -166,27 +167,33 @@ class ProfileCreationTest {
     }
 
     @Test
-    void aRefusedTokenAndARateLimitAreOutcomesNotExceptions() throws Exception {
+    void aRefusedTokenAndARateLimitAreFailedResultsNotExceptions() throws Exception {
         server.canned(401, "{\"errorMessage\":\"Invalid token\"}");
         ProfileCreationResult refused = server.services().profile().create("Wanted");
-        assertEquals(ProfileCreationResult.Outcome.UNAUTHORIZED, refused.outcome());
-        assertEquals("Invalid token", refused.message());
+        assertEquals(ProfileCreationResult.Outcome.FAILED, refused.outcome());
+        assertEquals(Kind.UNAUTHORIZED, refused.failure().orElseThrow().kind());
+        assertFalse(refused.message().contains("Invalid token"), "the service's own text is not repeated");
 
         server.rateLimited(12);
         ProfileCreationResult limited = server.services().profile().create("Wanted");
-        assertEquals(ProfileCreationResult.Outcome.RATE_LIMITED, limited.outcome());
-        assertEquals(Duration.ofSeconds(12), limited.retryAfter());
+        assertEquals(ProfileCreationResult.Outcome.FAILED, limited.outcome());
+        assertEquals(Kind.RATE_LIMITED, limited.failure().orElseThrow().kind());
+        assertEquals(
+                Duration.ofSeconds(12),
+                limited.failure().orElseThrow().retryAfter().orElse(null));
 
         server.canned(500, "");
-        assertEquals(
-                ProfileCreationResult.Outcome.FAILED,
-                server.services().profile().create("Wanted").outcome());
+        ProfileCreationResult down = server.services().profile().create("Wanted");
+        assertEquals(ProfileCreationResult.Outcome.FAILED, down.outcome());
+        assertEquals(Kind.NETWORK, down.failure().orElseThrow().kind());
     }
 
     @Test
-    void anUnreachableServiceIsAnException() {
+    void anUnreachableServiceIsAFailedResultOfKindNetwork() {
         server.close();
 
-        assertThrows(AccountException.class, () -> server.services().profile().create("Wanted"));
+        ProfileCreationResult unreachable = server.services().profile().create("Wanted");
+        assertEquals(ProfileCreationResult.Outcome.FAILED, unreachable.outcome());
+        assertEquals(Kind.NETWORK, unreachable.failure().orElseThrow().kind());
     }
 }

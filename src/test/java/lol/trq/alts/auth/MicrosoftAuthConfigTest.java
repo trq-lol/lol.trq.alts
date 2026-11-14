@@ -1,8 +1,10 @@
 package lol.trq.alts.auth;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -23,6 +25,21 @@ class MicrosoftAuthConfigTest {
         assertEquals(MicrosoftAuthConfig.DEFAULT_MINECRAFT_PROFILE_URL, config.minecraftProfileUrl());
     }
 
+    /**
+     * The default loopback path is pinned literally: an Azure app registration lists it as a redirect, so a
+     * change breaks every host that relies on the default, and it names no product or tool.
+     */
+    @Test
+    void theDefaultRedirectPathIsTheNeutralOne() {
+        assertEquals(
+                "/lol_trq_alts_loopback_redirect_long_enough_to_avoid_accidental_leaks_on_screenshare",
+                MicrosoftAuthConfig.DEFAULT_REDIRECT_PATH);
+        assertEquals(
+                MicrosoftAuthConfig.DEFAULT_REDIRECT_PATH,
+                MicrosoftAuthConfig.of("app").redirectPath(),
+                "of() listens on the default path");
+    }
+
     @Test
     void requiresClientId() {
         assertThrows(IllegalArgumentException.class, () -> MicrosoftAuthConfig.of(null));
@@ -31,8 +48,11 @@ class MicrosoftAuthConfigTest {
 
     @Test
     void blankOptionalsFallBackToDefaults() {
-        MicrosoftAuthConfig config =
-                new MicrosoftAuthConfig("app", "  ", null, null, null, null, null, null, null, "  ", "  ");
+        MicrosoftAuthConfig config = MicrosoftAuthConfig.of("app")
+                .withScope("  ")
+                .withRedirectPath(null)
+                .withRedirectUri("  ")
+                .withRpsTicketPrefix("  ");
         assertEquals(MicrosoftAuthConfig.DEFAULT_SCOPE, config.scope());
         assertEquals(MicrosoftAuthConfig.DEFAULT_REDIRECT_PATH, config.redirectPath());
         assertEquals(MicrosoftAuthConfig.DEFAULT_RPS_TICKET_PREFIX, config.rpsTicketPrefix());
@@ -78,6 +98,33 @@ class MicrosoftAuthConfigTest {
         assertEquals("custom.scope", config.scope());
         assertEquals("/cb", config.redirectPath());
         assertEquals("app", config.clientId());
+    }
+
+    @Test
+    void theRefreshGrantRedirectAndTicketPrefixHaveTheirOwnCopies() {
+        MicrosoftAuthConfig config = MicrosoftAuthConfig.of("app")
+                .withRedirectUri(MicrosoftAuthConfig.LEGACY_MSA_REDIRECT_URI)
+                .withRpsTicketPrefix(MicrosoftAuthConfig.LEGACY_MSA_RPS_TICKET_PREFIX)
+                .withScope(MicrosoftAuthConfig.LEGACY_MSA_SCOPE);
+
+        assertEquals(MicrosoftAuthConfig.legacyMsa("app"), config, "the legacy dialect, built by hand");
+        assertEquals(MicrosoftAuthConfig.legacyMsa("app").hashCode(), config.hashCode());
+        assertNull(config.withRedirectUri(null).redirectUri());
+        assertEquals("app", config.withRpsTicketPrefix("x=").clientId());
+        assertEquals("x=", config.withRpsTicketPrefix("x=").rpsTicketPrefix());
+    }
+
+    @Test
+    void aConfigIsAValueOverEveryField() {
+        MicrosoftAuthConfig config = MicrosoftAuthConfig.of("app");
+
+        assertEquals(MicrosoftAuthConfig.of("app"), config);
+        assertNotEquals(config, config.withClientId("other"));
+        assertNotEquals(config, config.withDeviceCodeEndpoints("https://id.example/code", null));
+        assertTrue(config.toString().startsWith("MicrosoftAuthConfig[clientId=app, scope="), config::toString);
+        assertTrue(
+                config.toString().endsWith(", deviceTokenUrl=" + MicrosoftAuthConfig.DEFAULT_DEVICE_TOKEN_URL + "]"),
+                config::toString);
     }
 
     @Test

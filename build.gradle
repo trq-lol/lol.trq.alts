@@ -5,17 +5,16 @@ plugins {
 }
 
 group = 'lol.trq'
-version = '0.12.0'
+version = '1.0.0'
 base { archivesName = 'lol.trq.alts' }
 
 repositories { mavenCentral() }
 
 dependencies {
-    // Gson appears in public signatures (JsonObject on HttpUtil, @SerializedName on the public records),
-    // so a consumer needs it to compile against this library: compileOnlyApi puts it on their compile
-    // classpath and declares it in the published metadata. It stays off the runtime classpath, because
-    // the host provides it (vanilla Minecraft ships it) and bundling a second copy would clash.
-    compileOnlyApi 'com.google.code.gson:gson:2.14.0'
+    // Gson is part of the API: @SerializedName sits on the public records, and the module descriptor
+    // requires it transitively. An ordinary api dependency, so the POM and the Gradle metadata both carry
+    // it at compile scope and a host resolves it without declaring it.
+    api 'com.google.code.gson:gson:2.14.0'
 
     testImplementation 'com.google.code.gson:gson:2.14.0'
     testImplementation platform('org.junit:junit-bom:6.1.2')
@@ -53,22 +52,233 @@ tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
 
+// The module descriptor records the release, so `jar --describe-module` and a module layer show
+// lol.trq.alts@<version>.
+tasks.named('compileJava', JavaCompile) {
+    options.javaModuleVersion = provider { project.version.toString() }
+}
+
 tasks.withType(Javadoc).configureEach {
     options.encoding = 'UTF-8'
 }
 
+// The published Javadoc is the API: the internal packages are not exported and are not documented.
+tasks.named('javadoc', Javadoc) {
+    exclude '**/internal/**'
+    // The public sources still refer to internal types; javadoc resolves them from the source path, and
+    // documents only the files it is given.
+    options.addPathOption('-source-path').value = sourceSets.main.java.srcDirs as List
+}
+
+// Fails if the published Javadoc names an internal package or documents an internal type: an entry under an
+// `internal` directory, or a page, index or element list that refers to `lol.trq.alts.internal.<something>`.
+def javadocCheck = tasks.register('javadocCheck') {
+    group = 'verification'
+    description = 'Checks that the javadoc jar holds no internal package and no page for an internal type.'
+    def javadocJar = tasks.named('javadocJar').flatMap { it.archiveFile }
+    inputs.file(javadocJar).withPropertyName('javadocJar')
+    def marker = layout.buildDirectory.file('javadocCheck/ok')
+    outputs.file(marker)
+    doLast {
+        def reference = ~/lol[.\/]trq[.\/]alts[.\/]internal[.\/]/
+        def problems = []
+        new java.util.zip.ZipFile(javadocJar.get().asFile).withCloseable { zip ->
+            zip.entries().each { entry ->
+                if (entry.name.split('/').contains('internal')) {
+                    problems << "entry ${entry.name}"
+                } else if (!entry.directory && (entry.name.endsWith('.html') || entry.name.endsWith('.js')
+                        || entry.name.endsWith('element-list'))) {
+                    def text = zip.getInputStream(entry).getText('UTF-8')
+                    if (reference.matcher(text).find()) {
+                        problems << "reference in ${entry.name}"
+                    }
+                }
+            }
+        }
+        if (!problems.isEmpty()) {
+            throw new GradleException('The javadoc names internal packages or types:\n  ' + problems.join('\n  '))
+        }
+        marker.get().asFile.text = 'ok\n'
+    }
+}
+
+tasks.named('check') {
+    dependsOn javadocCheck
+}
+
 tasks.named('test') {
     useJUnitPlatform()
-    // The library's test-only seams (dropping the proxy provider, the store key, the TLS trust) refuse
-    // to work unless the JVM says it is running the test suite.
-    systemProperty 'lol.trq.alts.testSeams', 'true'
+    // ErrorKindMigrationTableTest reads the changelog's error-kind table, so a changed table reruns it.
+    inputs.file('CHANGELOG.md').withPathSensitivity(PathSensitivity.RELATIVE)
+    // SinceTagsTest reads the main sources' Javadoc and the API dump's version.
+    inputs.dir('src/main/java').withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName('mainSources')
+    inputs.file('api/lol.trq.alts.api').withPathSensitivity(PathSensitivity.RELATIVE)
+    // ModulePathConsumerTest compiles and runs a consumer module against the built jar and Gson's jar.
+    def libraryJar = tasks.named('jar').flatMap { it.archiveFile }
+    def runtimeJars = configurations.runtimeClasspath
+    def releaseVersion = project.version.toString()
+    inputs.file(libraryJar).withPropertyName('moduleJar').withNormalizer(ClasspathNormalizer)
+    jvmArgumentProviders.add({
+        def gson = runtimeJars.files.find { it.name.startsWith('gson-') && it.name.endsWith('.jar') }
+        ["-Dlol.trq.alts.moduleJar=${libraryJar.get().asFile}", "-Dlol.trq.alts.gsonJar=${gson}",
+         "-Dlol.trq.alts.version=${releaseVersion}"]
+    } as CommandLineArgumentProvider)
+}
+
+// The compatibility gate. api/lol.trq.alts.api is the committed dump of the exported API (every public or
+// protected type, member and signature), generated from the built jar by the JDK-only tool in src/apiTool.
+// apiCheck, part of check, fails when a line of it is removed or changed, unless this build's major version
+// is greater than the dump's, and when the jar has API the dump lacks (run apiDump). Internal packages are
+// ignored; exporting one, or naming an internal type in an exported signature, fails it outright.
+sourceSets {
+    apiTool {
+        java.srcDirs = ['src/apiTool/java']
+    }
+    apiToolTest {
+        java.srcDirs = ['src/apiToolTest/java']
+        compileClasspath += sourceSets.apiTool.output
+        runtimeClasspath += sourceSets.apiTool.output
+    }
+}
+
+dependencies {
+    apiToolTestImplementation platform('org.junit:junit-bom:6.1.2')
+    apiToolTestImplementation 'org.junit.jupiter:junit-jupiter'
+    apiToolTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+def apiTool = { JavaExec task, String mode, String dumpVersion, List<String> extra = [] ->
+    def libraryJar = tasks.named('jar').flatMap { it.archiveFile }
+    def dependencyJars = configurations.runtimeClasspath
+    task.group = 'verification'
+    task.dependsOn tasks.named('jar')
+    task.javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(targetJavaVersion) }
+    task.classpath = sourceSets.apiTool.runtimeClasspath
+    task.mainClass = 'lol.trq.alts.tools.api.ApiGate'
+    task.inputs.file(libraryJar).withPropertyName('libraryJar').withNormalizer(ClasspathNormalizer)
+    task.argumentProviders.add({
+        [mode, libraryJar.get().asFile.path, file('api/lol.trq.alts.api').path, dumpVersion] +
+                extra + dependencyJars.files.collect { it.path }
+    } as CommandLineArgumentProvider)
+}
+
+tasks.register('apiDump', JavaExec) {
+    description = 'Writes api/lol.trq.alts.api from the built jar (-PapiVersion=X.Y.Z names its version). ' +
+            'Refuses to erase API within the major version unless -PapiAllowBreaking=<reason> is given.'
+    def breaking = findProperty('apiAllowBreaking')
+    apiTool(it, 'dump', (findProperty('apiVersion') ?: project.version).toString(),
+            ["--project-version=${project.version}".toString()] +
+                    (breaking ? ["--allow-breaking=${breaking}".toString()] : []))
+}
+
+def apiCheck = tasks.register('apiCheck', JavaExec) {
+    description = 'Fails if the built jar breaks or outgrows the committed API dump.'
+    apiTool(it, 'check', project.version.toString())
+    inputs.file('api/lol.trq.alts.api').withPropertyName('baseline').withPathSensitivity(PathSensitivity.RELATIVE)
+    def marker = layout.buildDirectory.file('apiCheck/ok')
+    outputs.file(marker)
+    doLast { marker.get().asFile.text = 'ok\n' }
+}
+
+def apiToolTest = tasks.register('apiToolTest', Test) {
+    group = 'verification'
+    description = 'Tests the compatibility gate itself.'
+    testClassesDirs = sourceSets.apiToolTest.output.classesDirs
+    classpath = sourceSets.apiToolTest.runtimeClasspath
+    useJUnitPlatform()
+}
+
+tasks.named('check') {
+    dependsOn apiCheck, apiToolTest
+}
+
+// The whole suite again, with the library as a named module on the module path: the jar is the module,
+// the test classes are patched into it, and Gson, JUnit and the JDK modules resolve as modules. This is
+// what proves the descriptor: a missing `requires` or `opens` (Gson building a private record by
+// reflection) fails here and not on the class path, where a descriptor restricts nothing.
+configurations {
+    moduleTestRuntime {
+        canBeConsumed = false
+        canBeResolved = true
+        extendsFrom configurations.testImplementation, configurations.testRuntimeOnly
+        attributes {
+            attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.JAVA_RUNTIME))
+            attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category, Category.LIBRARY))
+            attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements, LibraryElements.JAR))
+            attribute(Bundling.BUNDLING_ATTRIBUTE, objects.named(Bundling, Bundling.EXTERNAL))
+        }
+    }
+}
+
+dependencies {
+    moduleTestRuntime 'org.junit.platform:junit-platform-console'
+}
+
+def moduleTest = tasks.register('moduleTest', JavaExec) {
+    group = 'verification'
+    description = 'Runs the test suite with the library as a named module on the module path.'
+    dependsOn tasks.named('jar'), tasks.named('testClasses')
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(targetJavaVersion) }
+    def libraryJar = tasks.named('jar').flatMap { it.archiveFile }
+    def modules = configurations.moduleTestRuntime
+    def testOutput = sourceSets.test.output
+    inputs.files(libraryJar, modules, testOutput).withPropertyName('modulePath')
+    inputs.file('CHANGELOG.md').withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir('src/main/java').withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName('mainSources')
+    inputs.file('api/lol.trq.alts.api').withPathSensitivity(PathSensitivity.RELATIVE)
+    def report = layout.buildDirectory.dir('test-results/moduleTest')
+    outputs.dir(report).withPropertyName('reports')
+    classpath = files()
+    mainModule = 'org.junit.platform.console'
+    mainClass = 'org.junit.platform.console.ConsoleLauncher'
+    doFirst {
+        def testDirs = testOutput.files.findAll { it.exists() }
+        def mainPackages = new TreeSet<String>()
+        def testPackages = new TreeSet<String>()
+        [sourceSets.main, sourceSets.test].each { set ->
+            set.java.srcDirs.each { dir ->
+                if (dir.exists()) {
+                    dir.eachFileRecurse(groovy.io.FileType.FILES) { f ->
+                        if (f.name.endsWith('.java') && f.name != 'module-info.java') {
+                            def rel = dir.toPath().relativize(f.parentFile.toPath()).toString()
+                            (set == sourceSets.main ? mainPackages : testPackages) << rel.replace(File.separator, '.')
+                        }
+                    }
+                }
+            }
+        }
+        def opens = (mainPackages + testPackages).collect { "--add-opens=lol.trq.alts/${it}=org.junit.platform.commons" }
+        jvmArgs = [
+                '--module-path', ([libraryJar.get().asFile] + modules.files).join(File.pathSeparator),
+                '--add-modules', 'ALL-MODULE-PATH,java.compiler,jdk.compiler',
+                '--patch-module', 'lol.trq.alts=' + testDirs.join(File.pathSeparator),
+                // SinceTagsTest parses the sources with the compiler API.
+                '--add-reads', 'lol.trq.alts=org.junit.jupiter.api,java.compiler,jdk.compiler',
+                '-Dlol.trq.alts.expectModule=true',
+        ] + opens
+        args = [
+                'execute',
+                '--select-module', 'lol.trq.alts',
+                // Compiles and runs its own consumer module against the jar; it is a module-path test already.
+                '--exclude-classname', '.*ModulePathConsumerTest',
+                '--fail-if-no-tests',
+                '--disable-banner',
+                '--details', 'summary',
+                '--reports-dir', report.get().asFile.path,
+        ]
+    }
+}
+
+tasks.named('check') {
+    dependsOn moduleTest
 }
 
 tasks.named('jar') {
     manifest {
-        // A stable module name for a consumer on the module path, rather than one derived from the
-        // jar's file name, which changes with the version and the repository that served it.
-        attributes('Automatic-Module-Name': 'lol.trq.alts')
+        // module-info.java names the module, so no Automatic-Module-Name. Sealed, so on the class path a
+        // class from another jar cannot join one of the library's packages and reach its package-private
+        // members (the store, account, skin and vault bridges among them).
+        attributes('Sealed': 'true')
     }
 }
 

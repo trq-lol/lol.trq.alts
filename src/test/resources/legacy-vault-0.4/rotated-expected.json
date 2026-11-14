@@ -1,0 +1,45 @@
+[
+  {
+    "uuid": "00000000-0000-4000-8000-000000000001",
+    "username": "AltOne",
+    "accessToken": "access-one",
+    "type": "MICROSOFT",
+    "lastUsed": 1700000000000,
+    "lastUsedBy": "member-a",
+    "bans": {
+      "example.net": {
+        "banned": true,
+        "observedAt": 1700000100000,
+        "source": "observed",
+        "detail": "kicked",
+        "observedBy": "member-a"
+      },
+      "other.example": {
+        "banned": false,
+        "observedAt": 1700000200000,
+        "source": "manual"
+      }
+    },
+    "sourceClient": "example-client",
+    "sourceUser": "user-a",
+    "refreshToken": "refresh-one",
+    "expiresAt": 1800000000000
+  },
+  {
+    "uuid": "00000000-0000-4000-8000-000000000002",
+    "username": "AltTwo",
+    "accessToken": "access-two",
+    "type": "MICROSOFT",
+    "lastUsed": 1700000300000,
+    "refreshToken": "refresh-two",
+    "expiresAt": 1800000100000
+  },
+  {
+    "uuid": "00000000-0000-4000-8000-000000000003",
+    "username": "AltThree",
+    "accessToken": "",
+    "type": "OFFLINE",
+    "lastUsed": 0,
+    "expiresAt": 0
+  }
+]
