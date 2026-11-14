@@ -33,9 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     timeouts and executor) by the host's key. `connect` takes a `RepoLocator`, a `HostRef`, a
     `VaultSnapshot` or a locator and key, and refuses a host that serves another key with `PROTOCOL`;
     `connectFirstContact(locator)` takes whatever key the host serves, which is then unverified: compare
-    it out of band, persist `VaultHost.ref()` and reconnect with `connect(HostRef)`. A locator is reached at `https://<locator>` unless
-    `Builder#vaultHostAddress` maps it elsewhere. Each runtime keeps its own host tokens, and
-    `close()` drops them.
+    it out of band, persist `VaultHost.ref()` and reconnect with `connect(HostRef)`. A locator is
+    reached at `https://<locator>` unless `Builder#vaultHostAddress` maps it elsewhere. Each runtime
+    keeps its own host tokens, and `close()` drops them.
   - `SharedVault.create`, `open`, `prepareJoin`, `join` and `resume` give one member device's copy.
     `sync()` returns a `SyncReport`: the new states, a diverged owner chain the tie rule settled
     (`divergedAt`), a policy that turned to sharing (`policyTurnedOn`), the unreadable and discarded
@@ -46,10 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     stamps only the fields the edit changed, so a field another member changed is never reverted.
     `put(base, edited)` stamps only the fields where the two differ, for an edit of an account read
     earlier. `put(account)` stamps the fields that differ from the copy as it stands when the write
-    runs, so a stale object can revert remote edits; use `update`. A write that changes nothing sends
-    no commit. While the repository withholds refresh
-    tokens, `refreshToken` and `expiresAt` are neither sent nor read. Nothing the vault reads is saved
-    to the `AccountStore`.
+    runs, so a stale object can revert remote edits; use `update`. A removed account put again is
+    written whole, and drops the bans it held before its removal that it does not carry now. A write
+    that changes nothing sends no commit. While the repository withholds refresh tokens,
+    `refreshToken` and `expiresAt` are neither sent nor read. Nothing the vault reads is saved to the
+    `AccountStore`.
   - The owner invites from a pasted `InviteToken`, removes a `VaultMember` from `roster()` (the data
     key rotates), sets the policy with `setShareRefreshTokens`, and removes leaving members with
     `processLeaves()`; a member can `leave()`. `hosts()` lists the repository's hosts.
