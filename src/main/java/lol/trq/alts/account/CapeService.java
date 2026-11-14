@@ -7,7 +7,7 @@ import java.util.List;
  * ({@link ProfileService#fetch()} → {@link PlayerProfile#capes()}), so there is no separate list call.
  *
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public interface CapeService {
 
@@ -16,7 +16,7 @@ public interface CapeService {
      *
      * @return the owned capes
      * @throws lol.trq.alts.AltsException if the token was refused or the service failed
-     * @since 1.0.0
+     * @since 0.11.0
      */
     List<Cape> owned();
 
@@ -26,7 +26,7 @@ public interface CapeService {
      * @param capeId the cape id (from {@link Cape#id()})
      * @return the updated profile
      * @throws lol.trq.alts.AltsException if the token was refused or the cape is not owned
-     * @since 1.0.0
+     * @since 0.11.0
      */
     PlayerProfile setActive(String capeId);
 
@@ -34,7 +34,7 @@ public interface CapeService {
      * Hides whatever cape is shown.
      *
      * @throws lol.trq.alts.AltsException if the token was refused or the service failed
-     * @since 1.0.0
+     * @since 0.11.0
      */
     void hide();
 

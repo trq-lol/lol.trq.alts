@@ -4,7 +4,7 @@ package lol.trq.alts.account;
  * Reads what an account owns.
  *
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public interface EntitlementService {
 
@@ -13,7 +13,7 @@ public interface EntitlementService {
      *
      * @return the products the account holds
      * @throws lol.trq.alts.AltsException if the token was refused or the service failed
-     * @since 1.0.0
+     * @since 0.11.0
      */
     Entitlements fetch();
 }

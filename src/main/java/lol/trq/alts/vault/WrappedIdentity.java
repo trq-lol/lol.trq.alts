@@ -20,7 +20,7 @@ import lol.trq.alts.AltsFailure;
  * @param recoveryWrappedPrivateMaterial the private material sealed under the recovery key
  *     ({@code iv||ct}), Base64, or null if no recovery is set
  * @author trq
- * @since 0.2.0
+ * @since 0.2.0, moved from {@code lol.trq.alts.crypto} in 1.0.0
  */
 public record WrappedIdentity(
         @SerializedName("ed25519PublicKey") String ed25519PublicKey,
@@ -37,6 +37,7 @@ public record WrappedIdentity(
      * @throws AltsException of kind {@link AltsFailure.Kind#INVALID_INPUT} if {@code ed25519PublicKey}, {@code
      *     x25519PublicKey}, {@code kdfSalt} or {@code wrappedPrivateMaterial} is null, as in a stored record
      *     that lost a field
+     * @since 0.2.0
      */
     public WrappedIdentity {
         required(ed25519PublicKey, "ed25519PublicKey");
@@ -56,6 +57,7 @@ public record WrappedIdentity(
      * Returns whether this identity carries an offline recovery sealing.
      *
      * @return true if a recovery code can restore this identity
+     * @since 0.2.0
      */
     public boolean hasRecovery() {
         return recoverySalt != null && recoveryWrappedPrivateMaterial != null;

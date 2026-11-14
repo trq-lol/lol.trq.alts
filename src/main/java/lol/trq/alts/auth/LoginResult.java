@@ -14,7 +14,7 @@ import lol.trq.alts.model.AltAccount;
  * @param account the signed-in account, or {@code null} when the sign-in failed
  * @param failure why the sign-in failed, or empty when it succeeded
  * @author trq
- * @since 1.0.0
+ * @since 0.2.0, moved from {@code AltLoginCallback.LoginResult} in 1.0.0
  */
 public record LoginResult(AltAccount account, Optional<AltsFailure> failure) {
 
@@ -23,6 +23,7 @@ public record LoginResult(AltAccount account, Optional<AltsFailure> failure) {
      *
      * @throws NullPointerException if {@code failure} is null, or a success carries no account
      * @throws IllegalArgumentException if a failure carries an account
+     * @since 1.0.0
      */
     public LoginResult {
         Objects.requireNonNull(failure, "failure");
@@ -38,7 +39,7 @@ public record LoginResult(AltAccount account, Optional<AltsFailure> failure) {
      *
      * @param account the account that was signed in
      * @return the result
-     * @since 1.0.0
+     * @since 0.2.0
      */
     public static LoginResult success(AltAccount account) {
         return new LoginResult(account, Optional.empty());
@@ -71,7 +72,7 @@ public record LoginResult(AltAccount account, Optional<AltsFailure> failure) {
      * Returns whether the sign-in succeeded.
      *
      * @return true when there is no failure
-     * @since 1.0.0
+     * @since 0.2.0
      */
     public boolean success() {
         return failure.isEmpty();
@@ -82,7 +83,7 @@ public record LoginResult(AltAccount account, Optional<AltsFailure> failure) {
      * branch on it.
      *
      * @return the description
-     * @since 1.0.0
+     * @since 0.2.0
      */
     public String message() {
         return failure.map(AltsFailure::message).orElse("Logged in successfully");

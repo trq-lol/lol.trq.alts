@@ -18,7 +18,11 @@ import java.util.List;
  */
 public record BulkReport(List<BulkEntryResult> results, boolean cancelled, boolean stoppedEarly) {
 
-    /** Defensively copies the results, so a report cannot be edited after the fact. */
+    /**
+     * Defensively copies the results, so a report cannot be edited after the fact.
+     *
+     * @since 0.9.0
+     */
     public BulkReport {
         results = results == null ? List.of() : List.copyOf(results);
     }

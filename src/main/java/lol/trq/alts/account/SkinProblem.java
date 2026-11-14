@@ -12,18 +12,38 @@ package lol.trq.alts.account;
  * @since 1.0.0
  */
 public enum SkinProblem {
-    /** The file could not be read: missing, a directory, or not readable. */
+    /**
+     * The file could not be read: missing, a directory, or not readable.
+     *
+     * @since 1.0.0
+     */
     UNREADABLE,
 
-    /** There were no bytes to upload. */
+    /**
+     * There were no bytes to upload.
+     *
+     * @since 1.0.0
+     */
     EMPTY,
 
-    /** The data is larger than {@link SkinService#MAX_SKIN_BYTES}. */
+    /**
+     * The data is larger than {@link SkinService#MAX_SKIN_BYTES}.
+     *
+     * @since 1.0.0
+     */
     TOO_LARGE,
 
-    /** The data does not begin as a PNG, or its header is truncated. */
+    /**
+     * The data does not begin as a PNG, or its header is truncated.
+     *
+     * @since 1.0.0
+     */
     NOT_PNG,
 
-    /** The image is a PNG but not 64x64 or 64x32, the two canvases a skin can have. */
+    /**
+     * The image is a PNG but not 64x64 or 64x32, the two canvases a skin can have.
+     *
+     * @since 1.0.0
+     */
     WRONG_DIMENSIONS
 }

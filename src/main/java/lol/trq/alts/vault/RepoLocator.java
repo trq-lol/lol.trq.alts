@@ -108,12 +108,19 @@ public final class RepoLocator {
      *
      * @param o the other object
      * @return whether they are equal
+     * @since 1.0.0
      */
     @Override
     public boolean equals(Object o) {
         return o instanceof RepoLocator other && text().equals(other.text());
     }
 
+    /**
+     * Hashes what {@link #equals(Object)} compares.
+     *
+     * @return the hash
+     * @since 1.0.0
+     */
     @Override
     public int hashCode() {
         return text().hashCode();
@@ -123,6 +130,7 @@ public final class RepoLocator {
      * The address and the owner fingerprint.
      *
      * @return a description
+     * @since 1.0.0
      */
     @Override
     public String toString() {

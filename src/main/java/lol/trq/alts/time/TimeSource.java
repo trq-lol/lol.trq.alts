@@ -11,7 +11,7 @@ import java.time.Instant;
  * a host that already holds a corrected clock plugs its own in and the library opens no socket for it.
  *
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 @FunctionalInterface
 public interface TimeSource {
@@ -20,7 +20,7 @@ public interface TimeSource {
      * Returns the current instant.
      *
      * @return now, corrected
-     * @since 1.0.0
+     * @since 0.11.0
      */
     Instant now();
 }

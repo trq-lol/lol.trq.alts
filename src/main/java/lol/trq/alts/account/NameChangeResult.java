@@ -18,7 +18,7 @@ import lol.trq.alts.AltsFailure;
  * @param failure why the change failed, present exactly when the outcome is {@link Outcome#FAILED};
  *     carried since 1.0.0 in place of the former wait
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public record NameChangeResult(Outcome outcome, PlayerProfile profile, String message, Optional<AltsFailure> failure) {
 
@@ -26,19 +26,35 @@ public record NameChangeResult(Outcome outcome, PlayerProfile profile, String me
      * How a name change ended.
      *
      * @author trq
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public enum Outcome {
-        /** The name was changed; {@link NameChangeResult#profile()} carries the updated profile. */
+        /**
+         * The name was changed; {@link NameChangeResult#profile()} carries the updated profile.
+         *
+         * @since 0.11.0
+         */
         CHANGED,
 
-        /** The name is malformed or invalid (too long, illegal characters). */
+        /**
+         * The name is malformed or invalid (too long, illegal characters).
+         *
+         * @since 0.11.0
+         */
         INVALID_NAME,
 
-        /** The name is unavailable, or the account is within its name-change cooldown. */
+        /**
+         * The name is unavailable, or the account is within its name-change cooldown.
+         *
+         * @since 0.11.0
+         */
         UNAVAILABLE,
 
-        /** The change failed; {@link NameChangeResult#failure()} says why. */
+        /**
+         * The change failed; {@link NameChangeResult#failure()} says why.
+         *
+         * @since 0.11.0
+         */
         FAILED
     }
 
@@ -47,6 +63,7 @@ public record NameChangeResult(Outcome outcome, PlayerProfile profile, String me
      *
      * @throws NullPointerException if {@code outcome} or {@code failure} is null
      * @throws IllegalArgumentException if the failure does not match the outcome
+     * @since 1.0.0
      */
     public NameChangeResult {
         Objects.requireNonNull(outcome, "outcome");
@@ -71,7 +88,7 @@ public record NameChangeResult(Outcome outcome, PlayerProfile profile, String me
      * Returns whether the name was changed.
      *
      * @return true on success
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public boolean success() {
         return outcome == Outcome.CHANGED;

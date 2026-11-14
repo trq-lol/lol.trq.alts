@@ -88,6 +88,7 @@ public record PlayerCertificate(
      * Returns a description with the private key redacted.
      *
      * @return a string safe to log
+     * @since 0.12.0
      */
     @Override
     public String toString() {

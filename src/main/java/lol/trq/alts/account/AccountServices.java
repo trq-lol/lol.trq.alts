@@ -24,7 +24,7 @@ import lol.trq.alts.internal.net.HttpTransport;
  * or touches the account store; these operate directly on the account the token belongs to.
  *
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public final class AccountServices {
 
@@ -76,7 +76,7 @@ public final class AccountServices {
      * Returns the profile service — the full read, and creation for an account that has none.
      *
      * @return the profile service
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public ProfileService profile() {
         return profile;
@@ -86,7 +86,7 @@ public final class AccountServices {
      * Returns the entitlement (ownership) service.
      *
      * @return the entitlement service
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public EntitlementService entitlements() {
         return entitlements;
@@ -96,7 +96,7 @@ public final class AccountServices {
      * Returns the name service — availability, eligibility, change, and scheduled claim.
      *
      * @return the name service
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public NameService name() {
         return name;
@@ -106,7 +106,7 @@ public final class AccountServices {
      * Returns the skin service.
      *
      * @return the skin service
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public SkinService skin() {
         return skin;
@@ -116,7 +116,7 @@ public final class AccountServices {
      * Returns the cape service.
      *
      * @return the cape service
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public CapeService cape() {
         return cape;

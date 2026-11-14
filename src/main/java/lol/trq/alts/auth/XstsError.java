@@ -9,32 +9,52 @@ package lol.trq.alts.auth;
  * fixes in a specific place, so classifying it lets a host say where.
  *
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public enum XstsError {
 
     /**
      * The Microsoft account has never signed into Xbox, so it has no Xbox profile to authorize. The user
      * signs in once at xbox.com to create one.
+     *
+     * @since 0.11.0
      */
     NO_XBOX_ACCOUNT(2148916233L),
 
-    /** The account is from a country where Xbox Live is not available. */
+    /**
+     * The account is from a country where Xbox Live is not available.
+     *
+     * @since 0.11.0
+     */
     REGION_BLOCKED(2148916235L),
 
-    /** The account needs adult verification (South Korea). */
+    /**
+     * The account needs adult verification (South Korea).
+     *
+     * @since 0.11.0
+     */
     ADULT_VERIFICATION_REQUIRED(2148916236L),
 
-    /** The account needs adult verification (South Korea) — the second code the service uses for it. */
+    /**
+     * The account needs adult verification (South Korea) — the second code the service uses for it.
+     *
+     * @since 0.11.0
+     */
     ADULT_VERIFICATION_REQUIRED_ALT(2148916237L),
 
     /**
      * The account is a child under an adult's Microsoft Family, and must be added to a family before it
      * can sign into Xbox Live.
+     *
+     * @since 0.11.0
      */
     CHILD_ACCOUNT(2148916238L),
 
-    /** An {@code XErr} this release does not recognise. */
+    /**
+     * An {@code XErr} this release does not recognise.
+     *
+     * @since 0.11.0
+     */
     UNKNOWN(0L);
 
     private final long code;
@@ -47,7 +67,7 @@ public enum XstsError {
      * Returns the raw {@code XErr} code this value maps.
      *
      * @return the code, or {@code 0} for {@link #UNKNOWN}
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public long code() {
         return code;
@@ -58,7 +78,7 @@ public enum XstsError {
      *
      * @param xerr the raw code
      * @return the matching error, {@link #UNKNOWN} for anything unrecognised
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public static XstsError fromCode(long xerr) {
         for (XstsError error : values()) {

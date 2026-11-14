@@ -20,7 +20,7 @@ import lol.trq.alts.AltsFailure;
  * @param failure what ended the run, present exactly when the stop reason is
  *     {@link StopReason#TERMINAL_FAILURE}; a rate limit's stated wait travels in it; added in 1.0.0
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public record ClaimResult(
         boolean claimed,
@@ -36,10 +36,18 @@ public record ClaimResult(
      * @since 0.12.0
      */
     public enum StopReason {
-        /** The name was claimed. */
+        /**
+         * The name was claimed.
+         *
+         * @since 0.12.0
+         */
         CLAIMED,
 
-        /** The window ran out with every attempt refused. */
+        /**
+         * The window ran out with every attempt refused.
+         *
+         * @since 0.12.0
+         */
         WINDOW_ELAPSED,
 
         /**
@@ -47,10 +55,16 @@ public record ClaimResult(
          * rename), the service asking the run to slow down, or the runtime closing under it.
          * {@link ClaimResult#failure()} says which; a rate limit carries the wait it asked for, when it
          * said.
+         *
+         * @since 0.12.0
          */
         TERMINAL_FAILURE,
 
-        /** The caller cancelled the run. */
+        /**
+         * The caller cancelled the run.
+         *
+         * @since 0.12.0
+         */
         CANCELLED
     }
 
@@ -59,6 +73,7 @@ public record ClaimResult(
      *
      * @throws NullPointerException if {@code stopReason} or {@code failure} is null
      * @throws IllegalArgumentException if the failure does not match the stop reason
+     * @since 1.0.0
      */
     public ClaimResult {
         Objects.requireNonNull(stopReason, "stopReason");

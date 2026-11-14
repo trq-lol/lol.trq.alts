@@ -71,6 +71,7 @@ public final class VaultHost {
      * The locator and the key.
      *
      * @return a description
+     * @since 1.0.0
      */
     @Override
     public String toString() {

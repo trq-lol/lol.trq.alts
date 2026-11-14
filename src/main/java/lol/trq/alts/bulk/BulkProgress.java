@@ -20,7 +20,11 @@ package lol.trq.alts.bulk;
  */
 public interface BulkProgress {
 
-    /** A progress sink that discards everything, for a caller that only wants the report. */
+    /**
+     * A progress sink that discards everything, for a caller that only wants the report.
+     *
+     * @since 0.9.0
+     */
     BulkProgress NONE = new BulkProgress() {
         @Override
         public void started(int index, int total, String label) {}

@@ -30,22 +30,40 @@ public record ProfileCreationResult(
      * @since 0.12.0
      */
     public enum Outcome {
-        /** The profile was created; {@link ProfileCreationResult#profile()} carries it. */
+        /**
+         * The profile was created; {@link ProfileCreationResult#profile()} carries it.
+         *
+         * @since 0.12.0
+         */
         CREATED,
 
         /**
          * The name is not a valid Minecraft name — the wrong length or an illegal character. Decided
          * locally when the name could never be accepted, so no request is spent on it.
+         *
+         * @since 0.12.0
          */
         INVALID_NAME,
 
-        /** The name is already taken. */
+        /**
+         * The name is already taken.
+         *
+         * @since 0.12.0
+         */
         DUPLICATE,
 
-        /** The name is blocked or reserved and cannot be claimed. */
+        /**
+         * The name is blocked or reserved and cannot be claimed.
+         *
+         * @since 0.12.0
+         */
         NOT_ALLOWED,
 
-        /** The creation failed; {@link ProfileCreationResult#failure()} says why. */
+        /**
+         * The creation failed; {@link ProfileCreationResult#failure()} says why.
+         *
+         * @since 0.12.0
+         */
         FAILED
     }
 
@@ -54,6 +72,7 @@ public record ProfileCreationResult(
      *
      * @throws NullPointerException if {@code outcome} or {@code failure} is null
      * @throws IllegalArgumentException if the failure does not match the outcome
+     * @since 1.0.0
      */
     public ProfileCreationResult {
         Objects.requireNonNull(outcome, "outcome");

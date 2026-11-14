@@ -60,6 +60,8 @@ public record AltsFailure(
         /**
          * The service could not be reached, the connection failed or timed out, or it answered with a
          * server error ({@code 5xx}, {@code 408}). Nothing was spent; retrying is the remedy.
+         *
+         * @since 1.0.0
          */
         NETWORK,
 
@@ -67,6 +69,8 @@ public record AltsFailure(
          * The service answered that the caller is sending too many requests ({@code 429}). Nothing was
          * spent; the remedy is to wait, for {@link AltsFailure#retryAfter()} when the service said how
          * long, or to send from a different address.
+         *
+         * @since 1.0.0
          */
         RATE_LIMITED,
 
@@ -74,6 +78,8 @@ public record AltsFailure(
          * The credential was refused, or is empty or malformed: a token the service answered {@code 401}
          * or {@code 403} to, a cookie that produced no sign-in. A stored refresh token, if there is one,
          * may still renew the account.
+         *
+         * @since 1.0.0
          */
         UNAUTHORIZED,
 
@@ -81,6 +87,8 @@ public record AltsFailure(
          * The credential is permanently spent (the token endpoint stated {@code invalid_grant}) and a
          * fresh interactive sign-in is the only remedy. Where the library held it for a stored account,
          * the refresh token has been discarded.
+         *
+         * @since 1.0.0
          */
         REAUTH_REQUIRED,
 
@@ -88,12 +96,16 @@ public record AltsFailure(
          * The credential authenticated, but the account has no Minecraft profile or does not own the
          * game. Neither retrying nor signing in again changes it. Sign-in, check and
          * {@code ProfileService.fetch} all report a missing profile this way.
+         *
+         * @since 1.0.0
          */
         NOT_ENTITLED,
 
         /**
          * The thing asked for does not exist ({@code 404}): no such resource. A missing Minecraft profile
          * is {@link #NOT_ENTITLED} instead, and a lookup of a name nobody holds is an empty answer.
+         *
+         * @since 1.0.0
          */
         NOT_FOUND,
 
@@ -101,15 +113,23 @@ public record AltsFailure(
          * The sign-in succeeded but Xbox Live refused to authorize the account;
          * {@link AltsFailure#xstsError()} says why, and each cause is fixed by the user at a specific
          * place rather than by retrying.
+         *
+         * @since 1.0.0
          */
         XBOX_DENIED,
 
-        /** The user refused an interactive sign-in: declined the consent page or the device code. */
+        /**
+         * The user refused an interactive sign-in: declined the consent page or the device code.
+         *
+         * @since 1.0.0
+         */
         DECLINED,
 
         /**
          * An interactive sign-in was not finished in time: the device code expired, or the browser
          * sign-in was never completed. Starting again issues a fresh challenge.
+         *
+         * @since 1.0.0
          */
         TIMED_OUT,
 
@@ -117,18 +137,24 @@ public record AltsFailure(
          * The operation was stopped on the caller's side rather than failing: the host cancelled it, the
          * runtime was closed, or the executor it was to run on refused it. Retrying on the same runtime
          * does not help once it is closed.
+         *
+         * @since 1.0.0
          */
         CANCELLED,
 
         /**
          * What the caller supplied could not be used, and nothing was sent: an unreadable credential
          * text, a skin that is not a skin, an argument out of range.
+         *
+         * @since 1.0.0
          */
         INVALID_INPUT,
 
         /**
          * The request conflicts with the current state: a service answered {@code 409}, or a store file
          * is held by another runtime, in this process or another.
+         *
+         * @since 1.0.0
          */
         CONFLICT,
 
@@ -137,22 +163,38 @@ public record AltsFailure(
          * {@code MicrosoftAuthConfig}, or a login service that does not support device-code sign-in, or
          * a token endpoint answering {@code invalid_client} or {@code unauthorized_client} to the host's
          * client registration. Neither a retry nor a fresh sign-in fixes it.
+         *
+         * @since 1.0.0
          */
         NOT_CONFIGURED,
 
-        /** A store file could not be read or written. */
+        /**
+         * A store file could not be read or written.
+         *
+         * @since 1.0.0
+         */
         STORAGE,
 
-        /** A cryptographic operation failed: a key did not unwrap, a ciphertext did not authenticate. */
+        /**
+         * A cryptographic operation failed: a key did not unwrap, a ciphertext did not authenticate.
+         *
+         * @since 1.0.0
+         */
         CRYPTO,
 
         /**
          * A service answered with something that is not what its protocol promises: a body that is not
          * JSON, a field missing or of the wrong type.
+         *
+         * @since 1.0.0
          */
         PROTOCOL,
 
-        /** A failure the library could not classify. */
+        /**
+         * A failure the library could not classify.
+         *
+         * @since 1.0.0
+         */
         UNKNOWN
     }
 
@@ -163,6 +205,7 @@ public record AltsFailure(
      * @throws NullPointerException if a component is null
      * @throws IllegalArgumentException if {@code xstsError} is present on another kind, {@code retryAfter}
      *     is negative, or {@code retryAt} is present without {@code retryAfter} or absent with it
+     * @since 1.0.0
      */
     public AltsFailure {
         Objects.requireNonNull(kind, "kind");

@@ -29,7 +29,7 @@ import lol.trq.alts.internal.vault.MemberKeys;
  * code can be attached so the identity survives a forgotten passphrase, without any server-side escrow.
  *
  * @author trq
- * @since 0.2.0
+ * @since 0.2.0, moved from {@code lol.trq.alts.crypto} in 1.0.0
  */
 public final class VaultIdentity {
 
@@ -78,6 +78,7 @@ public final class VaultIdentity {
      * @return the unlocked identity
      * @throws AltsException of kind {@link AltsFailure.Kind#INVALID_INPUT} if {@code passphrase} is null, and of
      *     kind {@link AltsFailure.Kind#CRYPTO} if key generation or sealing fails
+     * @since 0.2.0
      */
     public static VaultIdentity create(char[] passphrase) {
         var ed = Ed25519.newKeyPair();
@@ -118,6 +119,7 @@ public final class VaultIdentity {
      *     tampered with, or the record's public keys do not match the private material, and of kind {@link
      *     AltsFailure.Kind#INVALID_INPUT} if the record is malformed or its iteration count out of range, or
      *     {@code passphrase} is null
+     * @since 0.2.0
      */
     public static VaultIdentity unlock(WrappedIdentity stored, char[] passphrase) {
         SecretKey mk = Pbkdf2.deriveKey(passphrase, decode(stored.kdfSalt(), "kdf salt"), stored.kdfIterations());
@@ -134,6 +136,7 @@ public final class VaultIdentity {
      * @throws AltsException of kind {@link AltsFailure.Kind#CRYPTO} if the code is wrong, the sealing was
      *     tampered with, or the record's public keys do not match the private material, and of kind {@link
      *     AltsFailure.Kind#INVALID_INPUT} if the record carries no recovery sealing or is malformed
+     * @since 0.2.0
      */
     public static VaultIdentity unlockWithRecovery(WrappedIdentity stored, String recoveryCode) {
         if (!stored.hasRecovery()) {
@@ -151,6 +154,7 @@ public final class VaultIdentity {
      * @param recoveryCode the recovery code (see {@link RecoveryCode#newCode()})
      * @return the stored form including the recovery sealing
      * @throws AltsException of kind {@link AltsFailure.Kind#CRYPTO} if sealing fails
+     * @since 0.2.0
      */
     public WrappedIdentity withRecovery(String recoveryCode) {
         byte[] salt = Pbkdf2.newSalt();
@@ -176,6 +180,7 @@ public final class VaultIdentity {
      * Returns the stored, passphrase-protected form of this identity for persistence or upload.
      *
      * @return the wrapped identity
+     * @since 0.2.0
      */
     public WrappedIdentity export() {
         return stored;
@@ -185,6 +190,7 @@ public final class VaultIdentity {
      * Returns the Ed25519 identity public key — this member's stable identity.
      *
      * @return the identity public key
+     * @since 0.2.0
      */
     public PublicKey identityPublicKey() {
         return edPublic;
@@ -196,6 +202,7 @@ public final class VaultIdentity {
      *
      * @return the Base64 identity public key
      * @throws AltsException of kind {@link AltsFailure.Kind#CRYPTO} if the key cannot be encoded
+     * @since 0.2.0
      */
     public String identityId() {
         return Base64.getEncoder().encodeToString(Ed25519.encodePublicKey(edPublic));
@@ -251,6 +258,7 @@ public final class VaultIdentity {
      * Returns the X25519 public key, to which other members wrap repository data keys for this member.
      *
      * @return the key-agreement public key
+     * @since 0.2.0
      */
     public PublicKey keyAgreementPublicKey() {
         return xPublic;
@@ -281,6 +289,7 @@ public final class VaultIdentity {
      * @return the signature
      * @throws AltsException of kind {@link AltsFailure.Kind#INVALID_INPUT} if the input is refused; nothing is
      *     signed. Of kind {@link AltsFailure.Kind#CRYPTO} if signing fails
+     * @since 0.2.0
      */
     public byte[] signChallenge(byte[] nonce) {
         if (nonce == null

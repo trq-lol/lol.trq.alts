@@ -13,7 +13,11 @@ import lol.trq.alts.internal.account.Uuids;
  */
 public record Blocklist(@SerializedName("blockedProfiles") List<String> blockedProfiles) {
 
-    /** Normalises a missing list to empty and every id to dashed form. */
+    /**
+     * Normalises a missing list to empty and every id to dashed form.
+     *
+     * @since 0.12.0
+     */
     public Blocklist {
         blockedProfiles = blockedProfiles == null
                 ? List.of()

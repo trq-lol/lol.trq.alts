@@ -7,14 +7,22 @@ package lol.trq.alts.account;
  *
  * @param base the Minecraft services origin, without a trailing slash
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public record AccountEndpoints(String base) {
 
-    /** The public Minecraft services origin. */
+    /**
+     * The public Minecraft services origin.
+     *
+     * @since 0.11.0
+     */
     public static final String DEFAULT_BASE = "https://api.minecraftservices.com";
 
-    /** Substitutes the default base for a blank one, and trims any trailing slash. */
+    /**
+     * Substitutes the default base for a blank one, and trims any trailing slash.
+     *
+     * @since 0.11.0
+     */
     public AccountEndpoints {
         base = base == null || base.isBlank() ? DEFAULT_BASE : base;
         if (base.endsWith("/")) {
@@ -26,6 +34,7 @@ public record AccountEndpoints(String base) {
      * Returns the endpoints for the public Minecraft services.
      *
      * @return the default endpoints
+     * @since 0.11.0
      */
     public static AccountEndpoints defaults() {
         return new AccountEndpoints(DEFAULT_BASE);

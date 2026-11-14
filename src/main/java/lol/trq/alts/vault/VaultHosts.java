@@ -167,6 +167,7 @@ public final class VaultHosts {
      * Counts only.
      *
      * @return a description
+     * @since 1.0.0
      */
     @Override
     public String toString() {

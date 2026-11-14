@@ -53,6 +53,7 @@ public final class LinkGrant {
      * Names the type only; the grant carries the owner key, encrypted.
      *
      * @return a description
+     * @since 1.0.0
      */
     @Override
     public String toString() {

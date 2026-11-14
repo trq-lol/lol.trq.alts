@@ -32,10 +32,18 @@ public record AccountStatus(AltAccount account, State state, Optional<AltsFailur
      * @since 0.8.0
      */
     public enum State {
-        /** The stored credentials work as they are. */
+        /**
+         * The stored credentials work as they are.
+         *
+         * @since 0.8.0
+         */
         VALID,
 
-        /** The credentials were spent and have been renewed; the account carries the new ones. */
+        /**
+         * The credentials were spent and have been renewed; the account carries the new ones.
+         *
+         * @since 0.8.0
+         */
         RENEWED,
 
         /**
@@ -43,12 +51,16 @@ public record AccountStatus(AltAccount account, State state, Optional<AltsFailur
          * refresh token, so {@link AltAccountService#refresh(AltAccount)} is the next step rather than a
          * fresh interactive login. Only a read-only {@link AltAccountService#check(AltAccount)} reports
          * this.
+         *
+         * @since 0.8.0
          */
         EXPIRED,
 
         /**
          * The credentials are permanently spent and the account needs a fresh interactive login. Any
          * refresh token held for it has been discarded.
+         *
+         * @since 0.8.0
          */
         REAUTH_REQUIRED,
 
@@ -56,6 +68,8 @@ public record AccountStatus(AltAccount account, State state, Optional<AltsFailur
          * The credentials authenticated, but the account cannot be played as it stands: it has no
          * Minecraft profile ({@link AltsFailure.Kind#NOT_ENTITLED}), or Xbox Live refused to authorize it
          * ({@link AltsFailure.Kind#XBOX_DENIED}). Neither retrying nor re-authenticating helps.
+         *
+         * @since 0.8.0
          */
         NOT_ENTITLED,
 
@@ -63,10 +77,16 @@ public record AccountStatus(AltAccount account, State state, Optional<AltsFailur
          * The service could not be reached, failed ({@link AltsFailure.Kind#NETWORK}), or is throttling
          * the caller ({@link AltsFailure.Kind#RATE_LIMITED}). Nothing was spent. An outage is worth a
          * retry; a rate limit is worth a wait, and the failure's kind says which.
+         *
+         * @since 0.8.0
          */
         UNREACHABLE,
 
-        /** Something else went wrong, which the library could not classify. */
+        /**
+         * Something else went wrong, which the library could not classify.
+         *
+         * @since 0.8.0
+         */
         UNKNOWN
     }
 
@@ -75,6 +95,7 @@ public record AccountStatus(AltAccount account, State state, Optional<AltsFailur
      *
      * @throws NullPointerException if {@code state} or {@code failure} is null
      * @throws IllegalArgumentException if the failure does not match the state
+     * @since 1.0.0
      */
     public AccountStatus {
         Objects.requireNonNull(state, "state");

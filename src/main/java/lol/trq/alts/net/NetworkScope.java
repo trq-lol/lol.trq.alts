@@ -33,19 +33,39 @@ public record NetworkScope(Purpose purpose, String accountUuid, String accountUs
      * @since 0.8.0
      */
     public enum Purpose {
-        /** A token, cookie, or OAuth exchange with the identity services. */
+        /**
+         * A token, cookie, or OAuth exchange with the identity services.
+         *
+         * @since 0.8.0
+         */
         AUTH,
 
-        /** A Minecraft services profile lookup, used to validate a token and resolve an identity. */
+        /**
+         * A Minecraft services profile lookup, used to validate a token and resolve an identity.
+         *
+         * @since 0.8.0
+         */
         PROFILE,
 
-        /** A player avatar or skin fetch. */
+        /**
+         * A player avatar or skin fetch.
+         *
+         * @since 0.8.0
+         */
         AVATAR,
 
-        /** A host-registered game-stats lookup. */
+        /**
+         * A host-registered game-stats lookup.
+         *
+         * @since 0.8.0
+         */
         STATS,
 
-        /** A shared-vault transport call. */
+        /**
+         * A shared-vault transport call.
+         *
+         * @since 0.8.0
+         */
         VAULT
     }
 
@@ -55,6 +75,7 @@ public record NetworkScope(Purpose purpose, String accountUuid, String accountUs
      *
      * @throws IllegalArgumentException if the route tag is present but blank: a provider must never be
      *     handed a tag that names no route
+     * @since 1.0.0
      */
     public NetworkScope {
         if (purpose == null) {

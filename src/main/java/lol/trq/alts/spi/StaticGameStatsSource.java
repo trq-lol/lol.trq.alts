@@ -23,17 +23,28 @@ public final class StaticGameStatsSource implements GameStatsSource {
      *
      * @param serverId the server id this source reports
      * @param chipsByUuid the chips to return per player UUID (copied defensively)
+     * @since 0.3.0
      */
     public StaticGameStatsSource(String serverId, Map<String, List<GameStats.Stat>> chipsByUuid) {
         this.serverId = Objects.requireNonNull(serverId, "serverId");
         this.chipsByUuid = Map.copyOf(Objects.requireNonNull(chipsByUuid, "chipsByUuid"));
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * @since 0.3.0
+     */
     @Override
     public String serverId() {
         return serverId;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * @since 0.3.0
+     */
     @Override
     public GameStats fetch(String uuid) {
         List<GameStats.Stat> chips = chipsByUuid.get(uuid);

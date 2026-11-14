@@ -8,7 +8,7 @@ import java.util.concurrent.CompletableFuture;
  * now, change it, and — for a name dropping at a known time — claim it the instant it opens.
  *
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public interface NameService {
 
@@ -18,7 +18,7 @@ public interface NameService {
      * @param name the username to check
      * @return whether it is available, taken, or disallowed
      * @throws lol.trq.alts.AltsException if the token was refused or the service failed
-     * @since 1.0.0
+     * @since 0.11.0
      */
     NameAvailability checkAvailability(String name);
 
@@ -27,7 +27,7 @@ public interface NameService {
      *
      * @return the eligibility
      * @throws lol.trq.alts.AltsException if the token was refused or the service failed
-     * @since 1.0.0
+     * @since 0.11.0
      */
     NameEligibility eligibility();
 
@@ -39,7 +39,7 @@ public interface NameService {
      *
      * @param name the new username
      * @return the classified outcome, carrying the updated profile on success
-     * @since 1.0.0
+     * @since 0.11.0
      */
     NameChangeResult change(String name);
 
@@ -61,7 +61,7 @@ public interface NameService {
      * @param target when the name becomes available
      * @param options how to pace the burst
      * @return a future holding the outcome
-     * @since 1.0.0
+     * @since 0.11.0
      */
     CompletableFuture<ClaimResult> claimAt(String name, Instant target, ClaimOptions options);
 }

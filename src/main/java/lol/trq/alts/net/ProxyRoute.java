@@ -39,19 +39,35 @@ public record ProxyRoute(Kind kind, String host, int port, String username, char
      * @since 0.8.0
      */
     public enum Kind {
-        /** No proxy. */
+        /**
+         * No proxy.
+         *
+         * @since 0.8.0
+         */
         DIRECT,
 
-        /** An HTTP proxy, which may carry credentials. */
+        /**
+         * An HTTP proxy, which may carry credentials.
+         *
+         * @since 0.8.0
+         */
         HTTP,
 
-        /** A SOCKS5 proxy, which may not — see {@link ProxyRoute}. */
+        /**
+         * A SOCKS5 proxy, which may not — see {@link ProxyRoute}.
+         *
+         * @since 0.8.0
+         */
         SOCKS5
     }
 
     private static final ProxyRoute DIRECT = new ProxyRoute(Kind.DIRECT, null, 0, null, null);
 
-    /** Validates the shape, and refuses the credential combination the JDK cannot honour per-request. */
+    /**
+     * Validates the shape, and refuses the credential combination the JDK cannot honour per-request.
+     *
+     * @since 0.8.0
+     */
     public ProxyRoute {
         if (kind == null) {
             throw new IllegalArgumentException("proxy kind is required");

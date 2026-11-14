@@ -21,6 +21,7 @@ public interface SessionInjector {
      * Installs {@code session} as the client's active identity.
      *
      * @param session the resolved account to make current
+     * @since 0.2.0
      */
     void inject(SessionData session);
 }

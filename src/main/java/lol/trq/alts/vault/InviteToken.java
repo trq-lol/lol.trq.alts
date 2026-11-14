@@ -110,12 +110,19 @@ public final class InviteToken {
      *
      * @param o the other object
      * @return whether they are equal
+     * @since 1.0.0
      */
     @Override
     public boolean equals(Object o) {
         return o instanceof InviteToken other && text().equals(other.text());
     }
 
+    /**
+     * Hashes what {@link #equals(Object)} compares.
+     *
+     * @return the hash
+     * @since 1.0.0
+     */
     @Override
     public int hashCode() {
         return text().hashCode();
@@ -125,6 +132,7 @@ public final class InviteToken {
      * The joiner's fingerprint and home host.
      *
      * @return a description
+     * @since 1.0.0
      */
     @Override
     public String toString() {

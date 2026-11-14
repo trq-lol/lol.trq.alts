@@ -13,12 +13,16 @@ import lol.trq.alts.time.TimeSource;
  * @param concurrency how many attempt chains run in parallel
  * @param timeSource the clock the schedule reads, for correcting OS drift
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public record ClaimOptions(
         Duration leadTime, Duration window, Duration attemptSpacing, int concurrency, TimeSource timeSource) {
 
-    /** Validates the shape and fills a missing time source with the system clock. */
+    /**
+     * Validates the shape and fills a missing time source with the system clock.
+     *
+     * @since 0.11.0
+     */
     public ClaimOptions {
         if (concurrency < 1) {
             throw new IllegalArgumentException("concurrency must be at least 1");
@@ -34,7 +38,7 @@ public record ClaimOptions(
      * chains, system clock.
      *
      * @return the default options
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public static ClaimOptions defaults() {
         return new ClaimOptions(
@@ -46,7 +50,7 @@ public record ClaimOptions(
      *
      * @param value the time source
      * @return a copy with the time source replaced
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public ClaimOptions withTimeSource(TimeSource value) {
         return new ClaimOptions(leadTime, window, attemptSpacing, concurrency, value);

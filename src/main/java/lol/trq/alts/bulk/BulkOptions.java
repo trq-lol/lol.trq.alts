@@ -25,7 +25,11 @@ public record BulkOptions(
         boolean stopOnRateLimit,
         Optional<String> routeTag) {
 
-    /** Validates the shape, since a zero concurrency would hang the run and a negative delay is a bug. */
+    /**
+     * Validates the shape, since a zero concurrency would hang the run and a negative delay is a bug.
+     *
+     * @since 1.0.0
+     */
     public BulkOptions {
         if (concurrency < 1) {
             throw new IllegalArgumentException("concurrency must be at least 1");

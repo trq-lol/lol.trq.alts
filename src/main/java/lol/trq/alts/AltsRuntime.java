@@ -314,6 +314,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
      * Returns the login service callers use to authenticate accounts.
      *
      * @return the login service
+     * @since 0.2.0
      */
     public AltLoginService loginService() {
         return loginService;
@@ -338,7 +339,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
      *
      * @param account the account to operate on
      * @return the account services
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public AccountServices accountServices(AltAccount account) {
         return accountAccess.services(transport, account.accessToken(), account.uuid(), accountEndpoints);
@@ -351,7 +352,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
      * @param accessToken the Minecraft access token
      * @param accountUuid the account UUID for request routing, or null
      * @return the account services
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public AccountServices accountServices(String accessToken, String accountUuid) {
         return accountAccess.services(transport, accessToken, accountUuid, accountEndpoints);
@@ -384,6 +385,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
      * renamed account keeps its head.
      *
      * @return the skin avatar cache
+     * @since 0.2.0
      */
     public SkinAvatarCache<H> skinCache() {
         return skinCache;
@@ -397,6 +399,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
      *
      * @param serverId the server whose stats to look up (matches a registered source's id)
      * @return the per-server game-stats cache
+     * @since 0.3.0
      */
     public AsyncCache<String, GameStats> gameStats(String serverId) {
         AsyncCache<String, GameStats> cache = gameStatsCaches.get(serverId);
@@ -408,6 +411,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
      * keeps no static sink of its own.
      *
      * @return the toast sink
+     * @since 0.2.0
      */
     public ToastSink toasts() {
         return toasts;
@@ -470,7 +474,11 @@ public final class AltsRuntime<H> implements AutoCloseable {
             return this;
         }
 
-        /** Creates an empty builder; populate it with the host seams, then call {@link #build()}. */
+        /**
+         * Creates an empty builder; populate it with the host seams, then call {@link #build()}.
+         *
+         * @since 0.2.0
+         */
         public Builder() {}
 
         /**
@@ -478,6 +486,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
          *
          * @param value the host session injector
          * @return this builder
+         * @since 0.2.0
          */
         public Builder<H> sessionInjector(SessionInjector value) {
             this.sessionInjector = value;
@@ -490,6 +499,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
          *
          * @param value the host vault directory provider
          * @return this builder
+         * @since 0.2.0
          */
         public Builder<H> vaultDirectory(VaultDirectoryProvider value) {
             this.vaultDirectory = value;
@@ -501,6 +511,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
          *
          * @param value the host texture uploader
          * @return this builder
+         * @since 0.2.0
          */
         public Builder<H> textureUploader(TextureUploader<H> value) {
             this.textureUploader = value;
@@ -512,6 +523,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
          *
          * @param value the host main-thread executor
          * @return this builder
+         * @since 0.2.0
          */
         public Builder<H> mainThread(MainThreadExecutor value) {
             this.mainThread = value;
@@ -523,6 +535,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
          *
          * @param value the host toast sink
          * @return this builder
+         * @since 0.2.0
          */
         public Builder<H> toastSink(ToastSink value) {
             this.toastSink = value;
@@ -537,6 +550,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
          * @param value the host game-stats source
          * @return this builder
          * @throws IllegalStateException if a source for the same server id was already registered
+         * @since 0.3.0
          */
         public Builder<H> gameStatsSource(GameStatsSource value) {
             Objects.requireNonNull(value, "gameStatsSource");
@@ -554,6 +568,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
          *
          * @param value the host Microsoft authentication configuration
          * @return this builder
+         * @since 0.2.0
          */
         public Builder<H> microsoftAuth(MicrosoftAuthConfig value) {
             this.microsoftAuth = value;
@@ -670,6 +685,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
          *
          * @param value the store filename, or null/blank to keep the default
          * @return this builder
+         * @since 0.2.0
          */
         public Builder<H> storeFileName(String value) {
             this.storeFileName = value;
@@ -683,6 +699,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
          *
          * @param value the key-binding constant, or null/blank to keep the default
          * @return this builder
+         * @since 0.2.0
          */
         public Builder<H> storeKeyBinding(String value) {
             this.storeKeyBinding = value;
@@ -695,6 +712,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
          *
          * @param value the secret-store filename, or null/blank to keep the default
          * @return this builder
+         * @since 0.2.0
          */
         public Builder<H> secretsFileName(String value) {
             this.secretsFileName = value;
@@ -708,6 +726,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
          *
          * @param value the secret-store key-binding constant, or null/blank to keep the default
          * @return this builder
+         * @since 0.2.0
          */
         public Builder<H> secretsKeyBinding(String value) {
             this.secretsKeyBinding = value;
@@ -778,6 +797,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
          * @throws NullPointerException if a required seam is missing
          * @throws AltsException of kind {@link AltsFailure.Kind#CONFLICT} if a store file is in use by another
          *     runtime, or {@link AltsFailure.Kind#STORAGE} if one cannot be locked
+         * @since 0.2.0
          */
         public AltsRuntime<H> build() {
             return new AltsRuntime<>(this);

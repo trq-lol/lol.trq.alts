@@ -104,6 +104,9 @@ tasks.named('test') {
     useJUnitPlatform()
     // ErrorKindMigrationTableTest reads the changelog's error-kind table, so a changed table reruns it.
     inputs.file('CHANGELOG.md').withPathSensitivity(PathSensitivity.RELATIVE)
+    // SinceTagsTest reads the main sources' Javadoc and the API dump's version.
+    inputs.dir('src/main/java').withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName('mainSources')
+    inputs.file('api/lol.trq.alts.api').withPathSensitivity(PathSensitivity.RELATIVE)
     // ModulePathConsumerTest compiles and runs a consumer module against the built jar and Gson's jar.
     def libraryJar = tasks.named('jar').flatMap { it.archiveFile }
     def runtimeJars = configurations.runtimeClasspath
@@ -209,6 +212,8 @@ def moduleTest = tasks.register('moduleTest', JavaExec) {
     def testOutput = sourceSets.test.output
     inputs.files(libraryJar, modules, testOutput).withPropertyName('modulePath')
     inputs.file('CHANGELOG.md').withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir('src/main/java').withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName('mainSources')
+    inputs.file('api/lol.trq.alts.api').withPathSensitivity(PathSensitivity.RELATIVE)
     def report = layout.buildDirectory.dir('test-results/moduleTest')
     outputs.dir(report).withPropertyName('reports')
     classpath = files()
@@ -233,9 +238,10 @@ def moduleTest = tasks.register('moduleTest', JavaExec) {
         def opens = (mainPackages + testPackages).collect { "--add-opens=lol.trq.alts/${it}=org.junit.platform.commons" }
         jvmArgs = [
                 '--module-path', ([libraryJar.get().asFile] + modules.files).join(File.pathSeparator),
-                '--add-modules', 'ALL-MODULE-PATH',
+                '--add-modules', 'ALL-MODULE-PATH,java.compiler,jdk.compiler',
                 '--patch-module', 'lol.trq.alts=' + testDirs.join(File.pathSeparator),
-                '--add-reads', 'lol.trq.alts=org.junit.jupiter.api',
+                // SinceTagsTest parses the sources with the compiler API.
+                '--add-reads', 'lol.trq.alts=org.junit.jupiter.api,java.compiler,jdk.compiler',
                 '-Dlol.trq.alts.expectModule=true',
         ] + opens
         args = [

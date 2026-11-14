@@ -146,6 +146,7 @@ public final class SyncReport {
      * The counts.
      *
      * @return a description
+     * @since 1.0.0
      */
     @Override
     public String toString() {

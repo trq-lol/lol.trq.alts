@@ -154,6 +154,7 @@ public final class OwnerIdentity {
      * The fingerprint only; never the phrase, the entropy or a key.
      *
      * @return a description
+     * @since 1.0.0
      */
     @Override
     public String toString() {

@@ -11,7 +11,7 @@ import lol.trq.alts.internal.crypto.Pbkdf2;
  * by design.
  *
  * @author trq
- * @since 0.2.0
+ * @since 0.2.0, moved from {@code lol.trq.alts.crypto} in 1.0.0
  */
 public final class RecoveryCode {
 
@@ -33,6 +33,7 @@ public final class RecoveryCode {
      * it to the user exactly once; it is never stored in plaintext.
      *
      * @return the formatted recovery code
+     * @since 0.2.0
      */
     public static String newCode() {
         byte[] bytes = new byte[CODE_BYTES];

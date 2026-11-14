@@ -7,13 +7,22 @@ import java.time.Instant;
  * millisecond-critical; a claim that needs the sub-second edge wants {@link NtpTimeSource} instead.
  *
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public final class SystemTimeSource implements TimeSource {
 
-    /** Creates a source reading the OS clock. */
+    /**
+     * Creates a source reading the OS clock.
+     *
+     * @since 0.12.0
+     */
     public SystemTimeSource() {}
 
+    /**
+     * {@inheritDoc}
+     *
+     * @since 0.11.0
+     */
     @Override
     public Instant now() {
         return Instant.now();

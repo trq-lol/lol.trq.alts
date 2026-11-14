@@ -14,22 +14,40 @@ import java.util.regex.Pattern;
  */
 public enum CredentialKind {
 
-    /** A Microsoft OAuth refresh token, possibly prefixed with a name or a bearer marker. */
+    /**
+     * A Microsoft OAuth refresh token, possibly prefixed with a name or a bearer marker.
+     *
+     * @since 0.9.0
+     */
     REFRESH_TOKEN,
 
-    /** A Minecraft services session token — a JWT. */
+    /**
+     * A Minecraft services session token — a JWT.
+     *
+     * @since 0.9.0
+     */
     SESSION_TOKEN,
 
-    /** Exported browser cookies, in any of the shapes the cookie route reads. */
+    /**
+     * Exported browser cookies, in any of the shapes the cookie route reads.
+     *
+     * @since 0.9.0
+     */
     COOKIE_TEXT,
 
     /**
      * A bare username, for an offline account. Only a line that is a valid Minecraft name — three to
      * sixteen letters, digits, or underscores — is taken for one.
+     *
+     * @since 0.9.0
      */
     OFFLINE_NAME,
 
-    /** Something this cannot place. Never guessed at. */
+    /**
+     * Something this cannot place. Never guessed at.
+     *
+     * @since 0.9.0
+     */
     UNKNOWN;
 
     /**

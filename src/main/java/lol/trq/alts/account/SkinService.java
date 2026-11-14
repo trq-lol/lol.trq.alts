@@ -7,7 +7,7 @@ import java.util.Optional;
  * Changes the account's skin.
  *
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public interface SkinService {
 
@@ -37,7 +37,7 @@ public interface SkinService {
      * @param model the arm model to render it with
      * @return the updated profile
      * @throws lol.trq.alts.AltsException if the token was refused or the service rejected the skin
-     * @since 1.0.0
+     * @since 0.11.0
      */
     PlayerProfile setFromUrl(String url, SkinModel model);
 
@@ -54,7 +54,7 @@ public interface SkinService {
      * @return the updated profile
      * @throws lol.trq.alts.AltsException of kind {@code INVALID_INPUT} if the bytes are not an uploadable skin
      *     (nothing was sent), or of the kind the refusal was if the service refused or failed
-     * @since 1.0.0
+     * @since 0.11.0
      */
     PlayerProfile upload(byte[] pngBytes, SkinModel model);
 
@@ -85,7 +85,7 @@ public interface SkinService {
      * Resets the skin to the default, removing any custom one.
      *
      * @throws lol.trq.alts.AltsException if the token was refused or the service failed
-     * @since 1.0.0
+     * @since 0.11.0
      */
     void reset();
 

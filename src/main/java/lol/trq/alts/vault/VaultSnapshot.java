@@ -194,6 +194,7 @@ public final class VaultSnapshot {
      * The repository, the pin and counts only; never a key or an account.
      *
      * @return a description
+     * @since 1.0.0
      */
     @Override
     public String toString() {

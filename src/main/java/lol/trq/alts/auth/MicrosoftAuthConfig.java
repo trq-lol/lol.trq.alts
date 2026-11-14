@@ -45,42 +45,90 @@ public record MicrosoftAuthConfig(
         @SerializedName("deviceCodeUrl") String deviceCodeUrl,
         @SerializedName("deviceTokenUrl") String deviceTokenUrl) {
 
-    /** Default OAuth scope for a Minecraft login. */
+    /**
+     * Default OAuth scope for a Minecraft login.
+     *
+     * @since 0.2.0
+     */
     public static final String DEFAULT_SCOPE = "XboxLive.signin XboxLive.offline_access";
 
-    /** Default loopback callback path — intentionally long to reduce accidental screen-share exposure. */
+    /**
+     * Default loopback callback path — intentionally long to reduce accidental screen-share exposure.
+     *
+     * @since 0.2.0
+     */
     public static final String DEFAULT_REDIRECT_PATH =
             "/in_game_account_switcher_long_enough_uri_to_prevent_accidental_leaks_on_screensharing_even_if_you_have_like_extremely_big_screen_though_it_might_not_mork_but_we_will_try_it_anyway_to_prevent_funny_things_from_happening_or_something";
 
-    /** Default OAuth authorize endpoint. */
+    /**
+     * Default OAuth authorize endpoint.
+     *
+     * @since 0.2.0
+     */
     public static final String DEFAULT_AUTHORIZE_URL = "https://login.live.com/oauth20_authorize.srf";
 
-    /** Default OAuth token endpoint. */
+    /**
+     * Default OAuth token endpoint.
+     *
+     * @since 0.2.0
+     */
     public static final String DEFAULT_TOKEN_URL = "https://login.live.com/oauth20_token.srf";
 
-    /** Default Xbox Live user-authentication endpoint. */
+    /**
+     * Default Xbox Live user-authentication endpoint.
+     *
+     * @since 0.2.0
+     */
     public static final String DEFAULT_XBOX_LIVE_AUTH_URL = "https://user.auth.xboxlive.com/user/authenticate";
 
-    /** Default XSTS authorization endpoint. */
+    /**
+     * Default XSTS authorization endpoint.
+     *
+     * @since 0.2.0
+     */
     public static final String DEFAULT_XSTS_AUTH_URL = "https://xsts.auth.xboxlive.com/xsts/authorize";
 
-    /** Default Minecraft services login-with-Xbox endpoint. */
+    /**
+     * Default Minecraft services login-with-Xbox endpoint.
+     *
+     * @since 0.2.0
+     */
     public static final String DEFAULT_MINECRAFT_LOGIN_URL =
             "https://api.minecraftservices.com/authentication/login_with_xbox";
 
-    /** Default Minecraft services profile endpoint. */
+    /**
+     * Default Minecraft services profile endpoint.
+     *
+     * @since 0.2.0
+     */
     public static final String DEFAULT_MINECRAFT_PROFILE_URL = "https://api.minecraftservices.com/minecraft/profile";
 
-    /** Prefix marking an OAuth 2.0 access token as delegated when it is exchanged at Xbox Live. */
+    /**
+     * Prefix marking an OAuth 2.0 access token as delegated when it is exchanged at Xbox Live.
+     *
+     * @since 0.7.0
+     */
     public static final String DEFAULT_RPS_TICKET_PREFIX = "d=";
 
-    /** The scope a legacy MSA application authenticates Xbox Live with. */
+    /**
+     * The scope a legacy MSA application authenticates Xbox Live with.
+     *
+     * @since 0.7.0
+     */
     public static final String LEGACY_MSA_SCOPE = "service::user.auth.xboxlive.com::MBI_SSL";
 
-    /** The redirect a legacy MSA application's token grant must declare. */
+    /**
+     * The redirect a legacy MSA application's token grant must declare.
+     *
+     * @since 0.7.0
+     */
     public static final String LEGACY_MSA_REDIRECT_URI = "https://login.live.com/oauth20_desktop.srf";
 
-    /** Prefix marking a legacy MSA access token as an RPS ticket proper. */
+    /**
+     * Prefix marking a legacy MSA access token as an RPS ticket proper.
+     *
+     * @since 0.7.0
+     */
     public static final String LEGACY_MSA_RPS_TICKET_PREFIX = "t=";
 
     /**
@@ -100,7 +148,11 @@ public record MicrosoftAuthConfig(
     public static final String DEFAULT_DEVICE_TOKEN_URL =
             "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
 
-    /** Validates the required client id and substitutes defaults for any blank optional. */
+    /**
+     * Validates the required client id and substitutes defaults for any blank optional.
+     *
+     * @since 0.12.0
+     */
     public MicrosoftAuthConfig {
         if (clientId == null || clientId.isBlank()) {
             throw new IllegalArgumentException("Microsoft clientId is required (supply your own Azure app id)");
@@ -135,7 +187,7 @@ public record MicrosoftAuthConfig(
      * @param minecraftProfileUrl the Minecraft services profile endpoint
      * @param redirectUri the {@code redirect_uri} the refresh grant must carry, or null to omit it
      * @param rpsTicketPrefix the prefix the Microsoft access token carries into the Xbox Live RPS ticket
-     * @since 0.12.0
+     * @since 0.7.0
      */
     public MicrosoftAuthConfig(
             String clientId,
@@ -170,6 +222,7 @@ public record MicrosoftAuthConfig(
      *
      * @param clientId the host's Azure application client id; required
      * @return a fully-defaulted config
+     * @since 0.2.0
      */
     public static MicrosoftAuthConfig of(String clientId) {
         return new MicrosoftAuthConfig(clientId, null, null, null, null, null, null, null, null, null, null);
@@ -237,6 +290,7 @@ public record MicrosoftAuthConfig(
      *
      * @param value the new scope, or null/blank to keep the default
      * @return a copy with the scope replaced
+     * @since 0.2.0
      */
     public MicrosoftAuthConfig withScope(String value) {
         return new MicrosoftAuthConfig(
@@ -260,6 +314,7 @@ public record MicrosoftAuthConfig(
      *
      * @param value the new redirect path, or null/blank to keep the default
      * @return a copy with the redirect path replaced
+     * @since 0.2.0
      */
     public MicrosoftAuthConfig withRedirectPath(String value) {
         return new MicrosoftAuthConfig(
@@ -289,6 +344,7 @@ public record MicrosoftAuthConfig(
      * @param minecraftLoginUrl the Minecraft services login-with-Xbox endpoint
      * @param minecraftProfileUrl the Minecraft services profile endpoint
      * @return a copy with the endpoints replaced
+     * @since 0.2.0
      */
     public MicrosoftAuthConfig withEndpoints(
             String authorizeUrl,

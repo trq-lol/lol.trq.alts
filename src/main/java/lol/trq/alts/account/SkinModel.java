@@ -7,15 +7,23 @@ import com.google.gson.annotations.SerializedName;
  * {@code slim} (3px arms, "Alex"); a skin uploaded with the wrong one renders with mismatched arms.
  *
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public enum SkinModel {
 
-    /** The 4-pixel-arm model. The wire value is {@code CLASSIC} on a read and {@code classic} on a write. */
+    /**
+     * The 4-pixel-arm model. The wire value is {@code CLASSIC} on a read and {@code classic} on a write.
+     *
+     * @since 0.11.0
+     */
     @SerializedName("CLASSIC")
     CLASSIC("classic"),
 
-    /** The 3-pixel-arm model. */
+    /**
+     * The 3-pixel-arm model.
+     *
+     * @since 0.11.0
+     */
     @SerializedName("SLIM")
     SLIM("slim");
 
@@ -29,7 +37,7 @@ public enum SkinModel {
      * Returns the lowercase token the skin-change endpoint expects in its {@code variant} field.
      *
      * @return the API variant token
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public String apiVariant() {
         return apiVariant;

@@ -70,6 +70,7 @@ public record AltAccount(
      * @param accessToken the authentication token
      * @param type the authentication protocol used
      * @return a new account with {@code lastUsed} set to now
+     * @since 0.2.0
      */
     public static AltAccount of(String uuid, String username, String accessToken, AccountType type) {
         return new AltAccount(
@@ -81,6 +82,7 @@ public record AltAccount(
      * attribution.
      *
      * @return a copy stamped as used now
+     * @since 0.2.0
      */
     public AltAccount usedNow() {
         return new AltAccount(
@@ -103,6 +105,7 @@ public record AltAccount(
      *
      * @param byMember the member id (Ed25519 identity) that used the account, or {@code null}
      * @return a copy stamped as used now by {@code byMember}
+     * @since 0.2.0
      */
     public AltAccount usedNow(String byMember) {
         return new AltAccount(
@@ -126,6 +129,7 @@ public record AltAccount(
      * @param serverId the server the ban applies to
      * @param ban the ban record, or {@code null} to clear this server's entry
      * @return a copy with {@code serverId}'s ban entry replaced
+     * @since 0.5.0
      */
     public AltAccount withBan(String serverId, BanInfo ban) {
         Map<String, BanInfo> updated = bans == null ? new LinkedHashMap<>() : new LinkedHashMap<>(bans);
@@ -179,6 +183,7 @@ public record AltAccount(
      * @param sourceClient the client (mod) the alt was added from, or {@code null} to clear
      * @param sourceUser the user within {@code sourceClient} that added it, or {@code null}
      * @return a copy carrying the given provenance
+     * @since 0.2.0
      */
     public AltAccount withSource(String sourceClient, String sourceUser) {
         return new AltAccount(
@@ -265,6 +270,7 @@ public record AltAccount(
      *
      * @param serverId the server to check
      * @return {@code true} if a ban record for {@code serverId} is present and flags the account banned
+     * @since 0.5.0
      */
     public boolean banned(String serverId) {
         BanInfo ban = bans == null ? null : bans.get(serverId);
@@ -275,6 +281,7 @@ public record AltAccount(
      * Returns whether this account is considered banned on any server.
      *
      * @return {@code true} if any server's ban record flags the account banned
+     * @since 0.2.0
      */
     public boolean banned() {
         return bans != null && bans.values().stream().anyMatch(b -> b != null && b.banned());
@@ -284,6 +291,7 @@ public record AltAccount(
      * Returns the set of server ids on which this account is considered banned.
      *
      * @return an unmodifiable set of banned server ids (empty if none)
+     * @since 0.5.0
      */
     public Set<String> bannedServers() {
         if (bans == null) {

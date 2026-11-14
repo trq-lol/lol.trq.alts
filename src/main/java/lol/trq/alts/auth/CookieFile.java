@@ -36,6 +36,8 @@ public final class CookieFile {
      * Largest cookie export accepted. Netscape exports of a full browser profile run to tens of
      * kilobytes; a megabyte is far past any real one and keeps a mistakenly picked archive or disk
      * image from being read into memory.
+     *
+     * @since 0.7.0
      */
     public static final long MAX_BYTES = 1L << 20;
 
@@ -66,6 +68,7 @@ public final class CookieFile {
      * @throws AltsException of kind {@link AltsFailure.Kind#INVALID_INPUT} if the file is missing, is not
      *     a regular file, is larger than {@link #MAX_BYTES}, holds no text, or cannot be read; the
      *     message names the file, never its path, and no exception carrying the path rides along
+     * @since 0.7.0
      */
     public static String read(Path file) {
         Objects.requireNonNull(file, "file");

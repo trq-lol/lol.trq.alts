@@ -43,7 +43,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * the clock.
  *
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public final class NtpTimeSource implements TimeSource {
 
@@ -169,6 +169,7 @@ public final class NtpTimeSource implements TimeSource {
      * with the offset it already has, which is zero until the first measurement lands.
      *
      * @return now, corrected by the last known offset
+     * @since 0.11.0
      */
     @Override
     public Instant now() {
@@ -186,7 +187,7 @@ public final class NtpTimeSource implements TimeSource {
      * measures in turn.
      *
      * @return true if the sync succeeded
-     * @since 1.0.0
+     * @since 0.11.0
      */
     public boolean sync() {
         measuring.lock();

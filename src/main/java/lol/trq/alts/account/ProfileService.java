@@ -8,7 +8,7 @@ import java.util.Optional;
  * chain performs is separate and internal; this is the whole picture a host shows.
  *
  * @author trq
- * @since 1.0.0
+ * @since 0.11.0
  */
 public interface ProfileService {
 
@@ -22,7 +22,7 @@ public interface ProfileService {
      * @return the profile
      * @throws lol.trq.alts.AltsException if the token was refused, the account has no profile, or the service
      *     failed
-     * @since 1.0.0
+     * @since 0.11.0
      */
     PlayerProfile fetch();
 

@@ -39,6 +39,7 @@ public record BulkEntryResult(
      *
      * @throws NullPointerException if {@code failure} is null, or a success carries no account
      * @throws IllegalArgumentException if a failure carries an account or entitlements
+     * @since 1.0.0
      */
     public BulkEntryResult {
         Objects.requireNonNull(failure, "failure");

@@ -51,12 +51,19 @@ public final class HostRef {
      *
      * @param o the other object
      * @return whether they are equal
+     * @since 1.0.0
      */
     @Override
     public boolean equals(Object o) {
         return o instanceof HostRef h && hostKey.equals(h.hostKey) && locator.equals(h.locator);
     }
 
+    /**
+     * Hashes what {@link #equals(Object)} compares.
+     *
+     * @return the hash
+     * @since 1.0.0
+     */
     @Override
     public int hashCode() {
         return Objects.hash(hostKey, locator);
@@ -66,6 +73,7 @@ public final class HostRef {
      * The locator and the key.
      *
      * @return a description
+     * @since 1.0.0
      */
     @Override
     public String toString() {
