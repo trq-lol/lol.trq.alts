@@ -51,6 +51,30 @@ public enum XstsError {
     CHILD_ACCOUNT(2148916238L),
 
     /**
+     * Xbox Live has banned the account for breaking its rules. Nothing the library or the host does
+     * changes that; the user takes it up with Xbox.
+     *
+     * @since 1.0.0
+     */
+    ACCOUNT_BANNED(2148916227L),
+
+    /**
+     * The account is restricted from Xbox Live, typically by family or parental settings. Whoever
+     * manages those settings lifts the restriction.
+     *
+     * @since 1.0.0
+     */
+    ACCOUNT_RESTRICTED(2148916229L),
+
+    /**
+     * The account has not accepted the Xbox Live terms of use. The user signs in once at xbox.com and
+     * accepts them.
+     *
+     * @since 1.0.0
+     */
+    TERMS_NOT_ACCEPTED(2148916234L),
+
+    /**
      * An {@code XErr} this release does not recognise.
      *
      * @since 0.11.0

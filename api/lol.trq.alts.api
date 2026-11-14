@@ -533,11 +533,14 @@ lol.trq.alts.auth.MicrosoftAuthConfig method public lol.trq.alts.auth.MicrosoftA
 lol.trq.alts.auth.MicrosoftAuthConfig method public static lol.trq.alts.auth.MicrosoftAuthConfig lol.trq.alts.auth.MicrosoftAuthConfig.legacyMsa(java.lang.String)
 lol.trq.alts.auth.MicrosoftAuthConfig method public static lol.trq.alts.auth.MicrosoftAuthConfig lol.trq.alts.auth.MicrosoftAuthConfig.of(java.lang.String)
 lol.trq.alts.auth.MicrosoftAuthConfig type public final record MicrosoftAuthConfig
+lol.trq.alts.auth.XstsError constant ACCOUNT_BANNED
+lol.trq.alts.auth.XstsError constant ACCOUNT_RESTRICTED
 lol.trq.alts.auth.XstsError constant ADULT_VERIFICATION_REQUIRED
 lol.trq.alts.auth.XstsError constant ADULT_VERIFICATION_REQUIRED_ALT
 lol.trq.alts.auth.XstsError constant CHILD_ACCOUNT
 lol.trq.alts.auth.XstsError constant NO_XBOX_ACCOUNT
 lol.trq.alts.auth.XstsError constant REGION_BLOCKED
+lol.trq.alts.auth.XstsError constant TERMS_NOT_ACCEPTED
 lol.trq.alts.auth.XstsError constant UNKNOWN
 lol.trq.alts.auth.XstsError method public long lol.trq.alts.auth.XstsError.code()
 lol.trq.alts.auth.XstsError method public static lol.trq.alts.auth.XstsError lol.trq.alts.auth.XstsError.fromCode(long)

@@ -1,6 +1,7 @@
 package lol.trq.alts.internal.auth;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,6 +14,7 @@ import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure;
 import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.auth.LoginResult;
+import lol.trq.alts.auth.XstsError;
 import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.internal.net.TestTransports;
 import lol.trq.alts.model.LoginMode;
@@ -74,6 +76,20 @@ class SignInEdgeCaseTest {
         chain.body("/xsts", "{\"Token\":\"xsts\"}");
 
         assertEquals(Kind.PROTOCOL, renewalFailure().kind());
+    }
+
+    @Test
+    void theFurtherXstsCodesAreDecodedAndStayXboxDenied() {
+        for (long code : new long[] {2148916227L, 2148916229L, 2148916234L}) {
+            chain.fail("/xsts", 401, "{\"XErr\":" + code + "}");
+
+            AltsFailure failure = renewalFailure();
+
+            assertEquals(Kind.XBOX_DENIED, failure.kind(), String.valueOf(code));
+            XstsError decoded = failure.xstsError().orElseThrow();
+            assertFalse(decoded == XstsError.UNKNOWN, code + " is a stated reason, not an unknown one");
+            assertEquals(code, decoded.code());
+        }
     }
 
     @Test
