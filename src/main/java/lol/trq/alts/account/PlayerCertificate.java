@@ -9,6 +9,9 @@ import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.time.Instant;
 import java.util.Base64;
+import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure;
+import lol.trq.alts.AltsFailure.Kind;
 
 /**
  * An account's chat-signing key pair, from {@code POST /player/certificates}: an RSA key pair, the
@@ -42,22 +45,50 @@ public record PlayerCertificate(
      * Decodes the private key.
      *
      * @return the RSA private key
-     * @throws GeneralSecurityException if the PEM is absent or is not a PKCS#8 RSA key
+     * @throws AltsException of kind {@code INVALID_INPUT} if the PEM is absent or its body is not Base64,
+     *     or of kind {@code CRYPTO} if what it decodes to is not a PKCS#8 RSA key; the message never
+     *     quotes the key
      * @since 0.12.0
      */
-    public PrivateKey privateKey() throws GeneralSecurityException {
-        return KeyFactory.getInstance("RSA").generatePrivate(new PKCS8EncodedKeySpec(der(privateKeyPem)));
+    public PrivateKey privateKey() {
+        PKCS8EncodedKeySpec spec = new PKCS8EncodedKeySpec(der(privateKeyPem));
+        return decode("private key", factory -> factory.generatePrivate(spec));
     }
 
     /**
      * Decodes the public key.
      *
      * @return the RSA public key
-     * @throws GeneralSecurityException if the PEM is absent or is not an X.509 RSA key
+     * @throws AltsException of kind {@code INVALID_INPUT} if the PEM is absent or its body is not Base64,
+     *     or of kind {@code CRYPTO} if what it decodes to is not an X.509 RSA key
      * @since 0.12.0
      */
-    public PublicKey publicKey() throws GeneralSecurityException {
-        return KeyFactory.getInstance("RSA").generatePublic(new X509EncodedKeySpec(der(publicKeyPem)));
+    public PublicKey publicKey() {
+        X509EncodedKeySpec spec = new X509EncodedKeySpec(der(publicKeyPem));
+        return decode("public key", factory -> factory.generatePublic(spec));
+    }
+
+    /** One RSA key decoding, which may fail as the JDK's key factory does. */
+    @FunctionalInterface
+    private interface KeyDecoding<K> {
+        K decode(KeyFactory factory) throws GeneralSecurityException;
+    }
+
+    /**
+     * Runs one decoding, reporting a key the factory refuses as {@code CRYPTO} with the JDK's exception
+     * kept as the cause and its message, which may quote key material, not repeated.
+     *
+     * @param what which key, for the message
+     * @param decoding the decoding to run
+     * @param <K> the key type
+     * @return the key
+     */
+    private static <K> K decode(String what, KeyDecoding<K> decoding) {
+        try {
+            return decoding.decode(KeyFactory.getInstance("RSA"));
+        } catch (GeneralSecurityException refused) {
+            throw new AltsException(AltsFailure.of(Kind.CRYPTO, "Certificate " + what + " is not an RSA key"), refused);
+        }
     }
 
     /**
@@ -107,11 +138,11 @@ public record PlayerCertificate(
      *
      * @param pem the PEM text
      * @return the DER bytes
-     * @throws GeneralSecurityException if the PEM is absent or its body is not Base64
+     * @throws AltsException of kind {@code INVALID_INPUT} if the PEM is absent or its body is not Base64
      */
-    private static byte[] der(String pem) throws GeneralSecurityException {
+    private static byte[] der(String pem) {
         if (pem == null || pem.isBlank()) {
-            throw new GeneralSecurityException("no key present");
+            throw new AltsException(Kind.INVALID_INPUT, "Certificate: no key present");
         }
         StringBuilder body = new StringBuilder();
         for (String line : pem.split("\\R")) {
@@ -123,7 +154,7 @@ public record PlayerCertificate(
         try {
             return Base64.getDecoder().decode(body.toString());
         } catch (IllegalArgumentException notBase64) {
-            throw new GeneralSecurityException("key is not valid PEM");
+            throw new AltsException(Kind.INVALID_INPUT, "Certificate: key is not valid PEM");
         }
     }
 }

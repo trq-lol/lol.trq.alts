@@ -47,6 +47,7 @@ part of a result. The [Error kinds](#error-kinds) table below maps every former 
 | `SkinValidationException` and its `Reason` | `SkinService.validate(bytes)` returning a `SkinProblem` (same constants); an upload throws `AltsException` of kind `INVALID_INPUT` |
 | `CryptoException`, `VaultException` | `AltsException` of kind `CRYPTO`, `INVALID_INPUT` or `PROTOCOL` |
 | `CookieFile.read`'s `IOException` | `AltsException` of kind `INVALID_INPUT` |
+| `PlayerCertificate.privateKey()`, `publicKey()` throwing `GeneralSecurityException` | the same calls, throwing `AltsException`: `INVALID_INPUT` for an absent or non-Base64 PEM, `CRYPTO` for one that decodes to no RSA key; drop the `catch (GeneralSecurityException e)` |
 | `NameChangeResult` and `ProfileCreationResult` outcomes `NOT_ENTITLED`, `UNAUTHORIZED`, `RATE_LIMITED` | `FAILED`, with the kind on `failure()` |
 | `ClaimResult.StopReason.RATE_LIMITED`, `UNKNOWN`; `ClaimResult.rateLimited()` | `TERMINAL_FAILURE`, with the kind on `failure()` |
 | `new ClaimResult(claimed, attempts, finalResult)`, `new ClaimResult(claimed, attempts, finalResult, stopReason)` | `new ClaimResult(claimed, attempts, finalResult, stopReason, failure)` |
@@ -365,7 +366,9 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   carries the failure and its wait; an unreachable service is a `FAILED` result, no longer an
   exception. `ClaimResult` gains `failure()`, present exactly on `TERMINAL_FAILURE`, which now also
   ends a run that met a rate limit or a closed runtime. The account services, `ProfileLookupService`
-  and `SkinService` throw `AltsException` and declare no checked exception. The stores report
+  and `SkinService` throw `AltsException` and declare no checked exception, and so do
+  `PlayerCertificate.privateKey()` and `publicKey()`, which threw the checked
+  `GeneralSecurityException`. The stores report
   `loadError()`, `saveError()` and `loadWarning()` as `Optional<AltsFailure>` of kind `STORAGE`. Read
   `failure().map(AltsFailure::kind)` where you read a reason, `failure().flatMap(AltsFailure::retryAfter)`
   where you read `retryAfter()`, and `failure().flatMap(AltsFailure::xstsError)` where you read

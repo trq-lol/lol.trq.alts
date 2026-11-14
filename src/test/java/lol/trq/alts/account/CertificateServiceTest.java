@@ -156,10 +156,26 @@ class CertificateServiceTest {
         PlayerCertificate broken = new PlayerCertificate("not a key", "%%%", "sig", null, null, null);
         PlayerCertificate absent = new PlayerCertificate(null, null, "sig", null, null, null);
 
-        assertThrows(GeneralSecurityException.class, broken::privateKey);
-        assertThrows(GeneralSecurityException.class, broken::publicKey);
-        assertThrows(GeneralSecurityException.class, absent::privateKey);
+        assertEquals(Kind.INVALID_INPUT, kindThrownBy(broken::privateKey), "PEM that is not Base64");
+        assertEquals(Kind.INVALID_INPUT, kindThrownBy(broken::publicKey));
+        assertEquals(Kind.INVALID_INPUT, kindThrownBy(absent::privateKey), "no PEM at all");
+        assertEquals(Kind.INVALID_INPUT, kindThrownBy(absent::publicKey));
         assertFalse(absent.toString().contains("<redacted>"), "an absent key is shown as absent");
+    }
+
+    /** A PEM that decodes, but not to a key, is a key that did not decode: CRYPTO, unchecked. */
+    @Test
+    void aPemThatHoldsNoKeyIsACryptoFailure() {
+        String garbage = "-----BEGIN RSA PRIVATE KEY-----\n"
+                + Base64.getEncoder().encodeToString(new byte[64]) + "\n-----END RSA PRIVATE KEY-----";
+        PlayerCertificate unusable = new PlayerCertificate(garbage, garbage, "sig", null, null, null);
+
+        assertEquals(Kind.CRYPTO, kindThrownBy(unusable::privateKey));
+        assertEquals(Kind.CRYPTO, kindThrownBy(unusable::publicKey));
+    }
+
+    private static Kind kindThrownBy(org.junit.jupiter.api.function.Executable decode) {
+        return assertThrows(AltsException.class, decode).failure().kind();
     }
 
     @Test
