@@ -150,14 +150,14 @@ public final class SharedVaultExample {
 
     private static SharedVault resumeOwner(AltsRuntime<?> alts) {
         HostSecrets secrets = alts.secrets();
-        byte[] entropy = Base64.getDecoder().decode(secrets.get(OWNER_ENTROPY));
+        byte[] entropy = Base64.getDecoder().decode(secrets.find(OWNER_ENTROPY).orElseThrow());
         OwnerIdentity owner;
         try {
             owner = OwnerIdentity.fromEntropy(entropy);
         } finally {
             Arrays.fill(entropy, (byte) 0);
         }
-        VaultSnapshot snapshot = VaultSnapshot.fromJson(secrets.get(SNAPSHOT));
+        VaultSnapshot snapshot = VaultSnapshot.fromJson(secrets.find(SNAPSHOT).orElseThrow());
         VaultHost home = alts.vault().connect(snapshot).join(); // the home host, by the key it had
         return SharedVault.resume(home, owner, snapshot).join();
     }
