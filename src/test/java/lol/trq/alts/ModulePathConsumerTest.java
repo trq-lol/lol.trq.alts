@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
@@ -165,6 +166,9 @@ class ModulePathConsumerTest {
                 ModuleFinder.of(libraryJar()).find("lol.trq.alts").orElseThrow().descriptor();
 
         assertFalse(descriptor.isAutomatic(), "the jar carries a module descriptor");
+        String version = System.getProperty("lol.trq.alts.version");
+        assertNotNull(version, "lol.trq.alts.version is set by the Gradle test task");
+        assertEquals(Optional.of(version), descriptor.rawVersion(), "the descriptor records the release");
         Set<String> exported = descriptor.exports().stream()
                 .filter(e -> !e.isQualified())
                 .map(ModuleDescriptor.Exports::source)

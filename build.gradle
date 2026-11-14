@@ -52,6 +52,12 @@ tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
 
+// The module descriptor records the release, so `jar --describe-module` and a module layer show
+// lol.trq.alts@<version>.
+tasks.named('compileJava', JavaCompile) {
+    options.javaModuleVersion = provider { project.version.toString() }
+}
+
 tasks.withType(Javadoc).configureEach {
     options.encoding = 'UTF-8'
 }
@@ -110,10 +116,12 @@ tasks.named('test') {
     // ModulePathConsumerTest compiles and runs a consumer module against the built jar and Gson's jar.
     def libraryJar = tasks.named('jar').flatMap { it.archiveFile }
     def runtimeJars = configurations.runtimeClasspath
+    def releaseVersion = project.version.toString()
     inputs.file(libraryJar).withPropertyName('moduleJar').withNormalizer(ClasspathNormalizer)
     jvmArgumentProviders.add({
         def gson = runtimeJars.files.find { it.name.startsWith('gson-') && it.name.endsWith('.jar') }
-        ["-Dlol.trq.alts.moduleJar=${libraryJar.get().asFile}", "-Dlol.trq.alts.gsonJar=${gson}"]
+        ["-Dlol.trq.alts.moduleJar=${libraryJar.get().asFile}", "-Dlol.trq.alts.gsonJar=${gson}",
+         "-Dlol.trq.alts.version=${releaseVersion}"]
     } as CommandLineArgumentProvider)
 }
 

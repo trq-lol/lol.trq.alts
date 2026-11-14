@@ -299,8 +299,8 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   `account`, `auth`, `bulk`, `cache`, `model`, `net`, `skin`, `spi`, `store`, `time` and `vault`
   packages, and nothing under `lol.trq.alts.internal`; it `requires transitive com.google.gson`, and
   requires `java.desktop` and `jdk.httpserver`, which the browser sign-in and the default avatar source
-  already used. On the module path a host reads only the exported packages. On the class path nothing
-  changes for a host that kept to the API.
+  already used. The descriptor records the release (`lol.trq.alts@1.0.0`). On the module path a host
+  reads only the exported packages. On the class path nothing changes for a host that kept to the API.
 - **A compatibility gate.** `api/lol.trq.alts.api` is the committed dump of the exported API, and the
   build's `apiCheck` fails a change that removes or alters any of it outside a new major version, so the
   1.x surface stays what 1.0.0 promises. Internal packages are outside it.
