@@ -8,6 +8,9 @@ Thanks for your interest in contributing!
 2. Ensure you have **JDK 25** installed.
 3. Build: `./gradlew build`.
 
+`gradlew.bat` is not tracked. On Windows, run `./gradlew` from Git Bash or WSL, or regenerate the batch
+script with `gradle wrapper`; `.gitignore` keeps it out of commits.
+
 ## Development workflow
 
 - **Format before committing:** `./gradlew spotlessApply`. CI rejects unformatted code.
