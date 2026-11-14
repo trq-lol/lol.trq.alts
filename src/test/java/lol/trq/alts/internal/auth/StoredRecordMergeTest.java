@@ -97,7 +97,7 @@ class StoredRecordMergeTest {
 
         BulkReport report = bulk.refreshAll(
                         List.of(snapshot),
-                        new BulkOptions(1, Duration.ofMillis(50), 2, Duration.ofSeconds(2), true),
+                        BulkOptions.of(1, Duration.ofMillis(50), 2, Duration.ofSeconds(2), true),
                         banAsItStarts)
                 .report()
                 .get(30, TimeUnit.SECONDS);

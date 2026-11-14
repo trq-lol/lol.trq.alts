@@ -1,63 +1,53 @@
 package lol.trq.alts.bulk;
 
 import java.time.Duration;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
  * How a bulk run should pace itself.
  *
- * @param concurrency how many entries may be in flight at once
- * @param minSpacing the least time between two entries <em>starting</em>
- * @param maxRetries how many times a retryable failure is retried, beyond the first attempt
- * @param retryBaseDelay the delay a retry grows from when the service asked for nothing specific
- * @param stopOnRateLimit whether a rate limit ends the run rather than being waited out; a limit counts
- *     whether or not the service said how long to wait
- * @param routeTag the route tag an import's sign-ins carry, on every request, to the proxy provider, or
- *     empty for none; see {@link #withRouteTag(String)}. Added in 1.0.0
+ * <p>A final class rather than a record since 1.0.0, so a later setting is an addition and not a break:
+ * start from {@link #defaults()} or {@link #of}, and derive copies with the {@code withX} methods. Two options are
+ * equal when every setting is.
+ *
  * @author trq
  * @since 0.9.0
  */
-public record BulkOptions(
-        int concurrency,
-        Duration minSpacing,
-        int maxRetries,
-        Duration retryBaseDelay,
-        boolean stopOnRateLimit,
-        Optional<String> routeTag) {
+public final class BulkOptions {
+
+    private final int concurrency;
+    private final Duration minSpacing;
+    private final int maxRetries;
+    private final Duration retryBaseDelay;
+    private final boolean stopOnRateLimit;
+    private final Optional<String> routeTag;
 
     /**
      * Validates the shape, since a zero concurrency would hang the run and a negative delay is a bug.
-     *
-     * @since 1.0.0
      */
-    public BulkOptions {
+    private BulkOptions(
+            int concurrency,
+            Duration minSpacing,
+            int maxRetries,
+            Duration retryBaseDelay,
+            boolean stopOnRateLimit,
+            Optional<String> routeTag) {
         if (concurrency < 1) {
             throw new IllegalArgumentException("concurrency must be at least 1");
         }
         if (maxRetries < 0) {
             throw new IllegalArgumentException("maxRetries cannot be negative");
         }
-        minSpacing = nonNegative(minSpacing);
-        retryBaseDelay = nonNegative(retryBaseDelay);
-        routeTag = routeTag == null ? Optional.empty() : routeTag;
         if (routeTag.isPresent() && routeTag.get().isBlank()) {
             throw new IllegalArgumentException("a route tag must not be blank");
         }
-    }
-
-    /**
-     * Creates options with no route tag: the shape before the tag existed.
-     *
-     * @param concurrency how many entries may be in flight at once
-     * @param minSpacing the least time between two entries starting
-     * @param maxRetries how many times a retryable failure is retried, beyond the first attempt
-     * @param retryBaseDelay the delay a retry grows from when the service asked for nothing specific
-     * @param stopOnRateLimit whether a rate limit ends the run rather than being waited out
-     * @since 0.9.0
-     */
-    public BulkOptions(
-            int concurrency, Duration minSpacing, int maxRetries, Duration retryBaseDelay, boolean stopOnRateLimit) {
-        this(concurrency, minSpacing, maxRetries, retryBaseDelay, stopOnRateLimit, Optional.empty());
+        this.concurrency = concurrency;
+        this.minSpacing = nonNegative(minSpacing);
+        this.maxRetries = maxRetries;
+        this.retryBaseDelay = nonNegative(retryBaseDelay);
+        this.stopOnRateLimit = stopOnRateLimit;
+        this.routeTag = routeTag;
     }
 
     /**
@@ -72,7 +62,87 @@ public record BulkOptions(
      * @since 0.9.0
      */
     public static BulkOptions defaults() {
-        return new BulkOptions(4, Duration.ofMillis(250), 2, Duration.ofSeconds(2), true);
+        return of(4, Duration.ofMillis(250), 2, Duration.ofSeconds(2), true);
+    }
+
+    /**
+     * Creates options with every pacing setting given and no route tag.
+     *
+     * @param concurrency how many entries may be in flight at once; at least 1
+     * @param minSpacing the least time between two entries starting; null or negative is zero
+     * @param maxRetries how many times a retryable failure is retried, beyond the first attempt; not negative
+     * @param retryBaseDelay the delay a retry grows from when the service asked for nothing specific; null or
+     *     negative is zero
+     * @param stopOnRateLimit whether a rate limit ends the run rather than being waited out
+     * @return the options
+     * @throws IllegalArgumentException if {@code concurrency} is below 1 or {@code maxRetries} is negative
+     * @since 1.0.0
+     */
+    public static BulkOptions of(
+            int concurrency, Duration minSpacing, int maxRetries, Duration retryBaseDelay, boolean stopOnRateLimit) {
+        return new BulkOptions(concurrency, minSpacing, maxRetries, retryBaseDelay, stopOnRateLimit, Optional.empty());
+    }
+
+    /**
+     * Returns how many entries may be in flight at once.
+     *
+     * @return the concurrency, at least 1
+     * @since 0.9.0
+     */
+    public int concurrency() {
+        return concurrency;
+    }
+
+    /**
+     * Returns the least time between two entries <em>starting</em>.
+     *
+     * @return the spacing, never negative
+     * @since 0.9.0
+     */
+    public Duration minSpacing() {
+        return minSpacing;
+    }
+
+    /**
+     * Returns how many times a retryable failure is retried, beyond the first attempt.
+     *
+     * @return the retry count, never negative
+     * @since 0.9.0
+     */
+    public int maxRetries() {
+        return maxRetries;
+    }
+
+    /**
+     * Returns the delay a retry grows from when the service asked for nothing specific.
+     *
+     * @return the base delay, never negative
+     * @since 0.9.0
+     */
+    public Duration retryBaseDelay() {
+        return retryBaseDelay;
+    }
+
+    /**
+     * Returns whether a rate limit ends the run rather than being waited out; a limit counts whether or not
+     * the service said how long to wait.
+     *
+     * @return whether the run stops on a rate limit
+     * @since 0.9.0
+     */
+    public boolean stopOnRateLimit() {
+        return stopOnRateLimit;
+    }
+
+    /**
+     * Returns the route tag an import's sign-ins carry, on every request, to the proxy provider; see
+     * {@link #withRouteTag(String)}.
+     *
+     * @return the tag, or empty for none
+     * @since 1.0.0
+     */
+    public Optional<String> routeTag() {
+        return routeTag;
     }
 
     /**
@@ -117,6 +187,48 @@ public record BulkOptions(
      */
     public BulkOptions withRouteTag(String tag) {
         return new BulkOptions(concurrency, minSpacing, maxRetries, retryBaseDelay, stopOnRateLimit, Optional.of(tag));
+    }
+
+    /**
+     * Returns whether {@code o} holds the same settings.
+     *
+     * @param o the object to compare
+     * @return true when every setting is equal
+     * @since 0.9.0
+     */
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof BulkOptions other
+                && concurrency == other.concurrency
+                && maxRetries == other.maxRetries
+                && stopOnRateLimit == other.stopOnRateLimit
+                && minSpacing.equals(other.minSpacing)
+                && retryBaseDelay.equals(other.retryBaseDelay)
+                && routeTag.equals(other.routeTag);
+    }
+
+    /**
+     * Returns a hash over every setting, consistent with {@link #equals(Object)}.
+     *
+     * @return the hash
+     * @since 0.9.0
+     */
+    @Override
+    public int hashCode() {
+        return Objects.hash(concurrency, minSpacing, maxRetries, retryBaseDelay, stopOnRateLimit, routeTag);
+    }
+
+    /**
+     * Returns every setting, in the form the record printed them.
+     *
+     * @return a description
+     * @since 0.9.0
+     */
+    @Override
+    public String toString() {
+        return "BulkOptions[concurrency=" + concurrency + ", minSpacing=" + minSpacing + ", maxRetries="
+                + maxRetries + ", retryBaseDelay=" + retryBaseDelay + ", stopOnRateLimit=" + stopOnRateLimit
+                + ", routeTag=" + routeTag + "]";
     }
 
     private static Duration nonNegative(Duration value) {

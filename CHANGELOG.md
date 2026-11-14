@@ -65,6 +65,7 @@ constructors are gone, and so are deconstruction patterns over them.
 | `new AltAccount(uuid, username, accessToken, type, lastUsed, lastUsedBy, bans, sourceClient, sourceUser, refreshToken, expiresAt)` | `AltAccount.builder(uuid, username, accessToken, type).lastUsed(..).lastUsedBy(..).bans(..).sourceClient(..).sourceUser(..).refreshToken(..).expiresAt(..).build()` (each setter optional), or `account.toBuilder()` to change several fields; the store file format is unchanged |
 | `new MicrosoftAuthConfig(...)` (thirteen or eleven arguments) | `MicrosoftAuthConfig.of(clientId)` or `legacyMsa(clientId)`, then `withScope`, `withRedirectPath`, `withEndpoints`, `withDeviceCodeEndpoints`, and the new `withRedirectUri` and `withRpsTicketPrefix` |
 | `new NetworkScope(purpose, uuid, username)`, `new NetworkScope(purpose, uuid, username, routeTag)` | `NetworkScope.of(purpose)` or `NetworkScope.forAccount(purpose, uuid, username)`, then `withRouteTag(tag)` |
+| `new BulkOptions(concurrency, minSpacing, maxRetries, retryBaseDelay, stopOnRateLimit)` | `BulkOptions.of(concurrency, minSpacing, maxRetries, retryBaseDelay, stopOnRateLimit)`, or `BulkOptions.defaults()` and the `withX` methods; a route tag with `withRouteTag(tag)` |
 
 **The shared vault: 0.4 to AVP 0.5.** 1.0 writes AVP 0.5 only, which is not wire compatible with 0.4
 and specifies no upgrade. A repository moves in five steps:
@@ -383,8 +384,9 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   reaches the `ProxyProvider` with that tag, and new `BulkOptions.withRouteTag(tag)` does the same for
   `importCredentials`. A host that pins accounts to proxies can now route a new account's first
   sign-in before any UUID exists. `routed` is abstract, so a host's own `AltLoginService`
-  implementation has to add it; `BulkOptions` gains a sixth component, `Optional<String> routeTag`, and
-  keeps its five-argument constructor. A blank tag is refused with `IllegalArgumentException` wherever
+  implementation has to add it. `BulkOptions` is a final class too, with `routeTag()`, and the new
+  `BulkOptions.of(...)` with the five pacing settings replaces its constructors. A blank tag is refused
+  with `IllegalArgumentException` wherever
   it is given: by `routed` or by `withRouteTag`.
 - **Request headers.** Besides a header holding a control character (0.12.0), `HttpTransport`'s
   header-taking methods now refuse a caller-supplied `Proxy-Authorization`, in any capitalisation, with

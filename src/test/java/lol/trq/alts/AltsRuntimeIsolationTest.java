@@ -312,7 +312,7 @@ class AltsRuntimeIsolationTest {
                 .importCredentials(
                         List.of("Alpha1", "Bravo2", "Charl3"),
                         LoginMode.ADD,
-                        new BulkOptions(1, Duration.ofMillis(500), 0, Duration.ofMillis(10), true),
+                        BulkOptions.of(1, Duration.ofMillis(500), 0, Duration.ofMillis(10), true),
                         null)
                 .report();
 

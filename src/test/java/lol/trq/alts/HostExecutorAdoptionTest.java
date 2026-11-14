@@ -142,7 +142,7 @@ class HostExecutorAdoptionTest {
         List<AltAccount> accounts = List.of(
                 AltAccount.of("00000000-0000-4000-8000-000000000001", "AltOne", "token", AccountType.MICROSOFT),
                 AltAccount.of("00000000-0000-4000-8000-000000000002", "AltTwo", "token", AccountType.MICROSOFT));
-        BulkOptions spaced = new BulkOptions(1, Duration.ofMillis(5), 0, Duration.ZERO, true);
+        BulkOptions spaced = BulkOptions.of(1, Duration.ofMillis(5), 0, Duration.ZERO, true);
 
         BulkReport report = bulk.entitlementsAll(accounts, spaced, BulkProgress.NONE)
                 .report()

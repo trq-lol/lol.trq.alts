@@ -33,7 +33,7 @@ import org.junit.jupiter.api.Test;
 @org.junit.jupiter.api.Timeout(value = 60, unit = TimeUnit.SECONDS)
 class BulkOperationsTest {
 
-    private static final BulkOptions FAST = new BulkOptions(4, Duration.ZERO, 2, Duration.ofMillis(1), true);
+    private static final BulkOptions FAST = BulkOptions.of(4, Duration.ZERO, 2, Duration.ofMillis(1), true);
 
     private static AltAccount account(int index) {
         return AltAccount.of("0000000-0000-4000-8000-" + index, "Alt" + index, "token", AccountType.MICROSOFT);
@@ -108,7 +108,7 @@ class BulkOperationsTest {
 
     @Test
     void spacingHoldsBetweenStarts() throws Exception {
-        BulkOptions spaced = new BulkOptions(1, Duration.ofMillis(30), 0, Duration.ZERO, true);
+        BulkOptions spaced = BulkOptions.of(1, Duration.ofMillis(30), 0, Duration.ZERO, true);
         BulkOperations bulk = bulkOver(account -> CompletableFuture.completedFuture(AccountStatus.valid(account)));
 
         long start = System.currentTimeMillis();
@@ -238,7 +238,7 @@ class BulkOperationsTest {
             }
             return CompletableFuture.completedFuture(AccountStatus.valid(account));
         });
-        BulkOptions patient = new BulkOptions(2, Duration.ZERO, 2, Duration.ofMillis(80), false);
+        BulkOptions patient = BulkOptions.of(2, Duration.ZERO, 2, Duration.ofMillis(80), false);
 
         BulkReport report = bulk.refreshAll(accounts(3), patient, BulkProgress.NONE)
                 .report()
@@ -538,7 +538,7 @@ class BulkOperationsTest {
 
     @Test
     void cancellingStopsStartingNewEntries() throws Exception {
-        BulkOptions slow = new BulkOptions(1, Duration.ofMillis(20), 0, Duration.ZERO, true);
+        BulkOptions slow = BulkOptions.of(1, Duration.ofMillis(20), 0, Duration.ZERO, true);
         BulkOperations bulk = bulkOver(account -> CompletableFuture.completedFuture(AccountStatus.valid(account)));
 
         BulkHandle handle = bulk.refreshAll(accounts(50), slow, BulkProgress.NONE);
@@ -834,7 +834,7 @@ class BulkOperationsTest {
     @Test
     void cancellingAnEntitlementSweepStopsStartingNewEntries() throws Exception {
         try (EntitlementServer server = new EntitlementServer()) {
-            BulkOptions slow = new BulkOptions(1, Duration.ofMillis(20), 0, Duration.ZERO, true);
+            BulkOptions slow = BulkOptions.of(1, Duration.ofMillis(20), 0, Duration.ZERO, true);
 
             BulkHandle handle = server.bulk().entitlementsAll(accounts(50), slow, BulkProgress.NONE);
             Thread.sleep(80);
