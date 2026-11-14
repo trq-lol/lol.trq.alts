@@ -19,8 +19,8 @@ that guide shows is a method here, one per section:
 - `manageAccount`, `readAttributes`, `claimAtDrop`: profile, entitlements, name change, player attributes
   and bans, and a scheduled name claim.
 - `lookUpPlayers`: anonymous lookup by name and by list, with the rate-limit branch.
-- `sharedVault`, `openPinned`, `createRepositories`: constructing the vault with an explicit key-binding
-  verifier, opening a repository against a stored rollback floor, and both refresh-token sharing policies.
+- `importLegacyRepository`, `shareRefreshTokens`: reading the accounts of a 0.4 repository with the
+  read-only importer, and turning refresh-token sharing on for an AVP 0.5 repository.
 - `readGameStats`: reading one server's stat chips.
 
 The file is compiled with `-Xlint:deprecation -Werror`, so it cannot use deprecated API.

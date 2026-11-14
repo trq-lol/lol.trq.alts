@@ -534,64 +534,44 @@ A 5xx or a dropped connection never costs the user their refresh token, while a 
 
 ## Shared vault
 
-The shared vault lets members share a set of accounts through a server that stores only ciphertext. `SharedVault` is a stateless facade doing client-side crypto; the network is a `VaultTransport` you implement. Read the threat model in [SECURITY.md](../SECURITY.md) before relying on it: it protects against a server that stores and relays faithfully, not against one working against its members.
+The shared vault lets members share a set of accounts through hosts that store only ciphertext. It speaks AVP 0.5: the owner signs every change to the members and the policy, every write is a commit a member signs, and the client verifies all of it itself, trusting no host. The whole flow (create, invite, join, sync) is compiled in [`SharedVaultExample`](../examples/SharedVaultExample.java). Read the threat model in [SECURITY.md](../SECURITY.md) before relying on it.
 
-Constructing the facade means answering "whose word do I take for another member's keys?". There is no default:
+### Carrying over a 0.4 repository
 
-```java
-// Member keys arrive through a server, so each one must carry a binding signed by an issuer the
-// host already trusts. A server that swaps a member's key cannot forge that signature.
-KeyBindingVerifier verifier = IssuerSignedKeyBindingVerifier.ofRawKey(issuerPublicKey);
-
-// The explicit alternative is KeyBindingVerifier.trustTransport(), which accepts served keys
-// as they are. Choose it only when the keys did not come from a server you would not trust
-// with the accounts themselves: you run the server, or the keys were compared out of band.
-return new SharedVault(new X25519HkdfAesGcmKeyWrap(), verifier);
-```
-
-The verifier runs before every wrap of the data key to another member, in `addMember(ctx, member, keyBindingSig)`, `rotateKey(ctx, alts, manifest)` and `removeMember(ctx, alts, manifest, removedMemberId)`. Compiled as `GettingStartedExample.sharedVault`.
-
-Open a repository against the rollback floor you stored last time, and store the new floor afterwards:
+1.0 no longer speaks the 0.4 vault. `LegacyVaultReader` is the one read-only path out of it: give it the manifest and envelope JSON exactly as the 0.4 host served them (fetch them with your own HTTP client, authenticating with `VaultIdentity.signChallenge`, or export them while you still run 0.12) and the member's identity, unlocked from its `WrappedIdentity` with the passphrase or the recovery code:
 
 ```java
-// RepoPin.none() the first time a repository is opened; whatever was stored after that.
-RepoPin stored = loadPin(manifest.repoId());
-
-RepoContext context = vault.openRepo(manifest, identity, stored);
-
-// Persist the floor the open just reached, merged so it can never move backwards. Do the same
-// whenever the context advances: after a pull, a push, or a key rotation.
-savePin(manifest.repoId(), stored.advancedTo(context.pin()));
-return context;
+try {
+    return LegacyVaultReader.read(manifestJson, envelopeJson, identity);
+} catch (AltsException e) {
+    switch (e.kind()) {
+        // The text the host saved is not JSON at all: fetch or export it again.
+        case INVALID_INPUT -> showError("That is not a saved 0.4 repository");
+        // Not this member's repository, or a manifest and envelope that do not belong together.
+        case PROTOCOL -> showError("This identity cannot read that repository");
+        // The key did not unwrap or the payload did not authenticate: wrong identity, or tampered.
+        case CRYPTO -> showError("The repository could not be decrypted");
+        default -> showError(e.getMessage());
+    }
+    return List.of();
+}
 ```
 
-Nothing in a served manifest is signed, so without a pin a server could hand back an earlier key epoch, one from before a member was removed. A `RepoPin` is two counters and no key, so it is safe to keep next to your other settings. Compiled as `GettingStartedExample.openPinned`.
+It never writes and never talks to a host. Nothing in a 0.4 repository is signed, so review the accounts before the owner writes them into a new AVP 0.5 repository and invites the members again. Compiled as `GettingStartedExample.importLegacyRepository`.
 
 ### Sharing policy
 
-A refresh token is a durable credential, so it does **not** travel into a shared repository by default. Opt in per repository at creation. Creating an identity and creating a repository both throw the checked `CryptoException`:
+A refresh token is a durable credential, so it does **not** travel into a shared repository by default. The owner turns sharing on in a new owner-signed state:
 
 ```java
-// The facade is stateless; the identity is the member's key pair, created once here and
-// unlocked from its stored form on later runs.
-VaultIdentity identity = VaultIdentity.create(passphrase);
+// Withholding is the default for a new repository.
+render(vault.sharesRefreshTokens() ? "sharing" : "withholding");
 
-// Withholds refresh tokens (the default).
-SharedVault.CreatedRepo repo = vault.createRepo(identity, alts);
-render(repo.manifest().repoId());
-
-// Shares them with every member of this repository.
-return vault.createRepo(identity, alts, true);
+// Owner only. What has been shared stays shared: turning it off later stops future sharing only.
+vault.setShareRefreshTokens(true).join();
 ```
 
-Here `alts` is the `List<AltAccount>` payload. Compiled as `GettingStartedExample.createRepositories`.
-
-The policy lives on the manifest and is enforced on both write and read. Know what that does and does not give you:
-
-- **It holds against members.** A peer running a modified build that pushes refresh tokens into a withholding repository achieves nothing: every other member strips them on read.
-- **It does not hold against the repository host.** The flag is plain manifest metadata that the server serves; it is neither signed nor bound into the payload AAD, so a malicious or compromised host can serve `shareRefreshTokens: true` to a repository that was created withholding, and members will believe it.
-
-**Opting in is effectively permanent.** `removeMember` and `rotateKey` re-key the repository so a removed member cannot read future payloads, but a refresh token that already reached a member's disk is a credential they hold outright. The only real revocation is at the identity provider: revoke the account's sessions and change its password.
+Compiled as `GettingStartedExample.shareRefreshTokens`. While the latest verified state withholds them, `refreshToken` and `expiresAt` are neither sent nor read, so a member running a modified build cannot push them in. **Opting in is effectively permanent** for what was shared: removing a member rotates the data key, but a refresh token that already reached a member's disk is a credential they hold outright. The only real revocation is at the identity provider: revoke the account's sessions and change its password.
 
 ## Game stats (optional)
 

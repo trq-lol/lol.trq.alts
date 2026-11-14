@@ -18,8 +18,6 @@ import lol.trq.alts.bulk.BulkHandle;
 import lol.trq.alts.bulk.BulkOptions;
 import lol.trq.alts.bulk.BulkProgress;
 import lol.trq.alts.bulk.BulkReport;
-import lol.trq.alts.crypto.CryptoException;
-import lol.trq.alts.crypto.X25519HkdfAesGcmKeyWrap;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.GameStats;
 import lol.trq.alts.model.LoginMode;
@@ -31,14 +29,9 @@ import lol.trq.alts.spi.ProxyProvider;
 import lol.trq.alts.spi.StoreKeyProvider;
 import lol.trq.alts.spi.ToastSink;
 import lol.trq.alts.store.AccountStore;
-import lol.trq.alts.vault.RepoContext;
-import lol.trq.alts.vault.RepoPin;
+import lol.trq.alts.vault.LegacyVaultReader;
 import lol.trq.alts.vault.SharedVault;
-import lol.trq.alts.vault.VaultException;
 import lol.trq.alts.vault.VaultIdentity;
-import lol.trq.alts.vault.transport.IssuerSignedKeyBindingVerifier;
-import lol.trq.alts.vault.transport.KeyBindingVerifier;
-import lol.trq.alts.vault.transport.VaultManifest;
 
 /**
  * The compiled companion to {@code docs/GETTING_STARTED.md}. Every snippet that guide shows is a method
@@ -386,73 +379,45 @@ public final class GettingStartedExample {
     }
 
     /**
-     * Section "Shared vault": constructing the facade with a deliberate answer to "whose word do I take
-     * for another member's keys?". There is no default: the data key is wrapped to whatever keys the
-     * verifier returns, so the choice decides whether a hostile server can read the repository.
+     * Section "Shared vault": reading the accounts of a repository of the 0.4 vault, which 1.0 no longer
+     * speaks, so the owner can carry them into a new AVP 0.5 repository. The importer only reads: it takes
+     * the two documents the 0.4 host served and this member's identity, and talks to nothing.
      *
-     * @param issuerPublicKey the raw Ed25519 public key of the service that signs members' key bindings
-     * @return the facade
-     * @throws CryptoException if the issuer key is not a valid Ed25519 public key
+     * @param identity this member's identity, unlocked from its stored form
+     * @param manifestJson the 0.4 manifest, as the 0.4 host served it
+     * @param envelopeJson the 0.4 envelope, as the 0.4 host served it
+     * @return the accounts, for the owner to review before writing them anywhere
      */
-    public static SharedVault sharedVault(byte[] issuerPublicKey) throws CryptoException {
-        // Member keys arrive through a server, so each one must carry a binding signed by an issuer the
-        // host already trusts. A server that swaps a member's key cannot forge that signature.
-        KeyBindingVerifier verifier = IssuerSignedKeyBindingVerifier.ofRawKey(issuerPublicKey);
-
-        // The explicit alternative is KeyBindingVerifier.trustTransport(), which accepts served keys
-        // as they are. Choose it only when the keys did not come from a server you would not trust
-        // with the accounts themselves: you run the server, or the keys were compared out of band.
-        return new SharedVault(new X25519HkdfAesGcmKeyWrap(), verifier);
+    public static List<AltAccount> importLegacyRepository(
+            VaultIdentity identity, String manifestJson, String envelopeJson) {
+        try {
+            return LegacyVaultReader.read(manifestJson, envelopeJson, identity);
+        } catch (AltsException e) {
+            switch (e.kind()) {
+                // The text the host saved is not JSON at all: fetch or export it again.
+                case INVALID_INPUT -> showError("That is not a saved 0.4 repository");
+                // Not this member's repository, or a manifest and envelope that do not belong together.
+                case PROTOCOL -> showError("This identity cannot read that repository");
+                // The key did not unwrap or the payload did not authenticate: wrong identity, or tampered.
+                case CRYPTO -> showError("The repository could not be decrypted");
+                default -> showError(e.getMessage());
+            }
+            return List.of();
+        }
     }
 
     /**
-     * Section "Shared vault": opening a repository against the rollback floor the host stored last
-     * time, and storing the new floor afterwards. Nothing in a served manifest is signed, so without
-     * this a server could hand back an earlier key epoch — one from before a member was removed.
+     * Section "Sharing policy": a repository withholds refresh tokens until its owner turns sharing on, in
+     * a new owner-signed state that every member verifies.
      *
-     * @param vault the facade from {@link #sharedVault}
-     * @param manifest the manifest the transport served
-     * @param identity this member's unlocked identity
-     * @return the working context
-     * @throws CryptoException if the data key cannot be unwrapped
-     * @throws VaultException if the manifest is older than the stored floor, or this member is not in it
+     * @param vault the owner's copy of the repository
      */
-    public static RepoContext openPinned(SharedVault vault, VaultManifest manifest, VaultIdentity identity)
-            throws CryptoException, VaultException {
-        // RepoPin.none() the first time a repository is opened; whatever was stored after that.
-        RepoPin stored = loadPin(manifest.repoId());
+    public static void shareRefreshTokens(SharedVault vault) {
+        // Withholding is the default for a new repository.
+        render(vault.sharesRefreshTokens() ? "sharing" : "withholding");
 
-        RepoContext context = vault.openRepo(manifest, identity, stored);
-
-        // Persist the floor the open just reached, merged so it can never move backwards. Do the same
-        // whenever the context advances: after a pull, a push, or a key rotation.
-        savePin(manifest.repoId(), stored.advancedTo(context.pin()));
-        return context;
-    }
-
-    /**
-     * Section "Sharing policy": creating a repository that withholds refresh tokens (the default) and
-     * one that shares them with every member. Both overloads throw the checked {@link CryptoException},
-     * as does creating the identity.
-     *
-     * @param vault the facade from {@link #sharedVault}
-     * @param passphrase the passphrase sealing the new identity's private material
-     * @param alts the initial alt payload
-     * @return the repository that shares refresh tokens
-     * @throws CryptoException if identity creation, key generation, or encryption fails
-     */
-    public static SharedVault.CreatedRepo createRepositories(
-            SharedVault vault, char[] passphrase, List<AltAccount> alts) throws CryptoException {
-        // The facade is stateless; the identity is the member's key pair, created once here and
-        // unlocked from its stored form on later runs.
-        VaultIdentity identity = VaultIdentity.create(passphrase);
-
-        // Withholds refresh tokens (the default).
-        SharedVault.CreatedRepo repo = vault.createRepo(identity, alts);
-        render(repo.manifest().repoId());
-
-        // Shares them with every member of this repository.
-        return vault.createRepo(identity, alts, true);
+        // Owner only. What has been shared stays shared: turning it off later stops future sharing only.
+        vault.setShareRefreshTokens(true).join();
     }
 
     /**
@@ -597,14 +562,6 @@ public final class GettingStartedExample {
          */
         byte[] loadOrCreate(String alias, int length) throws Exception;
     }
-
-    /** Stands in for the host reading the rollback floor it stored for a repository. */
-    private static RepoPin loadPin(String repoId) {
-        return RepoPin.none();
-    }
-
-    /** Stands in for the host storing a repository's rollback floor next to its other settings. */
-    private static void savePin(String repoId, RepoPin pin) {}
 
     /** Stands in for the host translating a {@link SessionData} into its platform's live session. */
     private static void installSession(SessionData session) {}
