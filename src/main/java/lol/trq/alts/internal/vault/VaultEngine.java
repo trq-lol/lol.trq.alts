@@ -278,6 +278,24 @@ public final class VaultEngine {
         return async(host.transport().executor(), () -> openNow(host, me, repoId, null, clock));
     }
 
+    /**
+     * Joins a repository after the owner's invite (SPEC 8.1): {@link #open} from the joiner's home host, plus
+     * the SPEC 11.2 check that the genesis owner key matches the locator's owner fingerprint.
+     *
+     * @param host the joiner's home host
+     * @param me the joiner's member keys
+     * @param locator the owner's repo locator
+     * @param clock epoch milliseconds
+     * @return the vault; fails as {@link #open}, and with {@code PROTOCOL} for another owner key
+     */
+    public static CompletableFuture<VaultEngine> join(
+            HostClient host, MemberKeys me, RepoLocator locator, LongSupplier clock) {
+        Objects.requireNonNull(me, "me");
+        Objects.requireNonNull(locator, "locator");
+        String fingerprint = locator.ownerFingerprint();
+        return async(host.transport().executor(), () -> openNow(host, me, locator.repoId(), fingerprint, clock));
+    }
+
     private static VaultEngine openNow(
             HostClient host, MemberKeys me, String repoId, String ownerFingerprint, LongSupplier clock) {
         HostClient.PullAnswer answer = host.pull(me, repoId, 0);
@@ -344,6 +362,28 @@ public final class VaultEngine {
         v.mergeHeadsNow();
         v.publishView();
         return v;
+    }
+
+    /**
+     * The joiner's step 2 of SPEC 8.1: asks its home host to carry the repository ({@code prepareJoin}),
+     * checks the acceptance the host signed, and builds the invite token for the owner.
+     *
+     * @param host the joiner's home host
+     * @param me the joiner's member keys
+     * @param repoId the repository from the owner's repo locator
+     * @return the invite token; fails with {@code PROTOCOL} if the acceptance does not check
+     */
+    public static CompletableFuture<InviteToken> prepareJoin(HostClient host, MemberKeys me, String repoId) {
+        Objects.requireNonNull(me, "me");
+        Objects.requireNonNull(repoId, "repoId");
+        return async(
+                host.transport().executor(),
+                () -> new InviteToken(
+                        me.ed25519Public(),
+                        me.x25519Public(),
+                        host.key(),
+                        host.locator(),
+                        host.prepareJoin(me, repoId)));
     }
 
     // --- Accessors ---------------------------------------------------------------------------------
@@ -579,7 +619,7 @@ public final class VaultEngine {
      * readable.
      *
      * @return the report; fails with {@code PROTOCOL} for a state that does not verify or a rollback (and the
-     *     vault is unchanged), {@code INVALID_INPUT} once this member left, or the host's refusal
+     *     vault is unchanged), {@code INVALID_INPUT} after {@link #leave()}, or the host's refusal
      */
     public CompletableFuture<PullReport> pull() {
         return serial(() -> {
@@ -1089,6 +1129,27 @@ public final class VaultEngine {
                 }
                 return null;
             });
+            return null;
+        });
+    }
+
+    /**
+     * Leaves the repository (SPEC 8.4): sends a signed leave request and stops syncing at once; every later
+     * operation that syncs is refused.
+     *
+     * @return completes when the host stored the request; fails with {@code INVALID_INPUT} for the owner, and
+     *     with the host's refusal
+     */
+    public CompletableFuture<Void> leave() {
+        return serial(() -> {
+            requireSyncing();
+            if (owner()) {
+                throw VaultFailures.invalid("the owner cannot leave");
+            }
+            host.leave(me, Tokens.signLeave(chain.repoId(), clock.getAsLong(), me.seedRef()));
+            left = true;
+            heads = new ArrayList<>();
+            incoming = new ArrayList<>();
             return null;
         });
     }
