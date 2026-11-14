@@ -585,6 +585,9 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   whatever was current when it started, so a sign-in the user made while the import ran was undone.
   It also stamped every imported account as used. An import now never touches the current account
   and leaves a stored account's `lastUsed` as it was.
+- A successful answer that carried nothing usable was misreported: an XSTS `2xx` with no readable
+  body came back as `XBOX_DENIED` (with `XstsError.UNKNOWN`), and a profile naming a JSON `null` for
+  its name or id escaped the profile hop unclassified. Both are now `PROTOCOL`.
 
 ## [0.12.0] - 2026-11-12
 

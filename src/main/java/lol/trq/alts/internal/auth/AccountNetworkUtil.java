@@ -104,13 +104,23 @@ public final class AccountNetworkUtil {
                 http.getForStatus(profileUrl, Map.of("Authorization", "Bearer " + token), scope);
 
         JsonObject body = response.body();
-        if (response.successful() && body != null && body.has("name") && body.has("id")) {
-            return new ProfileLookup(
-                    response.status(),
-                    body.get("name").getAsString(),
-                    body.get("id").getAsString(),
-                    response.retryAfter());
+        String name = body == null ? null : text(body, "name");
+        String id = body == null ? null : text(body, "id");
+        if (response.successful() && name != null && id != null) {
+            return new ProfileLookup(response.status(), name, id, response.retryAfter());
         }
+        // A success naming nobody, a JSON null among them, is not found(): callers report it as PROTOCOL.
         return new ProfileLookup(response.status(), null, null, response.retryAfter());
+    }
+
+    /**
+     * Reads a field that must be a JSON string.
+     *
+     * @param body the response body
+     * @param key the field
+     * @return the value, or {@code null} when the field is absent, a JSON null, or not a primitive
+     */
+    private static String text(JsonObject body, String key) {
+        return body.has(key) && body.get(key).isJsonPrimitive() ? body.get(key).getAsString() : null;
     }
 }

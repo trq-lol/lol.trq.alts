@@ -814,8 +814,12 @@ public final class MicrosoftAuthUtil {
                     } catch (Exception transportFailure) {
                         throw unreachable("XSTS auth", transportFailure);
                     }
-                    if (!status.successful() || status.body() == null) {
+                    if (!status.successful()) {
                         throw xstsFailure(status);
+                    }
+                    if (status.body() == null) {
+                        // A success that carries no token is no verdict on the account.
+                        throw unexpected("XSTS auth", null);
                     }
                     JsonObject response = status.body();
                     return read(
