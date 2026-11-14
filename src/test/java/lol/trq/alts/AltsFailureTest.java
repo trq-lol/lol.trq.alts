@@ -110,6 +110,20 @@ class AltsFailureTest {
     }
 
     @Test
+    void aFailureIsAValueOverEveryField() {
+        AltsFailure denied = AltsFailure.xboxDenied("denied", XstsError.CHILD_ACCOUNT);
+
+        assertEquals(AltsFailure.xboxDenied("denied", XstsError.CHILD_ACCOUNT), denied);
+        assertEquals(AltsFailure.xboxDenied("denied", XstsError.CHILD_ACCOUNT).hashCode(), denied.hashCode());
+        assertFalse(denied.equals(AltsFailure.xboxDenied("denied", XstsError.UNKNOWN)));
+        assertFalse(denied.equals(denied.withMessage("other")));
+        assertEquals(
+                "AltsFailure[kind=XBOX_DENIED, message=denied, retryAfter=Optional.empty,"
+                        + " xstsError=Optional[CHILD_ACCOUNT], retryAt=Optional.empty]",
+                denied.toString());
+    }
+
+    @Test
     void anXboxReasonTravelsWithXboxDeniedOnly() {
         assertThrows(
                 IllegalArgumentException.class,

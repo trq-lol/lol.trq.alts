@@ -26,22 +26,20 @@ import lol.trq.alts.auth.XstsError;
  * kind and message are equal whenever they were made.
  *
  * <p>It is a value the library hands a host, not a wire DTO: it carries no {@code @SerializedName} and
- * the library never serializes it. A host that wants to persist one writes the parts it needs.
+ * the library never serializes it. A host that wants to persist one writes the parts it needs. It is a
+ * final class rather than a record, so a later field is an addition and not a break: build one with
+ * {@link #of}, {@link #rateLimited} or {@link #xboxDenied}. Two failures are equal when every field is.
  *
- * @param kind what kind of failure this is; the thing to branch on
- * @param message a short description built by the library, safe to show and to log
- * @param retryAfter how long the service asked the caller to wait before trying again, when it said
- * @param xstsError why Xbox Live refused the account; present only on {@link Kind#XBOX_DENIED}
- * @param retryAt when the stated wait ends; present exactly when {@code retryAfter} is
  * @author trq
  * @since 1.0.0
  */
-public record AltsFailure(
-        Kind kind,
-        String message,
-        Optional<Duration> retryAfter,
-        Optional<XstsError> xstsError,
-        Optional<Instant> retryAt) {
+public final class AltsFailure {
+
+    private final Kind kind;
+    private final String message;
+    private final Optional<Duration> retryAfter;
+    private final Optional<XstsError> xstsError;
+    private final Optional<Instant> retryAt;
 
     /**
      * What kind of failure happened. One enum for the whole library, so a host writes its {@code switch}
@@ -200,15 +198,21 @@ public record AltsFailure(
     }
 
     /**
-     * Checks the components: everything is required, an Xbox Live reason only travels with
+     * Checks the fields: everything is required, an Xbox Live reason only travels with
      * {@link Kind#XBOX_DENIED}, and the end of a wait is known exactly when a wait was stated.
+     * Package-private: the factories are the API, and a test of this package builds a failure whose wait
+     * ends at a chosen instant.
      *
-     * @throws NullPointerException if a component is null
+     * @throws NullPointerException if a field is null
      * @throws IllegalArgumentException if {@code xstsError} is present on another kind, {@code retryAfter}
      *     is negative, or {@code retryAt} is present without {@code retryAfter} or absent with it
-     * @since 1.0.0
      */
-    public AltsFailure {
+    AltsFailure(
+            Kind kind,
+            String message,
+            Optional<Duration> retryAfter,
+            Optional<XstsError> xstsError,
+            Optional<Instant> retryAt) {
         Objects.requireNonNull(kind, "kind");
         Objects.requireNonNull(message, "message");
         Objects.requireNonNull(retryAfter, "retryAfter");
@@ -223,6 +227,61 @@ public record AltsFailure(
         if (retryAt.isPresent() != retryAfter.isPresent()) {
             throw new IllegalArgumentException("the end of a wait is known exactly when a wait was stated");
         }
+        this.kind = kind;
+        this.message = message;
+        this.retryAfter = retryAfter;
+        this.xstsError = xstsError;
+        this.retryAt = retryAt;
+    }
+
+    /**
+     * Returns what kind of failure this is; the thing to branch on.
+     *
+     * @return the kind
+     * @since 1.0.0
+     */
+    public Kind kind() {
+        return kind;
+    }
+
+    /**
+     * Returns a short description built by the library, safe to show and to log.
+     *
+     * @return the message
+     * @since 1.0.0
+     */
+    public String message() {
+        return message;
+    }
+
+    /**
+     * Returns how long the service asked the caller to wait before trying again, when it said.
+     *
+     * @return the stated wait, or empty
+     * @since 1.0.0
+     */
+    public Optional<Duration> retryAfter() {
+        return retryAfter;
+    }
+
+    /**
+     * Returns why Xbox Live refused the account; present only on {@link Kind#XBOX_DENIED}.
+     *
+     * @return the Xbox Live reason, or empty
+     * @since 1.0.0
+     */
+    public Optional<XstsError> xstsError() {
+        return xstsError;
+    }
+
+    /**
+     * Returns when the stated wait ends; present exactly when {@link #retryAfter()} is.
+     *
+     * @return the end of the wait, or empty
+     * @since 1.0.0
+     */
+    public Optional<Instant> retryAt() {
+        return retryAt;
     }
 
     /**
@@ -336,5 +395,46 @@ public record AltsFailure(
                 retryAt.map(end -> !Instant.now().isBefore(end)).orElse(kind == Kind.NETWORK);
             default -> false;
         };
+    }
+
+    /**
+     * Returns whether {@code o} is a failure with every field equal to this one's.
+     *
+     * @param o the object to compare
+     * @return true when every field is equal
+     * @since 1.0.0
+     */
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof AltsFailure other
+                && kind == other.kind
+                && message.equals(other.message)
+                && retryAfter.equals(other.retryAfter)
+                && xstsError.equals(other.xstsError)
+                && retryAt.equals(other.retryAt);
+    }
+
+    /**
+     * Returns a hash over every field, consistent with {@link #equals(Object)}.
+     *
+     * @return the hash
+     * @since 1.0.0
+     */
+    @Override
+    public int hashCode() {
+        return Objects.hash(kind, message, retryAfter, xstsError, retryAt);
+    }
+
+    /**
+     * Returns every field, in the form the record printed them. The message is the library's own, so it
+     * is safe to log.
+     *
+     * @return a description
+     * @since 1.0.0
+     */
+    @Override
+    public String toString() {
+        return "AltsFailure[kind=" + kind + ", message=" + message + ", retryAfter=" + retryAfter + ", xstsError="
+                + xstsError + ", retryAt=" + retryAt + "]";
     }
 }

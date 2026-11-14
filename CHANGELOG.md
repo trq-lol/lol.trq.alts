@@ -213,7 +213,8 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
 ### Added
 
 - **One error model.** `lol.trq.alts.AltsFailure` is the one value that describes a failure anywhere in
-  the library: a `kind()` to branch on, a `message()` the library builds (never a transport exception's
+  the library (a final class, built by `of`, `rateLimited` and `xboxDenied`, so it can gain a field in a
+  1.x release): a `kind()` to branch on, a `message()` the library builds (never a transport exception's
   text, a token or a path), an `Optional<Duration> retryAfter()`, an `Optional<XstsError> xstsError()`
   (present only on `XBOX_DENIED`), and `Optional<Instant> retryAt()`, the instant a stated wait ends
   (present exactly when `retryAfter` is). `retryable()` honours a stated wait for every retryable kind:
