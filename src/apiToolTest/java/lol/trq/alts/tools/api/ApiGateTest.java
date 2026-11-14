@@ -197,6 +197,27 @@ class ApiGateTest {
     }
 
     @Test
+    void exportingAPackageBelowInternalFails() throws IOException {
+        // internal anywhere in the name marks the package, not only as its last segment
+        String module = "module fixture { exports fx; exports fx.internal.deep; }";
+        String deep = "package fx.internal.deep;\npublic class Impl { public void a() {} }\n";
+
+        ApiDump.Result dump = dump(module, Map.of("fx/Api.java", API_V1, "fx/internal/deep/Impl.java", deep));
+
+        assertTrue(
+                dump.problems().stream().anyMatch(p -> p.contains("exports an internal package: fx.internal.deep")),
+                dump.problems()::toString);
+        assertTrue(dump.lines().stream().noneMatch(l -> l.contains("fx.internal")), "it is still not dumped");
+    }
+
+    @Test
+    void aPreReleaseVersionHasItsMajor() {
+        assertEquals(2, ApiGate.major("2.0.0-rc1"));
+        assertEquals(1, ApiGate.major("1.4.0+build.7"));
+        assertEquals(0, ApiGate.major("0.12.0"));
+    }
+
+    @Test
     void anInternalTypeInAnExportedSignatureFails() throws IOException {
         String module = "module lol.trq.alts { exports lol.trq.alts; }";
         String api =
