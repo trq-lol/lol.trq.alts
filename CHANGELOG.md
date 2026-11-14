@@ -561,6 +561,13 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   seconds, or a date in the year 9999) overflowed the millisecond conversions downstream: a failure
   could not be built, and a paced bulk run was cut short instead of waiting. `AltsFailure.retryAt()`
   is held to `Instant.MAX`, and every wait saturates, as a backstop for a wait a host builds itself.
+- A renewal, a check and a username correction wrote the caller's whole copy of the account back to
+  the store. A copy older than the store undid what had changed since: a ban marked while a paced
+  `refreshAll` worked through its list was lost, and a stale copy put a refresh token the service had
+  rotated past back on disk. Each now writes only what it changed (the tokens and expiry, or the
+  name) onto the record the store holds, under the store's lock, and the renewed account it returns
+  is that record. A stated `invalid_grant` discards the stored refresh token only when it is the one
+  that was refused. An account the store does not hold is still never persisted.
 
 ## [0.12.0] - 2026-11-12
 

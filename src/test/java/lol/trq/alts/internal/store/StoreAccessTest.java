@@ -7,9 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.UnaryOperator;
 import lol.trq.alts.AltsRuntime;
 import lol.trq.alts.internal.ChildFirstLoader;
+import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.spi.StoreKeyProvider;
 import lol.trq.alts.store.AccountStore;
 import lol.trq.alts.store.HostSecrets;
@@ -41,6 +44,12 @@ class StoreAccessTest {
                     Path directory, String fileName, String keyBinding, StoreKeyProvider key, boolean migrate) {
                 reached.set(true);
                 return null;
+            }
+
+            @Override
+            public Optional<AltAccount> update(AccountStore store, String uuid, UnaryOperator<AltAccount> change) {
+                reached.set(true);
+                return Optional.empty();
             }
 
             @Override

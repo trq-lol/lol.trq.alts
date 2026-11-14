@@ -1,8 +1,11 @@
 package lol.trq.alts.store;
 
 import java.nio.file.Path;
+import java.util.Optional;
+import java.util.function.UnaryOperator;
 import lol.trq.alts.internal.store.StoreAccess;
 import lol.trq.alts.internal.store.StoreFile;
+import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.spi.StoreKeyProvider;
 
 /**
@@ -46,6 +49,11 @@ final class StoreBridge implements StoreAccess.Bridge {
             boolean migrateFromMachineKey) {
         return HostSecrets.open(
                 directory, fileName, keyBinding, keyProvider, migrateFromMachineKey, StoreFile.DEFAULT_WRITE_DELAY);
+    }
+
+    @Override
+    public Optional<AltAccount> update(AccountStore store, String uuid, UnaryOperator<AltAccount> change) {
+        return store.update(uuid, change);
     }
 
     @Override

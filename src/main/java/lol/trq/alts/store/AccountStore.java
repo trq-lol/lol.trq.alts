@@ -328,6 +328,37 @@ public final class AccountStore {
     }
 
     /**
+     * Applies {@code change} to the stored entry for {@code uuid}, under the store lock, and persists;
+     * the current account is changed the same way when it is the same one. The way a check or a renewal
+     * writes back what it learned: the change receives the record as the store holds it now and alters
+     * only what that operation found out, so a ban marked, or a token rotated, since the caller read its
+     * copy is kept. Reached from the sign-in chain through {@code StoreAccess}; not API.
+     *
+     * <p>Does nothing to the stored list when the store holds no entry for {@code uuid}: an account the
+     * store does not hold is never persisted (see {@link #updateCredentials}).
+     *
+     * @param uuid the dashed UUID of the account
+     * @param change derives the new record from the one held now
+     * @return the stored entry after the change, or empty when the store holds none for {@code uuid}
+     */
+    Optional<AltAccount> update(String uuid, UnaryOperator<AltAccount> change) {
+        Objects.requireNonNull(change, "change");
+        synchronized (lock) {
+            AltAccount[] changed = {null};
+            boolean stored = replace(uuid, held -> changed[0] = change.apply(held));
+            AltAccount current = currentAccount;
+            if (matches(current, uuid)) {
+                currentAccount = change.apply(current);
+            }
+            if (!stored) {
+                return Optional.empty();
+            }
+            scheduleSave();
+            return Optional.of(changed[0]);
+        }
+    }
+
+    /**
      * Discards the refresh token and expiry for the account with {@code uuid} and persists. Called when
      * the authentication service permanently rejects the token, so a spent credential is not retried or
      * left at rest. A no-op if the UUID is unknown.

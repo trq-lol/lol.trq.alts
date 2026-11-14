@@ -2,12 +2,16 @@ package lol.trq.alts.internal.store;
 
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.function.UnaryOperator;
+import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.spi.StoreKeyProvider;
 import lol.trq.alts.store.AccountStore;
 import lol.trq.alts.store.HostSecrets;
 
 /**
- * How the runtime opens and closes its stores without either operation being public on the store types.
+ * How the runtime opens and closes its stores, and the sign-in chain writes back what a check or a
+ * renewal changed, without any of these operations being public on the store types.
  * The store package installs the one {@link Bridge} when its types initialize, and {@link #install}
  * accepts no other: only the library's own bridge class, loaded by this class's own loader, and only
  * once. Not part of the library's API: a host gets its stores from {@code AltsRuntime#store()} and
@@ -115,6 +119,17 @@ public final class StoreAccess {
                 String keyBinding,
                 StoreKeyProvider keyProvider,
                 boolean migrateFromMachineKey);
+
+        /**
+         * Applies {@code change} to the stored record for {@code uuid} under the store's lock and
+         * persists: how the sign-in chain writes back only what a check or a renewal changed.
+         *
+         * @param store the store
+         * @param uuid the dashed UUID of the account
+         * @param change derives the new record from the one held now
+         * @return the stored record after the change, or empty when the store holds none for {@code uuid}
+         */
+        Optional<AltAccount> update(AccountStore store, String uuid, UnaryOperator<AltAccount> change);
 
         /**
          * Flushes and closes an account store, releasing its lock. Idempotent.

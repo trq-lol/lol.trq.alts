@@ -2,8 +2,10 @@ package lol.trq.alts.internal.auth;
 
 import java.time.Clock;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 import lol.trq.alts.AltsFailure;
 import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.auth.AccountStatus;
@@ -13,6 +15,7 @@ import lol.trq.alts.auth.MicrosoftAuthConfig;
 import lol.trq.alts.internal.auth.AccountNetworkUtil.ProfileLookup;
 import lol.trq.alts.internal.net.FailureText;
 import lol.trq.alts.internal.net.HttpTransport;
+import lol.trq.alts.internal.store.StoreAccess;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.net.NetworkScope;
@@ -176,22 +179,38 @@ public class AltAccountServiceImpl implements AltAccountService {
      * validated the token already carried the current name. A no-op when the name is unchanged or the
      * store does not hold the account.
      *
+     * <p>Only the name is written, onto the record the store holds now: the caller's copy may carry a
+     * refresh token that a renewal elsewhere has rotated past since, which must not go back on disk.
+     *
      * @param account the account being validated
      * @param currentUsername the username the profile endpoint returned
-     * @return the account carrying the current username
+     * @return the validated account carrying the current username
      */
     private AltAccount correctUsername(AltAccount account, String currentUsername) {
         if (currentUsername == null || currentUsername.equals(account.username())) {
             return account;
         }
-        AltAccount renamed = account.withUsername(currentUsername);
-        store.updateCredentials(renamed);
-        return renamed;
+        update(account.uuid(), held -> held.withUsername(currentUsername));
+        return account.withUsername(currentUsername);
     }
 
     /**
-     * Renews an account from its stored refresh token, persisting the rotated credentials. The renewed
-     * account is derived from the stored one, so bans, provenance, and shared attribution survive.
+     * Applies {@code change} onto the record the store holds for {@code uuid}, under the store's lock.
+     *
+     * @param uuid the account's dashed UUID
+     * @param change derives the new record from the one held now
+     * @return the stored record after the change, or empty when the store holds none
+     */
+    private Optional<AltAccount> update(String uuid, UnaryOperator<AltAccount> change) {
+        return StoreAccess.bridge().update(store, uuid, change);
+    }
+
+    /**
+     * Renews an account from its stored refresh token, persisting the rotated credentials. Only the
+     * tokens and the expiry are written, onto the record the store holds when the renewal lands, so a
+     * ban marked or a name corrected while it was in flight survives, as do provenance and shared
+     * attribution. The renewed account handed back is that stored record; for an account the store does
+     * not hold, it is the caller's copy with the new tokens.
      *
      * @param account the account to renew
      * @return a future holding the outcome
@@ -203,9 +222,9 @@ public class AltAccountServiceImpl implements AltAccountService {
         return microsoft
                 .authenticateWithRefreshToken(microsoftAuth, account.refreshToken(), scope)
                 .thenApply(profile -> {
-                    AltAccount renewed =
-                            account.withTokens(profile.accessToken(), profile.refreshToken(), profile.expiresAt());
-                    store.updateCredentials(renewed);
+                    UnaryOperator<AltAccount> renewal =
+                            held -> held.withTokens(profile.accessToken(), profile.refreshToken(), profile.expiresAt());
+                    AltAccount renewed = update(account.uuid(), renewal).orElseGet(() -> renewal.apply(account));
                     return AccountStatus.renewed(renewed);
                 })
                 .exceptionally(failure -> renewalFailure(failure, account));
@@ -213,7 +232,8 @@ public class AltAccountServiceImpl implements AltAccountService {
 
     /**
      * Maps a failed renewal onto a status, discarding the stored refresh token only when the rejection
-     * is permanent. A transient failure must never cost the user a working credential.
+     * is permanent. A transient failure must never cost the user a working credential, and neither may
+     * a stale copy: the stored token is discarded only when it is the one that was refused.
      *
      * @param failure the failure the renewal completed with
      * @param account the account being renewed
@@ -229,7 +249,12 @@ public class AltAccountServiceImpl implements AltAccountService {
             // caller would retry into.
             return AccountStatus.failure(account, renewalStateFor(classified.kind()), classified);
         }
-        store.clearRefreshToken(account.uuid());
+        String spent = account.refreshToken();
+        update(
+                account.uuid(),
+                held -> Objects.equals(held.refreshToken(), spent)
+                        ? held.withTokens(held.accessToken(), null, 0L)
+                        : held);
         return AccountStatus.failure(
                 account.withTokens(account.accessToken(), null, 0L), State.REAUTH_REQUIRED, classified);
     }
