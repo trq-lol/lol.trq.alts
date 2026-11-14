@@ -206,13 +206,89 @@ class SharedVaultEditsTest {
     }
 
     @Test
-    void aZeroKnowledgeCopyRefusesTheOldFacadeMethods() throws Exception {
+    @SuppressWarnings("deprecation")
+    void anAvp05CopyRefusesEveryOldFacadeMethod() throws Exception {
+        try (VaultWorld w = new VaultWorld(dir)) {
+            SharedVault v = pair(w).bob();
+            List<org.junit.jupiter.api.function.Executable> calls = List.of(
+                    () -> v.createRepo(null, List.of()),
+                    () -> v.createRepo(null, List.of(), true),
+                    () -> v.openRepo(null, null),
+                    () -> v.openRepo(null, null, null),
+                    () -> v.addMember(null, null),
+                    () -> v.addMember(null, null, null),
+                    () -> v.encryptPayload(null, List.of()),
+                    () -> v.decryptPayload(null, null, 0L),
+                    () -> v.rotateKey(null, List.of(), List.<MemberPublicKey>of()),
+                    () -> v.rotateKey(null, List.of(), (lol.trq.alts.vault.transport.VaultManifest) null),
+                    () -> v.removeMember(null, List.of(), List.<MemberPublicKey>of()),
+                    () -> v.removeMember(null, List.of(), null, null));
+            assertEquals(12, calls.size(), "every 0.4 instance method");
+            for (int i = 0; i < calls.size(); i++) {
+                IllegalStateException e = assertThrows(IllegalStateException.class, calls.get(i), "call " + i);
+                assertEquals("an AVP 0.5 copy is not a 0.4 facade", e.getMessage(), "call " + i);
+            }
+        }
+    }
+
+    @Test
+    void aChangedBanOnAServerSyncsAsTheNewValue() throws Exception {
         try (VaultWorld w = new VaultWorld(dir)) {
             Pair p = pair(w);
-            IllegalStateException e =
-                    assertThrows(IllegalStateException.class, () -> p.bob().createRepo(p.bobId(), List.of()));
-            assertEquals("an AVP 0.5 copy is not a 0.4 facade", e.getMessage());
-            assertThrows(IllegalStateException.class, () -> p.bob().encryptPayload(null, List.of()));
+            BanInfo first = new BanInfo(true, 1L, "self", "first", null);
+            BanInfo second = new BanInfo(true, 2L, "login", "second", null);
+            BanInfo third = new BanInfo(false, 3L, "login", "lifted", null);
+            await(p.owner().put(alpha().withBan("one.example", first)));
+            await(p.owner().update(X, a -> a.withBan("one.example", second)));
+            await(p.bob().sync());
+            assertEquals(
+                    Map.of("one.example", second),
+                    p.bob().account(X).orElseThrow().bans(),
+                    "through update");
+            AltAccount read = p.bob().account(X).orElseThrow();
+            await(p.bob().put(read, read.withBan("one.example", third)));
+            await(p.owner().sync());
+            assertEquals(
+                    Map.of("one.example", third),
+                    p.owner().account(X).orElseThrow().bans(),
+                    "through put");
+        }
+    }
+
+    @Test
+    void puttingBackTheReadOfARemovedAccountRevivesIt() throws Exception {
+        try (VaultWorld w = new VaultWorld(dir)) {
+            Pair p = pair(w);
+            await(p.owner().put(alpha()));
+            AltAccount read = p.owner().account(X).orElseThrow();
+            await(p.owner().remove(X));
+            long pushes = w.host.count("/push");
+            await(p.owner().put(read, read));
+            assertEquals(pushes + 1, w.host.count("/push"), "a revival is a commit, though base equals edited");
+            await(p.bob().sync());
+            assertEquals(read, p.bob().account(X).orElseThrow());
+        }
+    }
+
+    @Test
+    void aRevivalIsWrittenWholeAndDropsTheBansItDoesNotCarry() throws Exception {
+        try (VaultWorld w = new VaultWorld(dir)) {
+            Pair p = pair(w);
+            BanInfo ban = new BanInfo(true, 1L, "self", null, null);
+            AltAccount banned = alpha().withBan("one.example", ban).withBan("two.example", ban);
+            // Through put(base, edited): edited carries only the second server.
+            await(p.owner().put(banned));
+            await(p.owner().remove(X));
+            await(p.owner().put(banned, banned.withBan("one.example", null)));
+            await(p.bob().sync());
+            assertEquals(
+                    Map.of("two.example", ban), p.bob().account(X).orElseThrow().bans());
+            // Through put(account): the same, from an account carrying no ban at all.
+            await(p.owner().put(banned));
+            await(p.owner().remove(X));
+            await(p.owner().put(alpha()));
+            await(p.bob().sync());
+            assertNull(p.bob().account(X).orElseThrow().bans(), "no pre-deletion ban comes back");
         }
     }
 
