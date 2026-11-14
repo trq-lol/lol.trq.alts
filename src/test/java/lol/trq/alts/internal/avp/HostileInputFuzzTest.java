@@ -38,8 +38,12 @@ class HostileInputFuzzTest {
     private final MessageDigest inputs = sha256();
     private int calls;
 
-    /** The digest of every input the rounds generate, pinned so a change to the generator is a visible one. */
-    private static final String INPUT_DIGEST = "efb81a4c63df4cc1f9dfd1de61bf33dfb0c23aaa280f7d196ecb83552e305561";
+    /**
+     * The digest of every input the rounds generate, pinned so a change to the generator is a visible one.
+     * Every random draw happens before the call that uses it, never inside one, so the digest depends on the
+     * generator alone and not on where the code under test rejects an input.
+     */
+    private static final String INPUT_DIGEST = "d253538d2032ad8684f30216fca88bc6aa4488e004fa983b4e4b02e08fc22388";
 
     private static MessageDigest sha256() {
         try {
@@ -185,12 +189,13 @@ class HostileInputFuzzTest {
             // Commits
             JsonElement cj = mutate(cs.get(rnd.nextInt(cs.size())));
             byte[] ctext = fed(rnd.nextBoolean() ? AvpJson.write(cj) : mangle(AvpJson.write(cs.get(0))));
+            byte[] ckey = fed(bytes(rnd.nextBoolean() ? 32 : rnd.nextInt(40)));
             call("commit", () -> {
                 Commit c = Commits.fromJson(AvpJson.parse(ctext));
                 Commits.verify(c);
                 Commits.shapeOk(c);
                 Commits.id(c);
-                Commits.open(c, fed(bytes(rnd.nextBoolean() ? 32 : rnd.nextInt(40))));
+                Commits.open(c, ckey);
             });
             // Payloads
             JsonElement pj = mutate(payloads.get(rnd.nextInt(payloads.size())));
@@ -207,6 +212,7 @@ class HostileInputFuzzTest {
             byte[] ttext = fed(rnd.nextBoolean() ? AvpJson.write(tj) : mangle(AvpJson.write(tokens.get(0))));
             String tok =
                     rnd.nextInt(5) == 0 ? new String(ttext, StandardCharsets.ISO_8859_1) : AvpBytes.base64Url(ttext);
+            byte[] ephemeral = fed(bytes(32));
             call("token", () -> {
                 JsonObject o = Tokens.decode(tok);
                 try {
@@ -226,7 +232,7 @@ class HostileInputFuzzTest {
                     // next
                 }
                 Tokens.LinkGrant g = Tokens.linkGrantFromJson(o);
-                Tokens.openLinkGrant(g, fed(bytes(32)));
+                Tokens.openLinkGrant(g, ephemeral);
             });
             JsonElement lj = mutate(leaves.get(rnd.nextInt(leaves.size())));
             fed(AvpJson.write(lj));
