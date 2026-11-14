@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import lol.trq.alts.AltsFailure;
+import lol.trq.alts.internal.store.StoreFile;
 import lol.trq.alts.spi.StoreKeyProvider;
 
 /**

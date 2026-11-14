@@ -20,12 +20,6 @@ import lol.trq.alts.auth.AccountStatus;
 import lol.trq.alts.auth.AltAccountService;
 import lol.trq.alts.auth.AltLoginService;
 import lol.trq.alts.auth.LoginResult;
-import lol.trq.alts.internal.net.Backoff;
-import lol.trq.alts.internal.net.FailureText;
-import lol.trq.alts.internal.net.HttpTransport;
-import lol.trq.alts.model.AltAccount;
-import lol.trq.alts.model.LoginMode;
-import lol.trq.alts.store.AccountStore;
 import lol.trq.alts.bulk.BulkEntryResult;
 import lol.trq.alts.bulk.BulkHandle;
 import lol.trq.alts.bulk.BulkOperations;
@@ -33,6 +27,12 @@ import lol.trq.alts.bulk.BulkOptions;
 import lol.trq.alts.bulk.BulkProgress;
 import lol.trq.alts.bulk.BulkReport;
 import lol.trq.alts.bulk.CredentialKind;
+import lol.trq.alts.internal.net.Backoff;
+import lol.trq.alts.internal.net.FailureText;
+import lol.trq.alts.internal.net.HttpTransport;
+import lol.trq.alts.model.AltAccount;
+import lol.trq.alts.model.LoginMode;
+import lol.trq.alts.store.AccountStore;
 
 /**
  * Concrete {@link BulkOperations}.

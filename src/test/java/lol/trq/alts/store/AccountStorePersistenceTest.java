@@ -25,6 +25,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import lol.trq.alts.AltsFailure;
 import lol.trq.alts.AltsFailure.Kind;
+import lol.trq.alts.internal.store.EncryptionUtil;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import org.junit.jupiter.api.AfterEach;

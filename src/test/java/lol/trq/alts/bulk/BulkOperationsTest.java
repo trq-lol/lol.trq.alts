@@ -17,6 +17,7 @@ import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.auth.AccountStatus;
 import lol.trq.alts.auth.AltAccountService;
 import lol.trq.alts.auth.LoginResult;
+import lol.trq.alts.internal.bulk.BulkOperationsImpl;
 import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.internal.net.TestTransports;
 import lol.trq.alts.model.AccountType;
@@ -28,7 +29,6 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import lol.trq.alts.internal.bulk.BulkOperationsImpl;
 
 /**
  * The pacing and stopping rules, exercised against a stub account service so no network is involved.

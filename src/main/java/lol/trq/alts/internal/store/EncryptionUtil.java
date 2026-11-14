@@ -1,4 +1,4 @@
-package lol.trq.alts.store;
+package lol.trq.alts.internal.store;
 
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;

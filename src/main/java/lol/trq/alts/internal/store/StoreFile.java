@@ -1,4 +1,4 @@
-package lol.trq.alts.store;
+package lol.trq.alts.internal.store;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -59,10 +59,10 @@ import lol.trq.alts.spi.StoreKeyProvider;
  * @author trq
  * @since 0.12.0
  */
-final class StoreFile {
+public final class StoreFile {
 
     /** How long a burst of mutations is gathered for before it is written, when coalescing is on. */
-    static final Duration DEFAULT_WRITE_DELAY = Duration.ofMillis(100);
+    public static final Duration DEFAULT_WRITE_DELAY = Duration.ofMillis(100);
 
     /** Suffix of the temporary file a write is staged in. */
     static final String TEMP_SUFFIX = ".tmp";
@@ -162,7 +162,7 @@ final class StoreFile {
      *     or {@link AltsFailure.Kind#STORAGE} when the lock could not be taken; the message names the file,
      *     never its path
      */
-    static StoreFile open(
+    public static StoreFile open(
             Path directory,
             String fileName,
             String keyBinding,
@@ -209,7 +209,7 @@ final class StoreFile {
      * reported on {@link #saveError()}, and a later load reads nothing and is reported on
      * {@link #loadError()}.
      */
-    void close() {
+    public void close() {
         synchronized (ioLock) {
             if (closed) {
                 return;
@@ -260,7 +260,7 @@ final class StoreFile {
      *
      * @return true once closed
      */
-    boolean closed() {
+    public boolean closed() {
         return closed;
     }
 
@@ -312,7 +312,7 @@ final class StoreFile {
      *
      * @return the on-disk filename
      */
-    String fileName() {
+    public String fileName() {
         return fileName;
     }
 
@@ -322,7 +322,7 @@ final class StoreFile {
      * @return the failure, of kind STORAGE, or null when the last load succeeded or found no file, or when
      *     the store has been written successfully since
      */
-    AltsFailure loadError() {
+    public AltsFailure loadError() {
         return loadError;
     }
 
@@ -331,7 +331,7 @@ final class StoreFile {
      *
      * @return the failure, of kind STORAGE, or null when the last write succeeded
      */
-    AltsFailure saveError() {
+    public AltsFailure saveError() {
         return saveError;
     }
 
@@ -349,7 +349,7 @@ final class StoreFile {
      * @param plaintext produces the serialized snapshot; it is called at most once, off the caller's
      *     thread when coalescing, so it must close over an immutable copy
      */
-    void submit(Supplier<String> plaintext) {
+    public void submit(Supplier<String> plaintext) {
         if (closed) {
             saveError = storage(fileName + ": not written, because the store is closed");
             return;
@@ -371,7 +371,7 @@ final class StoreFile {
      * Writes the snapshot that is waiting, if one is, and returns once it is on disk. Also waits out a
      * write already in progress on another thread.
      */
-    void flush() {
+    public void flush() {
         synchronized (ioLock) {
             if (closed) {
                 return;
@@ -423,7 +423,7 @@ final class StoreFile {
      * @param installer parses the plaintext into the store; a throw marks the file unreadable
      * @return what the load found
      */
-    LoadOutcome load(Installer installer) {
+    public LoadOutcome load(Installer installer) {
         flush();
         synchronized (ioLock) {
             String name = fileName;
@@ -632,7 +632,7 @@ final class StoreFile {
      * @return true when writes were refused and are allowed again; false when there was nothing to
      *     discard, the store is closed, or the copy could not be made (reported on {@link #saveError()})
      */
-    boolean discardUnreadable() {
+    public boolean discardUnreadable() {
         synchronized (ioLock) {
             if (closed || !writesRefused) {
                 return false;
@@ -969,7 +969,7 @@ final class StoreFile {
     }
 
     /** What a load found. */
-    enum LoadOutcome {
+    public enum LoadOutcome {
         /** There is no file; the store has simply never been written. */
         ABSENT,
         /** The file was read into the store. */
@@ -982,7 +982,7 @@ final class StoreFile {
 
     /** Parses decrypted plaintext into a store. */
     @FunctionalInterface
-    interface Installer {
+    public interface Installer {
 
         /**
          * Installs the plaintext into the store.

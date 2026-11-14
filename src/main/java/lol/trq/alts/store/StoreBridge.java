@@ -2,6 +2,7 @@ package lol.trq.alts.store;
 
 import java.nio.file.Path;
 import lol.trq.alts.internal.store.StoreAccess;
+import lol.trq.alts.internal.store.StoreFile;
 import lol.trq.alts.spi.StoreKeyProvider;
 
 /**

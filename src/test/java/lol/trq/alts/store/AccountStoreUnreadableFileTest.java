@@ -10,6 +10,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import lol.trq.alts.internal.store.EncryptionUtil;
+import lol.trq.alts.internal.store.StoreFileSeams;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import org.junit.jupiter.api.AfterEach;
@@ -248,7 +250,7 @@ class AccountStoreUnreadableFileTest {
 
     @Test
     void onlyTheNewestUnreadableCopiesAreKept() throws Exception {
-        int incidents = StoreFile.MAX_UNREADABLE_KEPT + 3;
+        int incidents = StoreFileSeams.MAX_UNREADABLE_KEPT + 3;
         for (int incident = 0; incident < incidents; incident++) {
             Files.writeString(storeFile(), "unreadable store number " + incident);
             store.load();
@@ -256,7 +258,8 @@ class AccountStoreUnreadableFileTest {
             Thread.sleep(2);
         }
 
-        assertEquals(StoreFile.MAX_UNREADABLE_KEPT, keptCopies().size(), "the copies must not pile up without bound");
+        assertEquals(
+                StoreFileSeams.MAX_UNREADABLE_KEPT, keptCopies().size(), "the copies must not pile up without bound");
         assertTrue(kept(("unreadable store number " + (incidents - 1)).getBytes(StandardCharsets.UTF_8)));
         assertFalse(
                 kept("unreadable store number 0".getBytes(StandardCharsets.UTF_8)),

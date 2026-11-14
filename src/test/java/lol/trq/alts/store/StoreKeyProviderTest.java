@@ -11,6 +11,8 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import lol.trq.alts.AltsFailure;
 import lol.trq.alts.AltsFailure.Kind;
+import lol.trq.alts.internal.store.StoreFile;
+import lol.trq.alts.internal.store.StoreFileSeams;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.spi.StoreKeyProvider;
@@ -82,11 +84,11 @@ class StoreKeyProviderTest {
         store.addAccount(alex());
         store.save();
         StoreFile file = store.fileForTests();
-        assertTrue(file.holdsKeyMaterialForTests(), "a store that has written holds its key until it closes");
+        assertTrue(StoreFileSeams.holdsKeyMaterial(file), "a store that has written holds its key until it closes");
 
         store.close();
 
-        assertFalse(file.holdsKeyMaterialForTests(), "a closed store keeps no key material reachable");
+        assertFalse(StoreFileSeams.holdsKeyMaterial(file), "a closed store keeps no key material reachable");
     }
 
     @Test

@@ -1,4 +1,4 @@
-package lol.trq.alts.store;
+package lol.trq.alts.internal.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;

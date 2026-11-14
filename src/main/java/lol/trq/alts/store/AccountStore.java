@@ -17,6 +17,7 @@ import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.UnaryOperator;
 import lol.trq.alts.AltsFailure;
+import lol.trq.alts.internal.store.StoreFile;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.BanInfo;
 import lol.trq.alts.spi.StoreKeyProvider;

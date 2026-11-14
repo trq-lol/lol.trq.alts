@@ -8,6 +8,9 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
+import lol.trq.alts.internal.store.EncryptionUtil;
+import lol.trq.alts.internal.store.StoreFile;
+import lol.trq.alts.internal.store.StoreFileSeams;
 
 /**
  * Reads what the stores leave on disk, for tests in any package. Each test owns its stores (or its
@@ -29,12 +32,12 @@ public final class StoreTestHooks {
 
     /** Returns the coalescing window {@code store} was opened with. */
     public static Duration writeDelayOf(AccountStore store) {
-        return store.fileForTests().writeDelay();
+        return StoreFileSeams.writeDelay(store.fileForTests());
     }
 
     /** Returns the coalescing window {@code secrets} were opened with. */
     public static Duration writeDelayOf(HostSecrets secrets) {
-        return secrets.fileForTests().writeDelay();
+        return StoreFileSeams.writeDelay(secrets.fileForTests());
     }
 
     /** Returns the write delay a runtime opens its stores with. */
@@ -56,8 +59,8 @@ public final class StoreTestHooks {
     public static List<byte[]> unreadableCopies(Path directory, String fileName) throws IOException {
         List<Path> copies;
         try (Stream<Path> entries = Files.list(directory)) {
-            copies = entries.filter(
-                            entry -> entry.getFileName().toString().startsWith(fileName + StoreFile.UNREADABLE_SUFFIX))
+            copies = entries.filter(entry ->
+                            entry.getFileName().toString().startsWith(fileName + StoreFileSeams.UNREADABLE_SUFFIX))
                     .sorted()
                     .toList();
         }
@@ -101,6 +104,6 @@ public final class StoreTestHooks {
 
     /** Returns whether {@code file} is a store's sidecar lock file. */
     public static boolean isLockFile(Path file) {
-        return file.getFileName().toString().endsWith(StoreFile.LOCK_SUFFIX);
+        return file.getFileName().toString().endsWith(StoreFileSeams.LOCK_SUFFIX);
     }
 }

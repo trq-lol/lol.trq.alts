@@ -15,6 +15,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure.Kind;
+import lol.trq.alts.internal.store.EncryptionUtil;
+import lol.trq.alts.internal.store.StoreFileSeams;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
 import org.junit.jupiter.api.Test;
@@ -121,12 +123,12 @@ class StoreLockTest {
     void closeRemovesTheShutdownFlush() {
         AccountStore store = AccountStore.open(storeDir, null, null, null, false, Duration.ofMinutes(10));
         store.addAccount(alex());
-        Thread hook = store.fileForTests().shutdownFlushForTests();
+        Thread hook = StoreFileSeams.shutdownFlush(store.fileForTests());
         assertNotNull(hook, "a coalesced write registers the flush that runs at exit");
 
         store.close();
 
-        assertNull(store.fileForTests().shutdownFlushForTests());
+        assertNull(StoreFileSeams.shutdownFlush(store.fileForTests()));
         assertFalse(Runtime.getRuntime().removeShutdownHook(hook), "close() must have deregistered it already");
     }
 
@@ -138,7 +140,7 @@ class StoreLockTest {
             assertFalse(Files.exists(storeDir.resolve("accounts.dat")));
 
             // What the JVM does at exit for a host that never closed its runtime.
-            store.fileForTests().shutdownFlushForTests().run();
+            StoreFileSeams.shutdownFlush(store.fileForTests()).run();
 
             String onDisk = EncryptionUtil.decrypt(
                     Files.readString(storeDir.resolve("accounts.dat")).strip(),
@@ -201,7 +203,7 @@ class StoreLockTest {
         first.addAccount(alex());
         CountDownLatch writing = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
-        first.fileForTests().beforeWriteForTests(() -> {
+        StoreFileSeams.beforeWrite(first.fileForTests(), () -> {
             writing.countDown();
             try {
                 release.await(10, TimeUnit.SECONDS);
