@@ -8,8 +8,9 @@ import java.util.List;
  * UUID an authentication flow needs, but the skins, capes, and any pending moderation actions on the
  * account.
  *
- * <p>Distinct from {@code MinecraftProfile}, which is the auth chain's internal result (identity plus
- * credentials). This is the read a host performs on a live account to show what it looks like and owns.
+ * <p>Distinct from the identity a sign-in resolves, which reaches a host as the account on its
+ * {@link lol.trq.alts.auth.LoginResult}. This is the read a host performs on a live account to show what it
+ * looks like and owns.
  *
  * @param uuid the account UUID (undashed, as the endpoint returns it)
  * @param name the current username

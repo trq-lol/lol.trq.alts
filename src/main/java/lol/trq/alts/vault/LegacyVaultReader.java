@@ -9,12 +9,12 @@ import lol.trq.alts.model.AltAccount;
 
 /**
  * The read-only importer for a repository of the 0.4 shared vault, which 1.0 no longer speaks: given the
- * repository's manifest and envelope, as JSON exactly as the 0.4 host served them, and the member's own
- * {@link VaultIdentity} (restored from its {@link WrappedIdentity} with the passphrase or the recovery
- * code), it returns the accounts. It never writes, never talks to a host and keeps nothing; the host fetches
- * the two documents itself (authenticating to its 0.4 server with {@link VaultIdentity#signChallenge}) or
- * exported them while it still ran 0.12. The owner then creates an AVP 0.5 repository ({@link
- * SharedVault#create}) with the accounts they choose and invites the members again.
+ * repository's manifest and envelope, as the 0.4 host wrote them (the JSON is parsed strictly), and the
+ * member's own {@link VaultIdentity} (restored from its {@link WrappedIdentity} with the passphrase or the
+ * recovery code), it returns the accounts. It never writes, never talks to a host and keeps nothing; the
+ * host fetches the two documents itself (authenticating to its 0.4 server with {@link
+ * VaultIdentity#signChallenge}) or exported them while it still ran 0.12. The owner then creates an AVP 0.5
+ * repository ({@link SharedVault#create}) with the accounts they choose and invites the members again.
  *
  * <p>It accepts what a 0.12 member could read and nothing else: the manifest must name the {@code
  * X25519-HKDF-SHA256-AESGCM-v1} wrap and list this member at its key epoch, the data key must unwrap with this
@@ -41,10 +41,11 @@ public final class LegacyVaultReader {
      * @param envelopeJson the encrypted payload envelope, as the 0.4 host served it
      * @param identity this member's identity
      * @return the accounts, in the order the payload holds them
-     * @throws AltsException of kind {@code INVALID_INPUT} for text that is not JSON, {@code PROTOCOL} for JSON
-     *     that is not a 0.4 manifest or envelope, a manifest that does not list this member, or an envelope
-     *     that does not belong with the manifest, and {@code CRYPTO} if the data key does not unwrap with this
-     *     identity or the payload does not authenticate
+     * @throws AltsException of kind {@code INVALID_INPUT} for text that is not strict JSON, {@code PROTOCOL}
+     *     for JSON that is not a 0.4 manifest or envelope, a manifest that does not list this member, or an
+     *     envelope that does not belong with the manifest, and {@code CRYPTO} if the data key does not unwrap
+     *     with this identity or the payload does not authenticate; every message starts {@code "Vault 0.4
+     *     import: "}
      * @since 1.0.0
      */
     public static List<AltAccount> read(String manifestJson, String envelopeJson, VaultIdentity identity) {
