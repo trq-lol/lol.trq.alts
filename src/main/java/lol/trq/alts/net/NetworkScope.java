@@ -1,5 +1,6 @@
 package lol.trq.alts.net;
 
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -17,14 +18,14 @@ import java.util.Optional;
  * every request of that sign-in, on every hop, reaches the provider with the tag. It is empty for every
  * other request.
  *
- * @param purpose what is being fetched
- * @param accountUuid the dashed UUID of the account this is for, or {@code null}
- * @param accountUsername the username of the account this is for, or {@code null}
- * @param routeTag the host's route tag for this request, or empty; added in 1.0.0
+ * <p>A final class rather than a record since 1.0.0, so a later field is an addition and not a break:
+ * build one with {@link #of}, {@link #forAccount} and {@link #withRouteTag}. Two scopes are equal when
+ * every field is.
+ *
  * @author trq
  * @since 0.8.0
  */
-public record NetworkScope(Purpose purpose, String accountUuid, String accountUsername, Optional<String> routeTag) {
+public final class NetworkScope {
 
     /**
      * The kind of request being made, so a host can route authentication and avatars differently.
@@ -69,34 +70,49 @@ public record NetworkScope(Purpose purpose, String accountUuid, String accountUs
         VAULT
     }
 
+    private final Purpose purpose;
+    private final String accountUuid;
+    private final String accountUsername;
+    private final Optional<String> routeTag;
+
     /**
-     * Substitutes {@link Purpose#AUTH} for a missing purpose, so a scope always states one, and empty for
-     * a missing route tag.
+     * Substitutes {@link Purpose#AUTH} for a missing purpose, so a scope always states one.
      *
      * @throws IllegalArgumentException if the route tag is present but blank: a provider must never be
      *     handed a tag that names no route
-     * @since 1.0.0
      */
-    public NetworkScope {
-        if (purpose == null) {
-            purpose = Purpose.AUTH;
-        }
-        routeTag = routeTag == null ? Optional.empty() : routeTag;
+    private NetworkScope(Purpose purpose, String accountUuid, String accountUsername, Optional<String> routeTag) {
         if (routeTag.isPresent() && routeTag.get().isBlank()) {
             throw new IllegalArgumentException("a route tag must not be blank");
         }
+        this.purpose = purpose == null ? Purpose.AUTH : purpose;
+        this.accountUuid = accountUuid;
+        this.accountUsername = accountUsername;
+        this.routeTag = routeTag;
     }
 
     /**
-     * Creates a scope with no route tag: the shape before the tag existed.
+     * Creates a scope for a request that belongs to no particular account.
      *
-     * @param purpose what is being fetched
-     * @param accountUuid the dashed UUID of the account, or {@code null}
-     * @param accountUsername the username of the account, or {@code null}
+     * @param purpose what is being fetched; {@code null} reads as {@link Purpose#AUTH}
+     * @return an account-less scope
      * @since 0.8.0
      */
-    public NetworkScope(Purpose purpose, String accountUuid, String accountUsername) {
-        this(purpose, accountUuid, accountUsername, Optional.empty());
+    public static NetworkScope of(Purpose purpose) {
+        return new NetworkScope(purpose, null, null, Optional.empty());
+    }
+
+    /**
+     * Creates a scope for a request made on one account's behalf.
+     *
+     * @param purpose what is being fetched; {@code null} reads as {@link Purpose#AUTH}
+     * @param accountUuid the dashed UUID of the account, or {@code null}
+     * @param accountUsername the username of the account, or {@code null}
+     * @return a scope naming the account
+     * @since 0.8.0
+     */
+    public static NetworkScope forAccount(Purpose purpose, String accountUuid, String accountUsername) {
+        return new NetworkScope(purpose, accountUuid, accountUsername, Optional.empty());
     }
 
     /**
@@ -112,26 +128,81 @@ public record NetworkScope(Purpose purpose, String accountUuid, String accountUs
     }
 
     /**
-     * Creates a scope for a request that belongs to no particular account.
+     * Returns what is being fetched.
      *
-     * @param purpose what is being fetched
-     * @return an account-less scope
+     * @return the purpose, never {@code null}
      * @since 0.8.0
      */
-    public static NetworkScope of(Purpose purpose) {
-        return new NetworkScope(purpose, null, null);
+    public Purpose purpose() {
+        return purpose;
     }
 
     /**
-     * Creates a scope for a request made on one account's behalf.
+     * Returns the dashed UUID of the account this is for.
      *
-     * @param purpose what is being fetched
-     * @param accountUuid the dashed UUID of the account, or {@code null}
-     * @param accountUsername the username of the account, or {@code null}
-     * @return a scope naming the account
+     * @return the UUID, or {@code null} for a request with no account
      * @since 0.8.0
      */
-    public static NetworkScope forAccount(Purpose purpose, String accountUuid, String accountUsername) {
-        return new NetworkScope(purpose, accountUuid, accountUsername);
+    public String accountUuid() {
+        return accountUuid;
+    }
+
+    /**
+     * Returns the username of the account this is for.
+     *
+     * @return the username, or {@code null} for a request with no account
+     * @since 0.8.0
+     */
+    public String accountUsername() {
+        return accountUsername;
+    }
+
+    /**
+     * Returns the host's route tag for this request.
+     *
+     * @return the tag, or empty
+     * @since 1.0.0
+     */
+    public Optional<String> routeTag() {
+        return routeTag;
+    }
+
+    /**
+     * Returns whether {@code o} is a scope with every field equal to this one's.
+     *
+     * @param o the object to compare
+     * @return true when every field is equal
+     * @since 0.8.0
+     */
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof NetworkScope other
+                && purpose == other.purpose
+                && Objects.equals(accountUuid, other.accountUuid)
+                && Objects.equals(accountUsername, other.accountUsername)
+                && routeTag.equals(other.routeTag);
+    }
+
+    /**
+     * Returns a hash over every field, consistent with {@link #equals(Object)}.
+     *
+     * @return the hash
+     * @since 0.8.0
+     */
+    @Override
+    public int hashCode() {
+        return Objects.hash(purpose, accountUuid, accountUsername, routeTag);
+    }
+
+    /**
+     * Returns every field, in the form the record printed them.
+     *
+     * @return a description
+     * @since 0.8.0
+     */
+    @Override
+    public String toString() {
+        return "NetworkScope[purpose=" + purpose + ", accountUuid=" + accountUuid + ", accountUsername="
+                + accountUsername + ", routeTag=" + routeTag + "]";
     }
 }

@@ -64,6 +64,7 @@ constructors are gone, and so are deconstruction patterns over them.
 | --- | --- |
 | `new AltAccount(uuid, username, accessToken, type, lastUsed, lastUsedBy, bans, sourceClient, sourceUser, refreshToken, expiresAt)` | `AltAccount.builder(uuid, username, accessToken, type).lastUsed(..).lastUsedBy(..).bans(..).sourceClient(..).sourceUser(..).refreshToken(..).expiresAt(..).build()` (each setter optional), or `account.toBuilder()` to change several fields; the store file format is unchanged |
 | `new MicrosoftAuthConfig(...)` (thirteen or eleven arguments) | `MicrosoftAuthConfig.of(clientId)` or `legacyMsa(clientId)`, then `withScope`, `withRedirectPath`, `withEndpoints`, `withDeviceCodeEndpoints`, and the new `withRedirectUri` and `withRpsTicketPrefix` |
+| `new NetworkScope(purpose, uuid, username)`, `new NetworkScope(purpose, uuid, username, routeTag)` | `NetworkScope.of(purpose)` or `NetworkScope.forAccount(purpose, uuid, username)`, then `withRouteTag(tag)` |
 
 **The shared vault: 0.4 to AVP 0.5.** 1.0 writes AVP 0.5 only, which is not wire compatible with 0.4
 and specifies no upgrade. A repository moves in five steps:
@@ -120,10 +121,9 @@ code to copy is under Removed). The implementation (`HttpUtil`'s successor `Http
   directory that cannot be created or locked fails `build()` with `STORAGE`. The lock is new in 1.0.
 - **Everything is per runtime.** A runtime built without a proxy provider connects directly, whatever
   another runtime was given; its store key provider and executor reach its own stores and tasks only.
-- **Route tags.** `NetworkScope` gains a fourth component, `Optional<String> routeTag`, and
-  `BulkOptions` a sixth, so a deconstruction pattern over either needs one more binding.
-  `AltLoginService.routed(tag)` is new and abstract, so a host's own implementation of the interface
-  must add it.
+- **Route tags.** `NetworkScope` and `BulkOptions` gain `routeTag()` (both are classes now, see
+  above). `AltLoginService.routed(tag)` is new and abstract, so a host's own implementation of the
+  interface must add it.
 - **`close()` ends what waits.** A paced bulk run, a device-code poll, a scheduled claim and a browser
   sign-in still waiting for its callback fail when the runtime closes; anything started afterwards
   returns or throws `CANCELLED`.
@@ -375,16 +375,17 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   through their constructors, the auth chain's request methods are instance methods, and
   `BulkOperationsImpl` loses the three-argument constructor that read entitlements from the public
   Minecraft services (the runtime passes its own account services).
-- **Breaking: `NetworkScope` gains a fourth component, `Optional<String> routeTag`,** so a deconstruction
-  pattern over it needs one more binding; the three-argument constructor, `of` and `forAccount` remain
-  and give an empty tag. New `AltLoginService.routed(String tag)` returns a view of the login service
+- **Breaking: `NetworkScope` is a final class and carries a route tag.** It was a record; its accessors,
+  value equality and description are kept, `of` and `forAccount` build it with an empty tag, and the new
+  `withRouteTag(tag)` and `routeTag()` add and read one. Its public constructors are gone. New
+  `AltLoginService.routed(String tag)` returns a view of the login service
   whose every request, on every hop of every route (the renewal behind `loginAccount` included),
   reaches the `ProxyProvider` with that tag, and new `BulkOptions.withRouteTag(tag)` does the same for
   `importCredentials`. A host that pins accounts to proxies can now route a new account's first
   sign-in before any UUID exists. `routed` is abstract, so a host's own `AltLoginService`
   implementation has to add it; `BulkOptions` gains a sixth component, `Optional<String> routeTag`, and
   keeps its five-argument constructor. A blank tag is refused with `IllegalArgumentException` wherever
-  it is given: by `routed`, by `withRouteTag`, or in a `NetworkScope` or `BulkOptions` built directly.
+  it is given: by `routed` or by `withRouteTag`.
 - **Request headers.** Besides a header holding a control character (0.12.0), `HttpTransport`'s
   header-taking methods now refuse a caller-supplied `Proxy-Authorization`, in any capitalisation, with
   an `IllegalArgumentException` whose message quotes nothing, before anything is sent. The proxy
