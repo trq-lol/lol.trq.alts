@@ -88,7 +88,9 @@ public final class LinkSession {
      * @param request the new device's request
      * @param confirm shows the code to the owner and answers whether they confirmed the two match
      * @return the grant to carry back
-     * @throws AltsException of kind {@code DECLINED} if the owner did not confirm; nothing is wrapped
+     * @throws AltsException of kind {@code DECLINED} if the owner did not confirm; nothing is wrapped. A {@code
+     *     confirm} that throws is not caught: its exception reaches the caller as it is, and nothing is
+     *     wrapped
      * @since 1.0.0
      */
     public static LinkGrant approve(OwnerIdentity owner, LinkRequest request, Predicate<String> confirm) {

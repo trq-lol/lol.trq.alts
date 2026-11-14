@@ -30,7 +30,11 @@ import lol.trq.alts.internal.vault.MemberKeys;
  */
 public final class OwnerIdentity {
 
-    /** The length of the mnemonic entropy: 32 bytes, 24 words. */
+    /**
+     * The length of the mnemonic entropy: 32 bytes, 24 words.
+     *
+     * @since 1.0.0
+     */
     public static final int ENTROPY_BYTES = 32;
 
     private final byte[] entropy;

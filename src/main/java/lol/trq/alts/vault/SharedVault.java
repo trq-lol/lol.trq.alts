@@ -1294,7 +1294,9 @@ public final class SharedVault {
     /**
      * The state to persist, so {@link #resume} can open this copy again: the pin, the retained epoch keys,
      * the clock and the merged accounts, as the last finished operation left them. Take one after every
-     * operation that changes the copy. It holds secrets.
+     * operation that changes the copy. It holds secrets (the data keys and the accounts' credentials):
+     * persist its {@link VaultSnapshot#toJson()} encrypted, for example in {@link
+     * lol.trq.alts.store.HostSecrets}, never in plain text.
      *
      * @return the snapshot
      * @since 1.0.0
