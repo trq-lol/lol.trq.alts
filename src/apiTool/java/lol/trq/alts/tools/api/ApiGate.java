@@ -40,6 +40,9 @@ public final class ApiGate {
     /** The argument that gives a reason to drop lines within the major version ({@code -PapiAllowBreaking}). */
     static final String ALLOW_BREAKING_ARG = "--allow-breaking=";
 
+    /** The argument that names the build's own version, when the dump is written for another. */
+    static final String PROJECT_VERSION_ARG = "--project-version=";
+
     private ApiGate() {}
 
     /**
@@ -92,11 +95,14 @@ public final class ApiGate {
      * @param existing the current baseline file's lines, or {@code null} when there is none yet
      * @param dump the new dump
      * @param version the version the new dump is written for
+     * @param projectVersion the version the build is for ({@code project.version})
      * @param breakingReason the reason given to drop lines anyway ({@code -PapiAllowBreaking}), or {@code null}
      * @return every reason to refuse; empty when the dump may be written
      */
-    static List<String> dumpRefusal(List<String> existing, ApiDump.Result dump, String version, String breakingReason) {
+    static List<String> dumpRefusal(
+            List<String> existing, ApiDump.Result dump, String version, String projectVersion, String breakingReason) {
         List<String> problems = new ArrayList<>(dump.problems());
+        boolean allowed = breakingReason != null && !breakingReason.isBlank();
         if (existing == null) {
             return problems;
         }
@@ -104,10 +110,17 @@ public final class ApiGate {
         if (baselineVersion.isEmpty()) {
             return problems;
         }
+        // A dump may not claim a major the build has not reached, or the removal rule below could be met by
+        // naming any later major. The one exception is the baseline's own major: the dump for the coming
+        // release (1.0.0) is written while the build still says 0.x.
+        int ahead = major(version);
+        if (ahead > major(projectVersion) && ahead != major(baselineVersion.get()) && !allowed) {
+            problems.add("a dump for " + version + " is ahead of this build (" + projectVersion
+                    + "); bump the version in build.gradle first (or pass -PapiAllowBreaking=<reason>)");
+        }
         Set<String> now = new LinkedHashSet<>(dump.lines());
         List<String> removed =
                 lines(existing).stream().filter(l -> !now.contains(l)).sorted().toList();
-        boolean allowed = breakingReason != null && !breakingReason.isBlank();
         if (!removed.isEmpty() && major(version) <= major(baselineVersion.get()) && !allowed) {
             problems.add(removed.size() + " line(s) of the " + baselineVersion.get()
                     + " API would be erased by a dump for " + version
@@ -147,6 +160,13 @@ public final class ApiGate {
         Optional<String> baselineVersion = versionOf(baseline);
         if (baselineVersion.isEmpty()) {
             problems.add("the baseline has no '" + VERSION_PREFIX.trim() + "' header line");
+            return problems;
+        }
+        if (major(buildVersion) >= 1 && major(baselineVersion.get()) > major(buildVersion)) {
+            // From 1.0 on, a baseline of a later major than the build was written for a release that has not
+            // been reached, which is how a removal would otherwise slip through a same-major build.
+            problems.add("the baseline is for " + baselineVersion.get() + ", a later major than this build ("
+                    + buildVersion + "); a dump may not run ahead of the version in build.gradle");
             return problems;
         }
         Set<String> base = lines(baseline);
@@ -206,8 +226,11 @@ public final class ApiGate {
         String version = args[3];
         List<Path> dependencies = new ArrayList<>();
         String breakingReason = null;
+        String projectVersion = version;
         for (int i = 4; i < args.length; i++) {
-            if (args[i].startsWith(ALLOW_BREAKING_ARG)) {
+            if (args[i].startsWith(PROJECT_VERSION_ARG)) {
+                projectVersion = args[i].substring(PROJECT_VERSION_ARG.length()).trim();
+            } else if (args[i].startsWith(ALLOW_BREAKING_ARG)) {
                 String reason = args[i].substring(ALLOW_BREAKING_ARG.length()).trim();
                 breakingReason = reason.isEmpty() ? null : reason;
             } else {
@@ -218,7 +241,7 @@ public final class ApiGate {
         if (args[0].equals("dump")) {
             List<String> existing =
                     Files.isRegularFile(baselineFile) ? Files.readAllLines(baselineFile, StandardCharsets.UTF_8) : null;
-            List<String> refusal = dumpRefusal(existing, dump, version, breakingReason);
+            List<String> refusal = dumpRefusal(existing, dump, version, projectVersion, breakingReason);
             if (!refusal.isEmpty()) {
                 fail("not dumped", refusal);
             }

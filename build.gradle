@@ -159,7 +159,8 @@ tasks.register('apiDump', JavaExec) {
             'Refuses to erase API within the major version unless -PapiAllowBreaking=<reason> is given.'
     def breaking = findProperty('apiAllowBreaking')
     apiTool(it, 'dump', (findProperty('apiVersion') ?: project.version).toString(),
-            breaking ? ["--allow-breaking=${breaking}".toString()] : [])
+            ["--project-version=${project.version}".toString()] +
+                    (breaking ? ["--allow-breaking=${breaking}".toString()] : []))
 }
 
 def apiCheck = tasks.register('apiCheck', JavaExec) {

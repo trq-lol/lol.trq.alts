@@ -114,13 +114,14 @@ class ApiGateTest {
         String v2 = API_V1.replace("    public void removed() {}\n", "");
         ApiDump.Result current = dump(MODULE, Map.of("fx/Api.java", v2));
 
-        List<String> refusal = ApiGate.dumpRefusal(baseline, current, "1.1.0", null);
+        List<String> refusal = ApiGate.dumpRefusal(baseline, current, "1.1.0", "1.1.0", null);
 
         assertEquals(1, refusal.size(), refusal::toString);
         assertTrue(refusal.get(0).contains("would be erased"), refusal::toString);
         assertTrue(refusal.get(0).contains("fx.Api.removed()"), refusal::toString);
         // A blank reason is no reason.
-        assertEquals(1, ApiGate.dumpRefusal(baseline, current, "1.0.0", " ").size());
+        assertEquals(
+                1, ApiGate.dumpRefusal(baseline, current, "1.0.0", "1.0.0", " ").size());
     }
 
     @Test
@@ -128,7 +129,44 @@ class ApiGateTest {
         List<String> baseline = baseline(API_V1, "1.0.0");
         String v2 = API_V1.replace("    public void removed() {}\n", "");
 
-        assertEquals(List.of(), ApiGate.dumpRefusal(baseline, dump(MODULE, Map.of("fx/Api.java", v2)), "2.0.0", null));
+        assertEquals(
+                List.of(),
+                ApiGate.dumpRefusal(baseline, dump(MODULE, Map.of("fx/Api.java", v2)), "2.0.0", "2.0.0", null));
+    }
+
+    @Test
+    void aDumpAheadOfTheBuildsMajorIsRefused() throws IOException {
+        // Naming a later major must not open the removal rule: the build has to be bumped first.
+        List<String> baseline = baseline(API_V1, "1.0.0");
+        String v2 = API_V1.replace("    public void removed() {}\n", "");
+        ApiDump.Result current = dump(MODULE, Map.of("fx/Api.java", v2));
+
+        List<String> refusal = ApiGate.dumpRefusal(baseline, current, "2.0.0", "1.4.0", null);
+
+        assertTrue(refusal.stream().anyMatch(p -> p.contains("ahead of this build")), refusal::toString);
+        // Before 1.0 the dump for the coming release (the baseline's own major) is still written...
+        assertTrue(ApiGate.dumpRefusal(baseline, dump(MODULE, Map.of("fx/Api.java", API_V1)), "1.0.0", "0.12.0", null)
+                .isEmpty());
+        // ...but a later one is not, nor is it before 1.0.
+        assertTrue(ApiGate.dumpRefusal(baseline, current, "2.0.0", "0.12.0", null).stream()
+                .anyMatch(p -> p.contains("ahead of this build")));
+        // A stated reason overrides it.
+        assertEquals(List.of(), ApiGate.dumpRefusal(baseline, current, "2.0.0", "1.4.0", "planned 2.0 dump"));
+    }
+
+    @Test
+    void aBaselineOfALaterMajorThanTheBuildFailsFromOnePointZero() throws IOException {
+        List<String> baseline = baseline(API_V1, "2.0.0");
+        String v2 = API_V1.replace("    public void removed() {}\n", "");
+
+        List<String> problems = ApiGate.check(baseline, dump(MODULE, Map.of("fx/Api.java", v2)), "1.3.0");
+
+        assertEquals(1, problems.size(), problems::toString);
+        assertTrue(problems.get(0).contains("later major than this build"), problems::toString);
+        // Before 1.0 the committed baseline is the coming 1.0.0, a later major on purpose.
+        assertEquals(
+                List.of(),
+                ApiGate.check(baseline(API_V1, "1.0.0"), dump(MODULE, Map.of("fx/Api.java", API_V1)), "0.12.0"));
     }
 
     @Test
@@ -137,8 +175,11 @@ class ApiGateTest {
         String v2 =
                 API_V1.replace("public void kept() {}", "public void kept() {}\n    public int added() { return 1; }");
 
-        assertEquals(List.of(), ApiGate.dumpRefusal(baseline, dump(MODULE, Map.of("fx/Api.java", v2)), "1.1.0", null));
-        assertEquals(List.of(), ApiGate.dumpRefusal(null, dump(MODULE, Map.of("fx/Api.java", v2)), "1.1.0", null));
+        assertEquals(
+                List.of(),
+                ApiGate.dumpRefusal(baseline, dump(MODULE, Map.of("fx/Api.java", v2)), "1.1.0", "1.1.0", null));
+        assertEquals(
+                List.of(), ApiGate.dumpRefusal(null, dump(MODULE, Map.of("fx/Api.java", v2)), "1.1.0", "1.1.0", null));
     }
 
     @Test
@@ -147,7 +188,7 @@ class ApiGateTest {
         String v2 = API_V1.replace("    public void removed() {}\n", "");
         ApiDump.Result current = dump(MODULE, Map.of("fx/Api.java", v2));
 
-        assertEquals(List.of(), ApiGate.dumpRefusal(baseline, current, "1.1.0", "removed() was never usable"));
+        assertEquals(List.of(), ApiGate.dumpRefusal(baseline, current, "1.1.0", "1.1.0", "removed() was never usable"));
         List<String> written = ApiGate.baseline(current, "1.1.0", "removed() was never usable");
 
         assertTrue(written.contains(ApiGate.BREAKING_PREFIX + "removed() was never usable"), written::toString);
