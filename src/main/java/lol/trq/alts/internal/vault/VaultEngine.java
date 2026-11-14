@@ -1137,7 +1137,11 @@ public final class VaultEngine {
                     Arrays.fill(plain, (byte) 0);
                 }
                 publish(signed, rotation);
-                retained.put(epoch, newKey.clone());
+                byte[] replaced = retained.put(epoch, newKey.clone());
+                if (replaced != null) {
+                    // adoptKeys already unwrapped the same key from the published state: zero that copy.
+                    Arrays.fill(replaced, (byte) 0);
+                }
                 recordOwn(rotation);
                 leaves = new ArrayList<>(leaves);
                 leaves.removeIf(l -> AvpBytes.same(l.memberKey(), member));
