@@ -16,7 +16,10 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.UnaryOperator;
 import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.crypto.CryptoException;
 import lol.trq.alts.crypto.KeyWrapScheme;
 import lol.trq.alts.crypto.PayloadCipher;
@@ -653,6 +656,11 @@ public final class SharedVault {
         }
     }
 
+    /** The engine, for a test that writes a payload no {@link AltAccount} can express. */
+    VaultEngine engineForTests() {
+        return engine();
+    }
+
     private VaultEngine engine() {
         if (engine == null) {
             throw new IllegalStateException("a 0.4 facade holds no AVP 0.5 repository copy");
@@ -938,12 +946,89 @@ public final class SharedVault {
     }
 
     /**
-     * Writes an account into the repository as one commit (AVP SPEC 5). Only the fields whose value differs
-     * from this copy's take a fresh stamp from the vault's clock, so a member who changed another field of
-     * the same account meanwhile keeps that change when the two merge; an account this copy does not hold,
-     * or holds deleted, is written whole. Each ban the account carries is written per server id; a server it
-     * does not mention is left as it is (clear one with {@link #markBanned} and a null ban). While the
-     * repository withholds refresh tokens, its {@code refreshToken} and {@code expiresAt} are not sent.
+     * Edits one account in the repository as one commit (AVP SPEC 5): the recommended way to change an
+     * account. {@code edit} runs inside the write, on the account as this copy holds it at that moment, and
+     * only the fields where its result differs from what it was given take a fresh stamp from the vault's
+     * clock. A remote edit of any other field, merged into this copy before or while the caller worked, is
+     * never reverted. A ban server the result drops is cleared. An edit that changes nothing sends no commit.
+     * While the repository withholds refresh tokens, the account it is given carries no {@code refreshToken}
+     * or {@code expiresAt}, and none is sent.
+     *
+     * <p>{@code edit} runs on the runtime's executor, one write at a time; it must not block on this vault.
+     *
+     * @param uuid the player UUID
+     * @param edit the change, for example {@code a -> a.withTokens(access, refresh, expiresAt)}
+     * @return the account as this copy holds it after the write; fails with {@code NOT_FOUND} if this copy
+     *     holds no such account or holds it deleted, {@code INVALID_INPUT} if {@code edit} returns null or
+     *     another UUID or after {@link #leave()}, {@code PROTOCOL} if the vault holds an impossible timestamp
+     *     from a member, and the host's refusal by its kind
+     * @since 1.0.0
+     */
+    public CompletableFuture<AltAccount> update(String uuid, UnaryOperator<AltAccount> edit) {
+        Objects.requireNonNull(uuid, "uuid");
+        Objects.requireNonNull(edit, "edit");
+        VaultEngine e = engine();
+        AtomicReference<AltAccount> stored = new AtomicReference<>();
+        return VaultFutures.guard(e.write(editor -> {
+                    boolean share = e.tip().state().shareRefreshTokens();
+                    Payload.Account current =
+                            editor.payload().underPolicy(share).accounts().get(uuid);
+                    if (current == null || current.isDeleted()) {
+                        throw new AltsException(Kind.NOT_FOUND, "Vault: this copy holds no such account");
+                    }
+                    AltAccount base = AccountMapping.toAccount(uuid, current);
+                    AltAccount edited = edit.apply(base);
+                    if (edited == null || !uuid.equals(edited.uuid())) {
+                        throw VaultFutures.invalid("an account edit returns the account, with the same UUID");
+                    }
+                    AccountMapping.write(editor, base, edited, share);
+                    Payload after = editor.payload().underPolicy(share);
+                    stored.set(AccountMapping.toAccount(uuid, after.accounts().get(uuid)));
+                })
+                .thenApply(id -> stored.get()));
+    }
+
+    /**
+     * Writes an edit of an account the caller read earlier, as one commit (AVP SPEC 5): only the fields where
+     * {@code base} and {@code edited} differ take a fresh stamp, so a remote edit of any other field, merged
+     * into this copy since {@code base} was read, survives. A ban server {@code base} had and {@code edited}
+     * drops is cleared. An account this copy does not hold, or holds deleted, is written whole from {@code
+     * edited}. An edit that changes nothing sends no commit. While the repository withholds refresh tokens,
+     * {@code refreshToken} and {@code expiresAt} are not sent.
+     *
+     * @param base the account as read, from {@link #account(String)} or {@link #accounts()}
+     * @param edited the account as changed; the same UUID
+     * @return completes once the host stored the commit; fails with {@code INVALID_INPUT} for a missing or
+     *     mismatched UUID or after {@link #leave()}, {@code PROTOCOL} if the vault holds an impossible
+     *     timestamp from a member, and the host's refusal by its kind
+     * @since 1.0.0
+     */
+    public CompletableFuture<Void> put(AltAccount base, AltAccount edited) {
+        Objects.requireNonNull(base, "base");
+        Objects.requireNonNull(edited, "edited");
+        if (edited.uuid() == null || edited.uuid().isBlank()) {
+            return VaultFutures.failed(noUuid());
+        }
+        if (!edited.uuid().equals(base.uuid())) {
+            return VaultFutures.failed(VaultFutures.invalid("an account edit keeps the account's UUID"));
+        }
+        VaultEngine e = engine();
+        return done(e.write(editor ->
+                AccountMapping.write(editor, base, edited, e.tip().state().shareRefreshTokens())));
+    }
+
+    /**
+     * Writes an account into the repository as one commit (AVP SPEC 5), stamping the fields that differ from
+     * the copy as it stands when the write runs; a stale object can revert remote edits; use {@link #update}.
+     * A new or deleted account is written whole. Each ban the account carries is written per server id; a
+     * server it does not mention is left as it is (clear one with {@link #markBanned} and a null ban). A put
+     * that changes nothing sends no commit. While the repository withholds refresh tokens, its {@code
+     * refreshToken} and {@code expiresAt} are not sent.
+     *
+     * <p>"Stale" means read before the copy merged a remote edit of the same account: such an object differs
+     * from the copy in exactly the field the other member changed, and putting it stamps that field back.
+     * {@link #update} and {@link #put(AltAccount, AltAccount)} compare with what the caller started from
+     * instead, and are safe for a read-modify-write.
      *
      * @param account the account
      * @return completes once the host stored the commit; fails with {@code INVALID_INPUT} for an account
@@ -956,7 +1041,9 @@ public final class SharedVault {
         if (account.uuid() == null || account.uuid().isBlank()) {
             return VaultFutures.failed(noUuid());
         }
-        return done(engine().write(e -> AccountMapping.write(e, account)));
+        VaultEngine e = engine();
+        return done(e.write(
+                editor -> AccountMapping.write(editor, account, e.tip().state().shareRefreshTokens())));
     }
 
     /**

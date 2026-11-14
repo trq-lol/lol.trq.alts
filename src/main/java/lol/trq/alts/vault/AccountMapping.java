@@ -7,7 +7,7 @@ import com.google.gson.JsonPrimitive;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
+import java.util.Objects;
 import java.util.SortedMap;
 import lol.trq.alts.internal.avp.Payload;
 import lol.trq.alts.internal.vault.PayloadEditor;
@@ -183,38 +183,73 @@ final class AccountMapping {
     }
 
     /**
-     * Writes an account into a payload edit, field by field: only a field whose value differs from the
-     * copy's takes a fresh stamp, so a concurrent edit of another field on another device survives the merge
-     * (SPEC 5). An account the copy does not hold, or holds deleted, takes every field, which brings a deleted
-     * one back. Each ban the account carries is written the same way, per server id; a server the account does
-     * not mention is left as it is.
+     * Writes an account into a payload edit against the copy as it stands when the write runs: only a field
+     * whose mapped value differs from the copy's takes a fresh stamp (SPEC 5). The comparison is in the
+     * {@link AltAccount} space, so a field the copy lacks, or holds with a value that reads as the default (an
+     * absent {@code lastUsed}, an unknown {@code type}), is not re-stamped by an account that reads the same.
+     * An account the copy does not hold, or holds deleted, is written whole. Each ban the account carries is
+     * written the same way, per server id; a server it does not mention is left as it is.
+     *
+     * <p>A stale account (one read before a remote edit the copy has since merged) reverts that edit: it
+     * differs from the copy in exactly that field. {@link #write(PayloadEditor, AltAccount, AltAccount,
+     * boolean)} has no such hazard.
      *
      * @param editor the edit
      * @param a the account
+     * @param share whether the latest verified state shares refresh tokens; when it does not, {@code
+     *     refreshToken} and {@code expiresAt} are not compared and never stamped
      */
-    static void write(PayloadEditor editor, AltAccount a) {
+    static void write(PayloadEditor editor, AltAccount a, boolean share) {
         Payload.Account current = editor.payload().accounts().get(a.uuid());
-        boolean all = current == null || current.isDeleted();
+        AltAccount before = current == null || current.isDeleted() ? null : toAccount(a.uuid(), current);
+        stamp(editor, current, before, a, share, false);
+    }
+
+    /**
+     * Writes an edit of an account: only a field where {@code base} and {@code edited} differ takes a fresh
+     * stamp, so a remote edit of any other field, merged into the copy after {@code base} was read, survives.
+     * A ban server {@code base} had and {@code edited} does not is cleared. An account the copy does not hold,
+     * or holds deleted, is written whole from {@code edited}.
+     *
+     * @param editor the edit
+     * @param base the account as the caller read it
+     * @param edited the account as the caller changed it; the same UUID
+     * @param share whether the latest verified state shares refresh tokens
+     */
+    static void write(PayloadEditor editor, AltAccount base, AltAccount edited, boolean share) {
+        Payload.Account current = editor.payload().accounts().get(edited.uuid());
+        AltAccount before = current == null || current.isDeleted() ? null : base;
+        stamp(editor, current, before, edited, share, true);
+    }
+
+    private static void stamp(
+            PayloadEditor editor,
+            Payload.Account current,
+            AltAccount before,
+            AltAccount a,
+            boolean share,
+            boolean clearDropped) {
+        Map<String, JsonElement> was = before == null ? null : fields(before);
         for (Map.Entry<String, JsonElement> e : fields(a).entrySet()) {
-            JsonElement before = current == null
-                    ? JsonNull.INSTANCE
-                    : Optional.ofNullable(current.fields().get(e.getKey()))
-                            .map(Payload.Field::value)
-                            .orElse(JsonNull.INSTANCE);
-            if (all || !before.equals(e.getValue())) {
+            if (!share && Payload.REFRESH_FIELDS.contains(e.getKey())) {
+                continue;
+            }
+            if (was == null || !was.get(e.getKey()).equals(e.getValue())) {
                 editor.setField(a.uuid(), e.getKey(), e.getValue());
             }
         }
+        Map<String, BanInfo> old = before == null || before.bans() == null ? Map.of() : before.bans();
         if (a.bans() != null) {
             for (Map.Entry<String, BanInfo> b : a.bans().entrySet()) {
-                JsonElement next = banJson(b.getValue());
-                JsonElement before = current == null
-                        ? JsonNull.INSTANCE
-                        : Optional.ofNullable(current.bans().get(b.getKey()))
-                                .map(Payload.Field::value)
-                                .orElse(JsonNull.INSTANCE);
-                if (all || !before.equals(next)) {
-                    editor.setBan(a.uuid(), b.getKey(), next);
+                if (before == null || !Objects.equals(old.get(b.getKey()), b.getValue())) {
+                    editor.setBan(a.uuid(), b.getKey(), banJson(b.getValue()));
+                }
+            }
+        }
+        if (clearDropped && before != null && current != null) {
+            for (String server : old.keySet()) {
+                if (a.bans() == null || !a.bans().containsKey(server)) {
+                    editor.setBan(a.uuid(), server, JsonNull.INSTANCE);
                 }
             }
         }
