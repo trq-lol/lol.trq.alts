@@ -182,18 +182,22 @@ public final class GettingStartedExample {
     }
 
     /**
-     * Section "Checking accounts without logging in": a sweep over everything the store holds. The live
-     * session never moves, which is the whole reason this is not a loop over {@code loginAccount}.
+     * Section "Checking accounts without logging in": a read-only sweep over everything the store holds.
+     * The live session never moves, which is the whole reason this is not a loop over {@code loginAccount},
+     * and no refresh token is redeemed, which is why it is {@code check} and not {@code refresh}.
      *
      * @param alts the runtime built by {@link #buildRuntime}
      */
     public static void sweepStoredAccounts(AltsRuntime<MyHandle> alts) {
+        // check() only looks: no refresh token is redeemed, so nothing rotates. For more than a handful of
+        // accounts, alts.bulk().checkAll(...) runs the same check paced, with progress and a cancel handle.
         for (AltAccount account : alts.store().accounts()) {
-            alts.accountService().refresh(account).thenAccept(status -> {
+            alts.accountService().check(account).thenAccept(status -> {
                 switch (status.state()) {
-                    // Nothing to do; the account is good, and RENEWED already persisted its new token.
-                    case VALID, RENEWED -> render(status.account().username());
-                    // The stored token is spent but recoverable — only a read-only check reports this.
+                    // Nothing to do; the account is good as it is.
+                    case VALID -> render(status.account().username());
+                    // The stored token is spent but a refresh token is held: refresh(account) renews it,
+                    // when the host decides to.
                     case EXPIRED -> render(status.account().username() + " needs refreshing");
                     // The credential is gone for good. Only a fresh interactive login fixes it.
                     case REAUTH_REQUIRED -> promptMicrosoftLogin(status.account());

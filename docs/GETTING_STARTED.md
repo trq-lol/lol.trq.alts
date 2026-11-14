@@ -230,12 +230,15 @@ Logging into an account installs it as the live session. That is right for one a
 `alts.accountService()` is the same machinery without that last step:
 
 ```java
+// check() only looks: no refresh token is redeemed, so nothing rotates. For more than a handful of
+// accounts, alts.bulk().checkAll(...) runs the same check paced, with progress and a cancel handle.
 for (AltAccount account : alts.store().accounts()) {
-    alts.accountService().refresh(account).thenAccept(status -> {
+    alts.accountService().check(account).thenAccept(status -> {
         switch (status.state()) {
-            // Nothing to do; the account is good, and RENEWED already persisted its new token.
-            case VALID, RENEWED -> render(status.account().username());
-            // The stored token is spent but recoverable — only a read-only check reports this.
+            // Nothing to do; the account is good as it is.
+            case VALID -> render(status.account().username());
+            // The stored token is spent but a refresh token is held: refresh(account) renews it,
+            // when the host decides to.
             case EXPIRED -> render(status.account().username() + " needs refreshing");
             // The credential is gone for good. Only a fresh interactive login fixes it.
             case REAUTH_REQUIRED -> promptMicrosoftLogin(status.account());
@@ -259,11 +262,11 @@ Two methods, and the difference matters:
 - **`check(account)`** asks the service whether the stored token still works and changes nothing.
 - **`refresh(account)`** does that, and renews from the refresh token when the stored token is spent, persisting the rotated credential.
 
-Reach for `check` when you are only looking. The token endpoint issues a new refresh token on every redemption, so a sweep built on `refresh` spends one rotation per account per sweep.
+Reach for `check` when you are only looking, as the sweep above does. The token endpoint issues a new refresh token on every redemption, so a sweep built on `refresh` spends one rotation per account per sweep. For more than a handful of accounts, `alts.bulk().checkAll(...)` runs the same check paced; the next section shows the bulk API with `refreshAll`.
 
 `UNREACHABLE` covers both an outage and a rate limit: `status.failure()` tells them apart by its kind (`NETWORK` or `RATE_LIMITED`), and carries the stated wait as `retryAfter()` when there was one. `NOT_ENTITLED` also covers an account Xbox Live refused to authorize (kind `XBOX_DENIED`).
 
-`status.account()` is the record as it now stands, renewed credentials included. Compiled as `GettingStartedExample.sweepStoredAccounts`.
+`status.account()` is the record as it now stands; after a `check` that is the record as it was, and after a `refresh` it carries the renewed credentials. Compiled as `GettingStartedExample.sweepStoredAccounts`.
 
 ## Doing it to every account at once
 
