@@ -106,7 +106,8 @@ public final class LinkSession {
     }
 
     /**
-     * Names the type only.
+     * Names the type and the 6-digit {@link #confirmationCode()}, which this device shows anyway and which
+     * is no secret; never the ephemeral private key and never the request.
      *
      * @return a description
      * @since 1.0.0
