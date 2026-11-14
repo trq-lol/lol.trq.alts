@@ -1,6 +1,7 @@
 package lol.trq.alts.model;
 
 import com.google.gson.annotations.SerializedName;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -61,6 +62,16 @@ public record AltAccount(
         @SerializedName("sourceUser") String sourceUser,
         @SerializedName("refreshToken") String refreshToken,
         @SerializedName("expiresAt") long expiresAt) {
+
+    /**
+     * Takes its own copy of {@code bans}, unmodifiable, so neither the map it was built from nor the one
+     * {@link #bans()} returns can change the account. {@code null} stays {@code null}.
+     *
+     * @since 0.6.0
+     */
+    public AltAccount {
+        bans = bans == null ? null : Collections.unmodifiableMap(new LinkedHashMap<>(bans));
+    }
 
     /**
      * Creates a freshly authenticated account stamped as used at the current system time, unattributed.

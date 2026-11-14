@@ -607,6 +607,9 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   `accounts()` or `get(key)` from another thread could see an empty store mid-load. Each now replaces
   the whole contents in one step. A store file whose plaintext is empty used to leave memory as it was;
   it now loads as the empty store it is.
+- `AltAccount` kept the `bans` map it was built with, and `GameStats` its `stats` list, so whoever still
+  held that map or list could change a record the store shares between threads, and so could a caller
+  of `bans()` or `stats()`. Each now takes an unmodifiable copy; `null` stays `null`.
 
 ## [0.12.0] - 2026-11-12
 
