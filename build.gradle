@@ -60,6 +60,14 @@ tasks.named('test') {
     useJUnitPlatform()
     // ErrorKindMigrationTableTest reads the changelog's error-kind table, so a changed table reruns it.
     inputs.file('CHANGELOG.md').withPathSensitivity(PathSensitivity.RELATIVE)
+    // ModulePathConsumerTest compiles and runs a consumer module against the built jar and Gson's jar.
+    def libraryJar = tasks.named('jar').flatMap { it.archiveFile }
+    def runtimeJars = configurations.runtimeClasspath
+    inputs.file(libraryJar).withPropertyName('moduleJar').withNormalizer(ClasspathNormalizer)
+    jvmArgumentProviders.add({
+        def gson = runtimeJars.files.find { it.name.startsWith('gson-') && it.name.endsWith('.jar') }
+        ["-Dlol.trq.alts.moduleJar=${libraryJar.get().asFile}", "-Dlol.trq.alts.gsonJar=${gson}"]
+    } as CommandLineArgumentProvider)
 }
 
 // The whole suite again, with the library as a named module on the module path: the jar is the module,
