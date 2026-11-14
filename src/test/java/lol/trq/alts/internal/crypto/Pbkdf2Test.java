@@ -1,4 +1,4 @@
-package lol.trq.alts.crypto;
+package lol.trq.alts.internal.crypto;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;

@@ -10,14 +10,14 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure;
-import lol.trq.alts.crypto.Ed25519;
-import lol.trq.alts.crypto.Pbkdf2;
-import lol.trq.alts.crypto.X25519;
 import lol.trq.alts.internal.avp.AvpCrypto;
 import lol.trq.alts.internal.avp.Challenge;
 import lol.trq.alts.internal.avp.Commits;
 import lol.trq.alts.internal.avp.Tokens;
 import lol.trq.alts.internal.avp.WrappedKey;
+import lol.trq.alts.internal.crypto.Ed25519;
+import lol.trq.alts.internal.crypto.Pbkdf2;
+import lol.trq.alts.internal.crypto.X25519;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 

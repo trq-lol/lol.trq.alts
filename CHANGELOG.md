@@ -219,6 +219,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LoginResult.failure(Kind, String)`.
 - **Breaking:** `crypto.CryptoException` and `vault.VaultException`; every failure is an
   `AltsException` (the table below maps them).
+- **Breaking: the `lol.trq.alts.crypto` package.** Its primitives (`Ed25519`, `X25519`, `Pbkdf2` and
+  `PayloadCipher`, which loses the 0.4 `aad` builder) are internal, under
+  `lol.trq.alts.internal.crypto`, and no public type takes or returns one. A host needs none of them:
+  `VaultIdentity`, `WrappedIdentity` and `RecoveryCode` (already in `vault`) are the identity API, and
+  the AVP 0.5 constructions live under `lol.trq.alts.internal.avp`.
 - **Breaking:** `AccountException` and `SkinValidationException` (with `SkinValidationException.Reason`,
   replaced by `SkinProblem` constant for constant). Their `status()`, `tokenRefused()`, `rateLimited()`,
   `notFound()` and `retryAfter()` become `failure().kind()` and `failure().retryAfter()`.

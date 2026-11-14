@@ -1,4 +1,4 @@
-package lol.trq.alts.crypto;
+package lol.trq.alts.internal.crypto;
 
 import java.security.SecureRandom;
 import java.security.spec.InvalidKeySpecException;

@@ -1,4 +1,4 @@
-package lol.trq.alts.crypto;
+package lol.trq.alts.internal.crypto;
 
 import java.math.BigInteger;
 import java.security.KeyFactory;

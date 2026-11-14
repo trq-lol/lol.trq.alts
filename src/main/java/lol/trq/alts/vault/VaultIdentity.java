@@ -9,11 +9,11 @@ import java.util.Base64;
 import javax.crypto.SecretKey;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure;
-import lol.trq.alts.crypto.Ed25519;
-import lol.trq.alts.crypto.PayloadCipher;
-import lol.trq.alts.crypto.Pbkdf2;
-import lol.trq.alts.crypto.X25519;
 import lol.trq.alts.internal.avp.Tokens;
+import lol.trq.alts.internal.crypto.Ed25519;
+import lol.trq.alts.internal.crypto.PayloadCipher;
+import lol.trq.alts.internal.crypto.Pbkdf2;
+import lol.trq.alts.internal.crypto.X25519;
 import lol.trq.alts.internal.vault.MemberKeys;
 
 /**
@@ -106,8 +106,8 @@ public final class VaultIdentity {
     /**
      * Unlocks a stored identity with its passphrase.
      *
-     * <p>The stored record is treated as untrusted: its iteration count must lie within
-     * {@link Pbkdf2#MIN_ITERATIONS} and {@link Pbkdf2#MAX_ITERATIONS}, and the public keys it names must
+     * <p>The stored record is treated as untrusted: its iteration count must lie between
+     * 10,000 and 10,000,000 (PBKDF2-HMAC-SHA256), and the public keys it names must
      * be the ones that belong to the unsealed private keys. A record whose public keys were swapped
      * after sealing, so that peers would wrap repository keys to someone else, is rejected.
      *
