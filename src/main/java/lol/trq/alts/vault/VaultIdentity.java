@@ -14,6 +14,8 @@ import lol.trq.alts.crypto.Ed25519;
 import lol.trq.alts.crypto.PayloadCipher;
 import lol.trq.alts.crypto.Pbkdf2;
 import lol.trq.alts.crypto.X25519;
+import lol.trq.alts.internal.avp.Tokens;
+import lol.trq.alts.internal.vault.MemberKeys;
 
 /**
  * A member's cryptographic identity: an Ed25519 key pair (the stable public identity used to
@@ -192,6 +194,50 @@ public final class VaultIdentity {
      */
     public String identityId() throws CryptoException {
         return Base64.getEncoder().encodeToString(Ed25519.encodePublicKey(edPublic));
+    }
+
+    /**
+     * Returns the key fingerprint of this member (AVP SPEC 3.2), {@code xxxx-xxxx-xxxx-xxxx}: what an owner
+     * compares with {@link InviteToken#fingerprint()} and the roster shows as {@link
+     * VaultMember#fingerprint()}.
+     *
+     * @return the fingerprint
+     * @throws AltsException of kind {@link lol.trq.alts.AltsFailure.Kind#CRYPTO} if a key cannot be encoded
+     * @since 1.0.0
+     */
+    public String fingerprint() {
+        try {
+            return Tokens.memberFingerprint(Ed25519.encodePublicKey(edPublic), X25519.encodePublicKey(xPublic));
+        } catch (CryptoException e) {
+            throw new AltsException(
+                    AltsFailure.of(AltsFailure.Kind.CRYPTO, "Vault identity: a key cannot be encoded"), e);
+        }
+    }
+
+    /**
+     * This identity as AVP 0.5 member keys: the same Ed25519 key signs and the same X25519 key unwraps.
+     *
+     * @return the member keys
+     * @throws AltsException of kind {@link lol.trq.alts.AltsFailure.Kind#CRYPTO} if a key cannot be encoded
+     */
+    MemberKeys memberKeys() {
+        byte[] seed = null;
+        byte[] scalar = null;
+        try {
+            seed = Ed25519.encodePrivateKey(edPrivate);
+            scalar = X25519.encodePrivateKey(xPrivate);
+            return MemberKeys.of(seed, scalar);
+        } catch (CryptoException e) {
+            throw new AltsException(
+                    AltsFailure.of(AltsFailure.Kind.CRYPTO, "Vault identity: a key cannot be encoded"), e);
+        } finally {
+            if (seed != null) {
+                Arrays.fill(seed, (byte) 0);
+            }
+            if (scalar != null) {
+                Arrays.fill(scalar, (byte) 0);
+            }
+        }
     }
 
     /**
