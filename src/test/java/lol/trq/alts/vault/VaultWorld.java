@@ -42,7 +42,7 @@ final class VaultWorld implements AutoCloseable {
 
     /** The first contact with the world's host, by locator alone. */
     VaultHost home() {
-        return await(alts.vault().connect(locator(host)));
+        return await(alts.vault().connectFirstContact(locator(host)));
     }
 
     static <T> T await(CompletableFuture<T> f) {

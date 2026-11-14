@@ -18,8 +18,8 @@ import lol.trq.alts.net.HttpTransport;
  * beforehand, refuses a host that serves another one. Pass the known key every time there is one: discovery is
  * unauthenticated, so a host reached by its locator alone is whoever answers there, and the key is what
  * identifies a host (SPEC 3.3). The forms that take a {@link RepoLocator}, a {@link HostRef}, a {@link
- * VaultSnapshot} or an explicit key all pass it; {@link #connect(String)} is the first contact with a host
- * whose key nobody vouched for yet. A vault opened through any connection still requires the verified
+ * VaultSnapshot} or an explicit key all pass it; {@link #connectFirstContact(String)} is the first contact
+ * with a host whose key nobody vouched for yet. A vault opened through any connection still requires the verified
  * manifest state to list that host's key, and the member's home host to be that key.
  *
  * <p>A locator ({@code host} or {@code host:port}) is reached at {@code https://<locator>} unless the host
@@ -123,14 +123,18 @@ public final class VaultHosts {
 
     /**
      * Connects to a host by its locator alone, taking whatever key its discovery serves: the first contact
-     * with a host nobody vouched for, such as the home host a joiner picks for itself. Prefer a form that
-     * passes the key whenever one is known.
+     * with a host nobody vouched for, such as the home host an owner creates a repository on or the one a
+     * joiner picks for itself. Discovery is unauthenticated, so the resulting {@link VaultHost#hostKey()} is
+     * unverified: show it to the user or compare it out of band with the key the host publishes before
+     * trusting it. Persist {@link VaultHost#ref()} and reconnect later with {@link #connect(HostRef)} or
+     * {@link #connect(String, String)}, which pin that key; prefer a form that passes a known key whenever one
+     * exists.
      *
      * @param locator {@code host} or {@code host:port}
      * @return the connection
      * @since 1.0.0
      */
-    public CompletableFuture<VaultHost> connect(String locator) {
+    public CompletableFuture<VaultHost> connectFirstContact(String locator) {
         Objects.requireNonNull(locator, "locator");
         return connect(locator, (byte[]) null);
     }

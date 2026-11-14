@@ -552,7 +552,7 @@ class SharedVaultAvp05Test {
         try (VaultWorld w = new VaultWorld(dir);
                 TestAvpHost other = new TestAvpHost()) {
             Pair p = pair(w);
-            VaultHost unlisted = await(w.alts.vault().connect(VaultWorld.locator(other)));
+            VaultHost unlisted = await(w.alts.vault().connectFirstContact(VaultWorld.locator(other)));
             assertEquals(AvpBytes.base64(other.key()), unlisted.hostKey());
             failure(SharedVault.open(unlisted, p.bobId(), p.owner().repoId()));
         }
@@ -582,7 +582,8 @@ class SharedVaultAvp05Test {
             // The test host speaks plain http, so a TLS handshake with it fails before any request is read.
             assertEquals(
                     Kind.NETWORK,
-                    failure(alts.vault().connect(VaultWorld.locator(plain))).kind());
+                    failure(alts.vault().connectFirstContact(VaultWorld.locator(plain)))
+                            .kind());
             assertEquals(List.of(), plain.requests());
         }
     }
@@ -701,7 +702,7 @@ class SharedVaultAvp05Test {
             Pair p = pair(w);
             assertEquals(
                     Kind.INVALID_INPUT,
-                    failure(w.alts.vault().connect("not a/locator")).kind());
+                    failure(w.alts.vault().connectFirstContact("not a/locator")).kind());
             assertEquals(
                     Kind.INVALID_INPUT,
                     failure(w.alts.vault().connect("example.net", "AAAA")).kind());
@@ -729,7 +730,8 @@ class SharedVaultAvp05Test {
             assertEquals(Kind.CANCELLED, failure(p.bob().put(full(UUID_B))).kind());
             assertEquals(
                     Kind.CANCELLED,
-                    failure(w.alts.vault().connect(VaultWorld.locator(w.host))).kind());
+                    failure(w.alts.vault().connectFirstContact(VaultWorld.locator(w.host)))
+                            .kind());
         }
     }
 

@@ -45,7 +45,7 @@ public final class SharedVaultExample {
         showOnce(owner.phrase()); // the owner writes it down: it is the only way back to the owner key
         secrets.put(OWNER_ENTROPY, Base64.getEncoder().encodeToString(owner.entropy()));
 
-        VaultHost home = alts.vault().connect(homeHost).join();
+        VaultHost home = alts.vault().connectFirstContact(homeHost).join();
         SharedVault vault = SharedVault.create(home, owner).join();
         secrets.put(SNAPSHOT, vault.snapshot().toJson());
         return vault.locator().text();
