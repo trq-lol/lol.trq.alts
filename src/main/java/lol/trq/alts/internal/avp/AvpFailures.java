@@ -22,7 +22,8 @@ import lol.trq.alts.AltsFailure.Kind;
  */
 public final class AvpFailures {
 
-    private static final String PREFIX = "Vault protocol: ";
+    /** What every message built here starts with, so a caller that relabels one can strip it. */
+    public static final String PREFIX = "Vault protocol: ";
 
     private AvpFailures() {}
 

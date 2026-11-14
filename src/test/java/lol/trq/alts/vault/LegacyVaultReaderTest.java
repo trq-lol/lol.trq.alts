@@ -350,6 +350,8 @@ class LegacyVaultReaderTest {
     private static AltsException assertKind(Kind kind, Executable call) {
         AltsException e = assertThrows(AltsException.class, call);
         assertEquals(kind, e.kind(), e.getMessage());
+        // One prefix for every failure, the shared AVP helpers' included, so a log line says where it came from.
+        assertTrue(e.getMessage().startsWith("Vault 0.4 import: "), e.getMessage());
         return e;
     }
 }

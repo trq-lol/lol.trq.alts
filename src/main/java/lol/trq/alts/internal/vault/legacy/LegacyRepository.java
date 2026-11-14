@@ -15,6 +15,7 @@ import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.internal.avp.AvpCrypto;
 import lol.trq.alts.internal.avp.AvpCrypto.WrapLabel;
+import lol.trq.alts.internal.avp.AvpFailures;
 import lol.trq.alts.internal.avp.AvpJson;
 import lol.trq.alts.internal.avp.WrappedKey;
 import lol.trq.alts.model.AltAccount;
@@ -25,7 +26,7 @@ import lol.trq.alts.model.AltAccount;
  * and talks to no host.
  *
  * <p>The checks are the ones the 0.12 {@code SharedVault.openRepo} and {@code decryptPayload} made, so an
- * import accepts exactly what a 0.12 member could read:
+ * import accepts what a 0.12 member could read, and nothing more:
  *
  * <ul>
  *   <li>the manifest names the wrap scheme {@value #SCHEME_ID};
@@ -44,9 +45,10 @@ import lol.trq.alts.model.AltAccount;
  * <p>The 0.12 rollback floor ({@code RepoPin}) has no counterpart: an import is one read with no earlier
  * state to compare with, and it proves nothing a 0.4 host could not have forged before it.
  *
- * <p>Text that is not JSON is {@code INVALID_INPUT}; JSON that is not the 0.4 shape, a member that is not
- * listed, or a check above that fails is {@code PROTOCOL}; a data key that does not unwrap or a payload that
- * does not authenticate is {@code CRYPTO}. No message quotes an input.
+ * <p>Text that is not strict JSON is {@code INVALID_INPUT}; JSON that is not the 0.4 shape, a member that is
+ * not listed, or a check above that fails is {@code PROTOCOL}; a data key that does not unwrap or a payload
+ * that does not authenticate is {@code CRYPTO}. Every message starts {@code "Vault 0.4 import: "}, and none
+ * quotes an input.
  *
  * @author trq
  * @since 1.0.0
@@ -81,6 +83,33 @@ public final class LegacyRepository {
         Objects.requireNonNull(envelopeJson, "envelopeJson");
         Objects.requireNonNull(memberId, "memberId");
         Objects.requireNonNull(x25519Private, "x25519Private");
+        try {
+            return readChecked(manifestJson, envelopeJson, memberId, x25519Private);
+        } catch (AltsException e) {
+            throw relabelled(e);
+        }
+    }
+
+    /**
+     * Gives a failure from the shared AVP helpers (a field of the wrong type, a wrap that does not open)
+     * the importer's own prefix, so every message the importer raises starts the same way. Kind and wait
+     * are kept, and the original stays the cause.
+     *
+     * @param e the failure
+     * @return {@code e} itself when it already carries the prefix, else a relabelled copy
+     */
+    private static AltsException relabelled(AltsException e) {
+        String message = e.failure().message();
+        if (message.startsWith(PREFIX)) {
+            return e;
+        }
+        String detail =
+                message.startsWith(AvpFailures.PREFIX) ? message.substring(AvpFailures.PREFIX.length()) : message;
+        return new AltsException(e.failure().withMessage(PREFIX + detail), e);
+    }
+
+    private static List<AltAccount> readChecked(
+            String manifestJson, String envelopeJson, String memberId, byte[] x25519Private) {
         JsonObject manifest = document(manifestJson, "manifest");
         JsonObject envelope = document(envelopeJson, "envelope");
 
@@ -192,7 +221,7 @@ public final class LegacyRepository {
         try {
             value = AvpJson.parse(text.getBytes(StandardCharsets.UTF_8));
         } catch (AltsException e) {
-            throw new AltsException(Kind.INVALID_INPUT, PREFIX + "the " + what + " is not JSON");
+            throw new AltsException(Kind.INVALID_INPUT, PREFIX + "the " + what + " is not strict JSON");
         }
         if (!value.isJsonObject()) {
             throw protocol("the " + what + " is not a JSON object");
