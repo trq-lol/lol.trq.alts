@@ -7,59 +7,70 @@ over a token, bulk operations, an encrypted local store and a shared vault. Host
 the host applications of bots, and account managers alike. It is consumed as a JitPack dependency
 (`com.github.trq-lol:lol.trq.alts`) or a git submodule, and it must never depend on or reference any
 specific consumer. Pure JDK plus Gson: no Minecraft types, no renderer types, no host imports. Package
-and class names (`alts`, `AltStore`, `AltAccount`) are historical and stay.
+and class names (`alts`, `AltAccount`, `VaultDirectoryProvider`) are historical and stay.
 
 ## 30-second mental model
 
-One wiring root, a handful of host seams, everything else behind them.
+One wiring root that owns everything it builds, a handful of host seams, the rest internal.
 
 ```java
-AltsRuntime<H> alts = new AltsRuntime.Builder<H>()
+try (AltsRuntime<H> alts = new AltsRuntime.Builder<H>()
         .sessionInjector(session -> ...)   // REQUIRED: make a SessionData the live session
-        .vaultDirectory(() -> dataDir)     // REQUIRED: where the encrypted account file lives
+        .vaultDirectory(() -> dataDir)     // REQUIRED: where the two encrypted store files live
         .mainThread(host::execute)         // REQUIRED: run a task on the host's main thread
         .toastSink(...)                    // REQUIRED: surface a notification
         .textureUploader(...)              // optional: PNG bytes -> your handle type H
         .avatarSource(...)                 // optional: defaults to Mojang, cropped locally
+        .avatarUrlTemplate(...)            // optional: or a head-render service (discloses UUIDs)
         .gameStatsSource(...)              // optional: one per server
         .microsoftAuth(MicrosoftAuthConfig.of(yourAzureClientId))  // optional
-        .vaultTransportResolver(...)       // optional: avp:// authority -> transport
+        .accountEndpoints(...)             // optional: another base for the account services
+        .vaultHostAddress(...)             // optional: vault host locator -> base URL
         .proxyProvider(scope -> ...)       // optional: route each request; absent means direct
         .executor(hostExecutor)            // optional: where blocking work runs; default virtual threads
         .storeKeyProvider(() -> keyBytes)  // optional: real key material for the stores
         .migrateFromMachineKey(upgrade)    // optional: true on the ONE launch that adopts the key
-        .build();   // validates, binds the static stores, and loads them from disk
+        .build()) {  // validates, opens and locks this runtime's stores, loads them from disk
 
-alts.loginService();           // the entire sign-in surface
-alts.accountService();         // check / refresh, without touching the live session
-alts.bulk();                   // the same, over many accounts, paced
-alts.accountServices(account); // profile / entitlements / name / skin / cape / attributes / ... over the token
-alts.profileLookup();          // name or UUID -> public identity, no token
-alts.skinCache();              // UUID -> H
-alts.gameStats("example.net")  // AsyncCache<uuid, GameStats>, one per registered source
+    alts.store();                  // AccountStore: the saved accounts and the current one
+    alts.secrets();                // HostSecrets: per-user secrets, kept apart from the accounts
+    alts.loginService();           // the entire sign-in surface
+    alts.accountService();         // check / refresh, without touching the live session
+    alts.bulk();                   // the same, over many accounts, paced
+    alts.accountServices(account); // profile / entitlements / name / skin / cape / attributes / ... over the token
+    alts.profileLookup();          // name or UUID -> public identity, no token
+    alts.skinCache();              // UUID -> H
+    alts.gameStats("example.net"); // AsyncCache<uuid, GameStats>, one per registered source
+    alts.vault();                  // VaultHosts: connect to AVP 0.5 hosts, then open a SharedVault
+    alts.toasts();                 // the host's ToastSink, the one route for a notification
+}   // close(): flush and unlock the stores, close the transport, shut a library-made executor
 ```
 
 `H` is the host's opaque texture-handle type. The library never inspects it; it only hands it back.
 
-The proxy provider, the executor, the stores and the store key are process-wide statics behind the
-runtime. A later `null` (or a second runtime that leaves one unset) never removes what is installed.
+Nothing is process-wide. Each runtime builds and owns its `AccountStore`, its `HostSecrets`, its
+transport (proxy provider, tunnel connections, timeouts) and its executor, and hands them to every
+service through constructors. Two runtimes in one JVM, on two directories, share nothing; two on one
+directory cannot both build, because each store file is locked for its runtime's life.
 
-Package map:
+Package map (the exported packages are exactly what `module-info.java` exports and what
+`api/lol.trq.alts.api` lists):
 
 | Package | What lives there |
 |---|---|
-| `spi/` | the host seams, which are the entire boundary: `SessionInjector`, `VaultDirectoryProvider`, `MainThreadExecutor`, `ToastSink`, `TextureUploader`, `AvatarSource`, `GameStatsSource`, `ProxyProvider`, `StoreKeyProvider`, `DeviceCodePrompt`, `VaultTransportResolver` |
-| `auth/` | the sign-in routes, account check/refresh, `MicrosoftAuthConfig`, token expiry, cookies, `XstsError` |
-| `account/` | the surface over a token: profile (read, create), entitlements, name (+claim), skin, cape, attributes, certificates, blocklist; plus the anonymous `ProfileLookupService` |
-| `bulk/` | one operation over many accounts: pacing, retries, progress, cancellation, rate-limit handling |
-| `net/` | `HttpUtil` (the one way out), `ProxyTunnelSocketFactory`, `IoExecutor` (the one executor), `FailureText`, `NetworkScope`, `ProxyRoute`, `Backoff`, `Multipart` |
-| `store/` | `AltStore` (accounts) and `SecretStore` (per-user secrets) over the shared `StoreFile` writer |
+| `lol.trq.alts` | `AltsRuntime` and its `Builder`; the error model, `AltsFailure` (with `Kind`) and `AltsException` |
+| `spi/` | the host seams, which are the entire boundary: `SessionInjector`, `VaultDirectoryProvider`, `MainThreadExecutor`, `ToastSink`, `TextureUploader`, `AvatarSource`, `GameStatsSource` (+ `StaticGameStatsSource`), `ProxyProvider`, `StoreKeyProvider`, `DeviceCodePrompt` |
+| `auth/` | `AltLoginService`, `AltAccountService`, `LoginResult`, `AccountStatus`, `MicrosoftAuthConfig`, `CookieFile`, `XstsError` |
+| `account/` | the surface over a token: profile (read, create), entitlements, name (+claim), skin (+`SkinProblem`), cape, attributes, certificates, blocklist, `AccountEndpoints`; plus the anonymous `ProfileLookupService` |
+| `bulk/` | one operation over many accounts: `BulkOperations`, `BulkOptions`, `BulkProgress`, `BulkReport`, `BulkEntryResult`, `CredentialKind` |
+| `net/` | the value types a `ProxyProvider` sees: `NetworkScope` (purpose, account, route tag) and `ProxyRoute` |
+| `store/` | `AccountStore` and `HostSecrets`, reached only as `alts.store()` / `alts.secrets()` |
 | `time/` | `TimeSource` seam + `SystemTimeSource` / `NtpTimeSource`, for the scheduled name claim |
 | `cache/` | `AsyncCache<K,V>`: lazy, non-blocking, stale-while-revalidate, bounded |
-| `skin/` | `SkinAvatarCache<H>` (UUID-keyed) + `MojangAvatarSource` / `UrlTemplateAvatarSource` |
+| `skin/` | `SkinAvatarCache<H>` (UUID-keyed), reached only as `alts.skinCache()` |
 | `model/` | the records: `AltAccount`, `SessionData`, `GameStats`, `BanInfo`, enums |
-| `format/` | text and colour helpers for account UIs |
-| `crypto/`, `vault/` | the shared repository; `vault/transport/` is the DTO boundary, `vault/federation/` is `avp://` addressing |
+| `vault/` | the AVP 0.5 client API (`VaultHosts`, `VaultHost`, `SharedVault`, `SyncReport`, `VaultSnapshot`, `OwnerIdentity`, `LinkSession`, `VaultIdentity` and its stored forms, the tokens) and the read-only `LegacyVaultReader` |
+| `internal/` | everything else: `internal.net` (`HttpTransport`, the tunnel, `FailureText`, ...), `internal.auth` (the sign-in chain), `internal.account`, `internal.bulk`, `internal.store` (`StoreFile`, `EncryptionUtil`), `internal.skin`, `internal.crypto` (the primitives), `internal.avp` (the AVP 0.5 constructions), `internal.vault` (the client engine; `legacy` is the 0.4 importer). Not exported, not documented, not covered by the API gate |
 
 ## Hard rules
 
@@ -67,15 +78,23 @@ Package map:
   launcher, product, sync server, or hosted instance that consumes this, and never name or link another
   authentication library, launcher or tool. Keep examples generic (`your application`, `the host`,
   `example.net`, `vault.example`). This covers source, comments, Javadoc, docs, commit messages, tests,
-  and the README. `AltAccount.sourceClient`/`sourceUser` and `avp://host/repoId` define field *names*
+  and the README. `AltAccount.sourceClient`/`sourceUser` and `avp://` locators define field *names*
   only; the values are host-supplied at runtime. CI enforces this (`.github/workflows/no-leak.yml`,
   against a denylist held as a repository secret).
 - **Host-agnostic boundary.** Seam interfaces live in `spi/`; hosts implement them. Never reach into a
   host type. No `import` outside `lol.trq.alts`, the JDK, and Gson.
+- **Never export `internal`.** Implementation goes under `lol.trq.alts.internal.<pkg>`, which
+  `module-info.java` does not export and the published Javadoc leaves out (`javadocCheck` fails the
+  build if it shows up). No exported signature may name an internal type: `apiCheck` fails outright.
+- **The API is frozen by a dump.** `api/lol.trq.alts.api` is the committed list of every exported type,
+  member and signature. `apiCheck` (part of `check`) fails when a line is removed or changed in the same
+  major version, and when the jar has API the dump lacks. An intended addition is recorded with
+  `./gradlew apiDump`; a removal is a 2.0 matter (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 - **Secrets stay out.** No API keys, tokens, or credentials in source or history. A server API key lives
   host-side behind `GameStatsSource` (or another seam). Never commit `.idea/`, `*.iml`, or machine paths.
 - **House style.** palantir-java-format (4-space, 120 column). Records for DTOs with `@SerializedName`
-  on every component. Full Javadoc on public and protected members, with `@since` on each new one.
+  on every component. Full Javadoc on public and protected members, with exactly one `@since` naming the
+  release each one first shipped in (`SinceTagsTest` checks every exported declaration).
 - **Conventional Commits**, one logical change each, and **never** a `Co-Authored-By` or any other
   AI-attribution trailer. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -85,100 +104,143 @@ Package map:
 (browser, authorization code with PKCE), `loginDeviceCode` (no browser, no port; the host shows a code
 through `DeviceCodePrompt`), `loginRefreshToken`, `loginCookie`, `loginCookieFile`, `loginSession`,
 `loginOffline`, and `loginAccount` (log into a record you already hold). All return
-`CompletableFuture<LoginResult>`; none throw at the caller. A new route follows the same shape: resolve
-on the library executor, finish through `finalizeLogin`, return a classified result.
+`CompletableFuture<LoginResult>`; none throw at the caller, and none complete exceptionally.
+`routed(tag)` returns a view whose every request carries a route tag, for a first sign-in that has no
+account UUID to route on yet. A new route follows the same shape: resolve on the runtime's executor,
+finish through `finalizeLogin`, return a classified result.
 
-**Outcomes are typed, messages are not.** Every `LoginResult` carries an `AltLoginCallback.FailureReason`:
+**One error model.** A failure anywhere is an `AltsFailure`: a `kind()` to branch on, a library-built
+`message()`, `retryAfter()` / `retryAt()` when the service stated a wait, `xstsError()` on
+`XBOX_DENIED`, and `retryable()`. Where the caller is expected to branch on the outcome (`LoginResult`,
+`AccountStatus`, `NameChangeResult`, `ProfileCreationResult`, `ClaimResult`, `BulkEntryResult`) the
+result carries it as `Optional<AltsFailure> failure()`; everywhere else it is thrown as the unchecked
+`AltsException`, and a library future completes exceptionally only with one (inside a
+`CompletionException`). `AltsFailure.Kind` is one enum for the whole library:
 
-| Reason | Meaning |
+| Kind | Meaning |
 |---|---|
-| `NONE` | success |
-| `UNKNOWN` | unclassified |
-| `REAUTH_REQUIRED` | the stored credential is permanently spent and was discarded |
-| `INVALID_TOKEN` | empty, malformed or refused |
-| `NETWORK` | unreachable or a 5xx; retry |
-| `NOT_CONFIGURED` | no `MicrosoftAuthConfig` |
-| `NOT_ENTITLED` | authenticated, no Minecraft profile |
+| `NETWORK` | unreachable, timed out, a 5xx or a 408; retry |
 | `RATE_LIMITED` | a `429`; wait (`retryAfter()` when stated) |
+| `UNAUTHORIZED` | empty, malformed or refused; a refresh token may still renew |
+| `REAUTH_REQUIRED` | a stated `invalid_grant`: the credential is spent and was discarded |
+| `NOT_ENTITLED` | authenticated, no Minecraft profile (sign-in, check and `ProfileService.fetch` alike) |
+| `NOT_FOUND` | a `404` on anything but the profile read |
 | `XBOX_DENIED` | Xbox Live refused; `xstsError()` says why |
 | `DECLINED` | the user refused an interactive sign-in |
 | `TIMED_OUT` | an interactive sign-in was not finished in time |
+| `CANCELLED` | stopped on the caller's side: cancelled, the runtime closed, the executor refused |
+| `INVALID_INPUT` | what the caller supplied cannot be used; nothing was sent |
+| `CONFLICT` | a `409`, or a store file held by another runtime |
+| `NOT_CONFIGURED` | no `MicrosoftAuthConfig`, no device-code support, or the client registration refused |
+| `STORAGE` | a store file could not be read or written |
+| `CRYPTO` | a key did not unwrap, a ciphertext did not authenticate |
+| `PROTOCOL` | an answer the protocol does not allow; every rejected vault host item |
+| `UNKNOWN` | unclassified; the enum ends here so a host's `default` covers a later constant |
 
-Hosts branch on the reason; a message string survives neither obfuscation nor localization. Classify a
+Hosts branch on the kind; a message string survives neither obfuscation nor localization. Classify a
 *refusal* apart from an *unreachable service* apart from a *throttle*: the first means the credential is
-spent, the second means retry, the third means wait, and conflating them sends the user through a
-browser login to fix an outage or retries into a ban. `AccountStatus.State` maps `RATE_LIMITED` to
-`UNREACHABLE` (with `rateLimited()` true) and `XBOX_DENIED` to `NOT_ENTITLED`; that mapping is an
-exhaustive switch, so a new reason has to be placed.
-
-**There are four error models, by layer.** `LoginResult` for sign-in, `AccountStatus` for check and
-refresh, the checked `AccountException` (with status, `rateLimited()`, `notFound()`, `retryAfter()`) for
-account reads, and the checked `CryptoException` / `VaultException` for the vault. Mutations whose
-refusal is an ordinary outcome return a classified result (`NameChangeResult`, `ProfileCreationResult`,
-`ClaimResult`). The stores throw nothing for I/O and report on `loadError()` / `saveError()`.
+the problem, the second means retry, the third means wait, and conflating them sends the user through a
+browser login to fix an outage or retries into a ban. `AccountStatus.State` maps `RATE_LIMITED` and
+`NETWORK` to `UNREACHABLE` and `XBOX_DENIED` to `NOT_ENTITLED`; that mapping is an exhaustive switch,
+so a new kind has to be placed. `ErrorKindMigrationTableTest` pins every 0.12 constant's kind against
+the CHANGELOG table, row for row.
 
 **A refresh token is a durable credential, not another access token.** It renews a session for as long as
 it is valid, so it is redacted from every `toString`, never persisted for an account the store does not
 already hold, discarded only on a *stated* `invalid_grant` (never on a 429, a 408, or a 5xx), and
-withheld from a shared repository unless the manifest opts in. Keep all four properties when touching
-`AltAccount`, `AltStore`, `MicrosoftAuthUtil`, or `SharedVault`.
+withheld from a shared repository unless its latest owner-signed state opts in. Keep all four
+properties when touching `AltAccount`, `AccountStore`, the sign-in chain (`internal.auth`) or the vault.
 
 **DTOs are records with `@SerializedName` on every component**, so (de)serialization survives shrinking
 and obfuscation. Any record carrying a credential, a response body or a header value overrides
-`toString` to leave it out. Adding a component breaks deconstruction patterns: keep a constructor with
-the previous arity and note the change in the changelog.
+`toString` to leave it out. Adding a component breaks deconstruction patterns, and after 1.0 it fails
+`apiCheck`: a public record does not grow components within a major version. `AltsFailure` is a value,
+not a wire DTO, and carries no annotations.
 
 **Logging in is one step more than operating on an account.** `AltAccountService.check`/`refresh` never
 touch the live session; `loginAccount` is `refresh` plus the injection. Keep it that way: anything that
 works over many accounts is unbuildable the moment a session install creeps back into the middle of the
 chain. Prefer `check` over `refresh` when only looking: renewal rotates the refresh token every time.
 
-**Every request goes through `HttpUtil`.** That is where the finite timeouts, the redirect rules, the
-1 MiB body cap, the header check, and the host's proxy live. A new call site that opens its own
-connection opts out of all of them. Pass a `NetworkScope` naming the purpose and, when there is one, the
-account, on every hop.
+**The runtime owns its state, and hands it down.** `AltsRuntime` constructs its stores, its
+`HttpTransport` and its executor and passes them to each service through its constructor; nothing in
+the library reads a static to reach a store, the network or a thread. Public types that need
+construction the host must not do themselves (the stores, `AccountServices`, `ProfileLookupService`,
+`SkinAvatarCache`, `VaultHosts`) have no public factory: a package-private bridge in their package
+(`StoreBridge`, `AccountBridge`, `SkinBridge`, `VaultBridge`) installs into an `internal.*Access` class
+that accepts only that bridge, once, and the runtime builds through it. Follow the same pattern for a
+new runtime-built type.
 
-**Every blocking task goes through `IoExecutor.executor()`.** Pass it as the executor argument of
-`supplyAsync`, `runAsync` and `delayedExecutor`. The one-argument forms run on the common pool, which the
-library does not use.
+**Every request goes through the runtime's `HttpTransport`** (`internal.net`). That is where the finite
+timeouts, the redirect rules, the 1 MiB body cap (16 MiB for vault exchanges), the header checks (no
+control character, no caller-set `Proxy-Authorization`), and the host's proxy live. A new call site that
+opens its own connection opts out of all of them. Pass a `NetworkScope` naming the purpose and, when
+there is one, the account, on every hop; a routed view adds its tag.
 
-**Proxy resolution fails closed.** An installed `ProxyProvider` that throws or returns null fails the
-request; it must never fall back to a direct connection. An HTTPS target behind an HTTP proxy goes
-through `ProxyTunnelSocketFactory`, which sends the credential on the `CONNECT` only and keeps
-connections apart per proxy identity. The JVM still resolves the origin host name locally on that path;
-that is a documented limit, not something to paper over.
+**Every blocking task runs on the runtime's executor**, `transport.executor()`. Pass it as the executor
+argument of `supplyAsync`, `runAsync` and `delayedExecutor`; the one-argument forms run on the common
+pool, which the library does not use. Every wait goes through `transport.delay(...)` /
+`schedule(...)`, which `close()` ends: the JDK's own delayed executor would swallow the rejection.
+
+**`close()` ends everything.** It flushes and unlocks both stores, drops the vault's tokens, closes the
+transport (pooled tunnels; every later request refused), and shuts down an executor the runtime created
+(a host's executor is left alone). Whatever waited on the runtime fails on the closing thread: a paced
+bulk run, a device-code poll, a scheduled claim, a browser sign-in's callback. A route started after
+close returns `CANCELLED` (result types) or throws `AltsException(CANCELLED)` (account services). It is
+idempotent, and a shutdown hook still flushes for a host that never calls it.
+
+**Proxy resolution fails closed.** A `ProxyProvider` that throws or returns null fails the request; it
+must never fall back to a direct connection. No provider means direct, per runtime. An HTTPS target
+behind an HTTP proxy goes through `ProxyTunnelSocketFactory`, which sends the credential on the
+`CONNECT` only and keeps connections apart per proxy identity, within one transport. The JVM still
+resolves the origin host name locally on that path; that is a documented limit, not something to paper
+over.
 
 **The account services live over a token and never touch the session or store.** `account/` is a set of
-one-job services built from a live access token through `AccountServices.of(...)` or
-`alts.accountServices(account)`. Reach them through the facade; the `*Impl` classes are package-private
-on purpose. `ProfileLookupService` sends no token at all.
+one-job services built from a live access token through `alts.accountServices(account)` (or
+`(token, uuid)`), aimed at `Builder#accountEndpoints` or the origin of the configured profile URL. The
+implementations are in `internal.account`. `ProfileLookupService` sends no token at all.
 
 **A scheduled claim's wait is real-time.** `NameService.claimAt` sleeps to the final stretch then spins
 briefly; its clock is a `time/TimeSource` seam so a host can correct drift, but the sleep is wall-clock.
 Test it with the real clock and short durations, not a frozen one. `NtpTimeSource.now()` never touches
 the network. Keep "the name was claimed" separate from "the run stopped": `ClaimResult.stopReason()`
-says which, and a rate limit or a cancellation ends the run.
+says which, and a `TERMINAL_FAILURE` carries the failure (a rate limit or a closed runtime included).
 
 **Avatars key on UUID and default to Mojang.** `skinCache().get(uuid)`, never the username. The default
-`AvatarSource` crops the face from Mojang directly, so no third party sees the account list;
-`UrlTemplateAvatarSource` is the opt-in back. At most six downloads are in flight, and a failed fetch
-retries on a backoff.
+source (`internal.skin.MojangAvatarSource`) crops the face from Mojang directly, so no third party sees
+the account list; `Builder#avatarUrlTemplate` is the opt-in back. At most six downloads are in flight,
+and a failed fetch retries on a backoff.
 
-**An unreadable store is not an empty store.** `AltStore`/`SecretStore` never overwrite a file they
-failed to read: they report why on `loadError()` and copy it aside to `<name>.unreadable.<time>` first
-(newest five kept). With the default machine-derived key, a renamed OS user is enough to make a good file
-unreadable. With a `StoreKeyProvider`, a file opens under the host's key or not at all; the
-machine-derived key is accepted only while `migrateFromMachineKey(true)` is set; and while a load failed
-because the key was unavailable, every write is refused until a `load()` succeeds. Preserve all of that
-in any change to persistence.
+**An unreadable store is not an empty store.** `AccountStore`/`HostSecrets` never overwrite a file they
+failed to read, whatever the reason (the wrong key, an unavailable key, a damaged file, a read error):
+they report why on `loadError()` (kind `STORAGE`), copy it aside to `<name>.unreadable.<time>` (newest
+five kept; a file unread only for want of the key is copied when discarded), and refuse every write,
+reported on `saveError()`, until a `load()` succeeds, the file is gone, or the host calls
+`discardUnreadable()`. With the default machine-derived key, a renamed OS user is enough to make a good
+file unreadable. With a `StoreKeyProvider`, a file opens under the host's key or not at all, and the
+machine-derived key is accepted only while `migrateFromMachineKey(true)` is set. Preserve all of that in
+any change to persistence.
 
-**Store writes are atomic and, under the builder, coalesced.** `StoreFile` stages, syncs and moves, and
-keeps a `.bak`. A runtime built through the builder writes 100 ms after a mutation on the
-`alts-store-writer` thread; `save()` and `flush()` write at once.
+**A store file has one owner.** Each store takes an exclusive `FileChannel` lock on a sidecar
+`<name>.lock` for its runtime's life. A second runtime on the same file, in this process or another,
+fails `build()` with `CONFLICT` (the message names the file, never the path), and a build that fails
+holds no lock. `close()` releases it.
 
-**The vault verifies before it wraps.** `SharedVault` takes a `KeyBindingVerifier` and has no default:
-`trustTransport()` is an explicit choice. `RepoPin` is the host-persisted rollback floor. The protocol
-does not resist a malicious server; [SECURITY.md](SECURITY.md) says exactly where.
+**Store writes are atomic and coalesced.** `StoreFile` stages, syncs and moves, and keeps a `.bak`. A
+runtime writes 100 ms after a mutation on the store's writer thread; `save()` and `flush()` write at
+once. After `close()` a mutator changes memory only and records "the store is closed" on `saveError()`.
+
+**The vault verifies everything, trusts no host.** It speaks AVP 0.5: an owner-signed manifest chain
+(members, wrapped keys, epoch, policy, hosts), member-signed commits, strict Ed25519, the pin and the
+tie rule, wraps only to invite-token keys. A forged state, a forged commit or a rollback fails the whole
+operation with `PROTOCOL` and leaves the copy as it was (a deliberate departure from the reference
+client, which keeps the valid prefix). `VaultHosts.connect` passes the expected host key wherever one is
+known; `connectFirstContact` is for a first contact only. The library never sends a host the owner
+phrase, its entropy or seed, a private key, a data key or a plaintext. `VaultSnapshot` and the
+`OwnerIdentity` entropy are secrets the host persists encrypted, recommended in `HostSecrets`.
+`LegacyVaultReader` reads a 0.4 repository once and writes nothing. [SECURITY.md](SECURITY.md) says
+exactly what the protocol does and does not resist.
 
 **Microsoft login needs a host-supplied client id.** There is no built-in default. `MicrosoftAuthConfig.of`
 is the Azure OAuth dialect; `legacyMsa` is the pre-Azure one, which differs in its redirect, its scope,
@@ -188,54 +250,80 @@ and its RPS ticket prefix.
 
 - **Do not add a Minecraft, renderer, or consumer import.** If a change seems to need one, it belongs
   behind a new `spi/` seam.
-- **Do not branch on a failure message** anywhere, including in tests. Add a `FailureReason` if the
-  existing ones do not fit.
+- **Do not export or leak `internal`.** A public signature that names an internal type, a new `exports`
+  line, or a public class added to an exported package without a dump update fails `apiCheck` or
+  `javadocCheck`. Decide first whether a new type is API; if it is, run `apiDump` and review the diff.
+- **Do not add a method to an `spi` seam without a default.** A host implements those; an abstract
+  addition breaks it, which the line-based gate does not catch. The service interfaces (`AltLoginService`,
+  `AltAccountService`, `BulkOperations`, `BulkHandle`, `ProfileLookupService`, the `account` services)
+  are implemented by the library only and say so, so a method may be added there.
+- **Do not branch on a failure message** anywhere, including in tests. Branch on the kind; add a `Kind`
+  only if none fits, and place it in `AccountStatus.State`'s switch and the CHANGELOG.
+- **Do not throw anything but `AltsException` out of a future**, and do not throw at the caller from a
+  result-typed route: a sign-in, check or refresh returns its failure.
 - **Do not append a transport exception's message to user-facing text.** The JDK quotes the offending
   input in its messages, and here that input is a token, a sign-in address or a path. Use
-  `FailureText.of(failure)`, which returns a fixed phrase for the kind of failure, and keep the original
-  as the cause.
-- **Do not put a control character in a header.** `HttpUtil` refuses a header name or value holding one
-  with a message that quotes nothing. Strip pasted tokens of whitespace and control characters first.
-- **Do not use the common pool.** No one-argument `supplyAsync` / `runAsync`; pass
-  `IoExecutor.executor()`. Logins resolve on that executor while the host reads `accounts()` from its own
-  thread, which is why the store collections are concurrent and the mutators atomic.
-- **Do not assume the session injector runs on the main thread.** It is called from the library
+  `internal.net.FailureText.of(failure)`, which returns a fixed phrase for the kind of failure, and keep
+  the original as the cause.
+- **Do not put a control character in a header**, or set `Proxy-Authorization` yourself. `HttpTransport`
+  refuses both with a message that quotes nothing. Strip pasted tokens of whitespace and control
+  characters first.
+- **Do not use the common pool.** No one-argument `supplyAsync` / `runAsync`; pass the transport's
+  executor. Logins resolve on it while the host reads `accounts()` from its own thread, which is why the
+  store collections are concurrent and the mutators atomic.
+- **Do not reach for a static.** There is no process-wide store, transport, executor or toast sink;
+  take what you need through the constructor, from the runtime that built you.
+- **Do not assume the session injector runs on the main thread.** It is called from the runtime's
   executor.
-- **Do not write a store file any other way.** Go through `StoreFile`, and never write after an
-  unreadable load without the copy aside, or at all while the key was unavailable.
-- **Do not accept the machine-derived key under a provider** outside the migration opt-in, and never let
-  a `null` remove an installed proxy provider, executor or store key.
+- **Do not write a store file any other way.** Go through `StoreFile`, and never write over a file whose
+  last load failed.
+- **Do not accept the machine-derived key under a provider** outside the migration opt-in.
 - **Do not persist an account the store does not already hold.** `updateCredentials` is deliberately a
   no-op for an unknown UUID: a `DIRECT` login or an account from a shared repository is one the user
-  chose not to save.
-- **Do not change a crypto construction casually.** The scheme ids, AAD, and key-binding bytes are fixed
-  by the [Alt Vault Protocol](https://github.com/trqlmao/avp) and gated byte-for-byte by
-  `AvpConformanceVectorsTest` against vendored vectors.
-- **Test seams need the test JVM.** `HttpUtil.resetForTests`, `IoExecutor.resetForTests`, the store
-  resets and the TLS override are package-private and throw unless the JVM carries
-  `-Dlol.trq.alts.testSeams=true`. The Gradle `test` task sets it; a test run from an IDE must add it.
-  From another test package, reach them through the helpers in the test sources: `NetTestHooks`
-  (`resetHttp`, `resetExecutor`) and `StoreTestHooks` (`reset`). Tests that install a provider, an
-  executor or a write delay reset it afterwards; `bind(null)` does not.
+  chose not to save. Nothing the vault reads is written to the `AccountStore`.
+- **Do not change a vault construction casually.** The canonical encodings, labels, AAD and wrap scheme
+  are fixed by the [Alt Vault Protocol](https://github.com/trqlmao/avp) 0.5 and gated byte for byte by
+  the vendored vectors (`src/test/resources/avp-vectors/`, pinned by `AvpVectorFilesTest`): the vector
+  tests under `internal.avp` (`PrimitiveVectorsTest`, `ManifestVectorsTest`, `CommitVectorsTest`,
+  `MergeVectorsTest`, `FederationVectorsTest`, `Bip39OwnerVectorsTest`, `NegativeVectorsTest`,
+  `AcceptanceReplayTest`), and `AvpConformanceVectorsTest` in `internal.crypto` for the 0.4 primitives
+  the identity and the importer rest on.
+- **Do not sign raw host bytes.** 0.5 signs only canonical-encoding constructions (the challenge is
+  `CE("avp/challenge/v1", hostKey, memberKey, nonce)`). `VaultIdentity.signChallenge` is the 0.4 export
+  aid and refuses `avp/`-prefixed or out-of-range input; keep that guard.
+- **Test seams are package-private and need nothing else.** There is no `lol.trq.alts.testSeams`
+  property and no process-wide reset: a test builds its own runtime, store or transport and closes it.
+  From another package, reach the seams through the helpers in the test sources: `StoreTestHooks`
+  (`store`: open a store directly, its write delay, close it, list unreadable copies), `StoreFileSeams`
+  (`internal.store`: the `StoreFile` hooks), `TestTransports` (`internal.net`: a transport per test,
+  routed, on a given executor, or trusting a loopback TLS certificate), `AccountStoreTestSupport`
+  (`internal.auth`), and `TestAvpHost` / `VaultWorld` for the vault. The hooks themselves
+  (`Builder.afterStoresOpenForTests`, `StoreFile.beforeWriteForTests`, `fileForTests`,
+  `SharedVault.engineForTests`) stay package-private.
+- **Every test runs twice.** `check` runs the suite on the class path (`test`) and again with the jar as
+  a named module (`moduleTest`), so a missing `requires` or `opens` fails there. Gson builds private
+  records by reflection only in `store` and `internal.auth`, which the descriptor opens to Gson alone.
 - **Do not edit a docs snippet directly.** Every multi-line Java block in `docs/GETTING_STARTED.md` is
   inlined from a method in `examples/`, which `check` compiles with `-Xlint:deprecation -Werror`. Change
-  the example first, then the guide, and never show deprecated API.
+  the example first, then the guide, character for character.
 - **Do not skip the `@since`.** New public and protected members carry the version they will first ship
   in, and a `CHANGELOG.md` entry under `[Unreleased]`.
 - **Do not claim live verification you do not have.** The device-code flow and the cookie chain are
-  tested against loopback and scripted servers only.
+  tested against loopback and scripted servers only; the vault against an in-process test host.
 
 ## Build
 
 ```bash
-./gradlew build          # compile + test + spotlessCheck + compile examples/
+./gradlew build          # compile + test + moduleTest + apiCheck + javadocCheck + spotlessCheck + examples
 ./gradlew check          # the same gate CI runs
 ./gradlew spotlessApply  # format (run before committing)
+./gradlew apiDump        # record an intended API addition in api/lol.trq.alts.api
 ```
 
 JDK 25 required. The library has no Minecraft dependency, so it builds standalone. A release is a
-`build: release X.Y.Z` commit (version in `build.gradle`, dated changelog heading) followed by a `vX.Y.Z`
-tag; the tag's CI run publishes the GitHub release from that changelog section.
+`build: release X.Y.Z` commit (version in `build.gradle`, dated changelog heading, the API dump's
+version) followed by a `vX.Y.Z` tag; the tag's CI run publishes the GitHub release from that changelog
+section.
 
 ## Further reading
 
@@ -243,4 +331,4 @@ tag; the tag's CI run publishes the GitHub release from that changelog section.
 [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for host integration,
 [llms.txt](llms.txt) for a structured index of everything,
 [SECURITY.md](SECURITY.md) for the threat model and its stated boundaries,
-[docs/specs/](docs/specs/) for the design records, including what remains before the 1.0 API freeze.
+[docs/specs/](docs/specs/) for the design records, the 1.0 freeze and its type inventory among them.
