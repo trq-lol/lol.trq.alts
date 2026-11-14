@@ -893,6 +893,101 @@ public final class HttpTransport implements AutoCloseable {
     }
 
     /**
+     * A response as raw bytes, whatever its status, for a protocol that parses its own bodies strictly and
+     * reads the error body of a refusal as well as the body of a success.
+     *
+     * @param status the HTTP status code
+     * @param body the body bytes, empty when the response carried none
+     * @param retryAfter how long the service asked the caller to wait, or {@code null} when it did not
+     * @author trq
+     * @since 1.0.0
+     */
+    public record RawResponse(int status, byte[] body, Duration retryAfter) {
+
+        /**
+         * Copies the body.
+         *
+         * @since 1.0.0
+         */
+        public RawResponse {
+            body = body == null ? new byte[0] : body.clone();
+        }
+
+        /**
+         * Returns the body.
+         *
+         * @return a copy of the body bytes
+         * @since 1.0.0
+         */
+        @Override
+        public byte[] body() {
+            return body.clone();
+        }
+
+        /**
+         * Returns a description that leaves the body out, for the reason {@link HttpResponse#toString()}
+         * does.
+         *
+         * @return a loggable description
+         * @since 1.0.0
+         */
+        @Override
+        public String toString() {
+            return "RawResponse[status=" + status + ", body=" + body.length + " bytes, retryAfter=" + retryAfter + "]";
+        }
+    }
+
+    /**
+     * Sends one request and returns the status with the raw body, read up to a cap the caller chooses, for
+     * every status: the error body of a {@code 4xx} or {@code 5xx} is read too. The shared vault uses it,
+     * because its answers can be larger than the {@value #MAX_TEXT_BODY_BYTES}-byte cap of the JSON
+     * helpers and it parses them itself.
+     *
+     * <p>Same request path as every other method here: the scope's route, failing closed when the proxy
+     * provider does; the same timeouts and header checks; no redirects.
+     *
+     * @param method the HTTP method
+     * @param urlString the target URL
+     * @param contentType the Content-Type header value, or null when there is no body
+     * @param headers optional HTTP headers to include in the request
+     * @param body the raw request body, or null
+     * @param maxBytes the largest body to read
+     * @param scope what is being fetched, and on whose behalf
+     * @return the status, the body and any stated wait
+     * @throws IOException if the body runs past {@code maxBytes}, or the request fails
+     * @throws Exception if a network or protocol error occurs
+     * @since 1.0.0
+     */
+    public RawResponse exchange(
+            String method,
+            String urlString,
+            String contentType,
+            Map<String, String> headers,
+            byte[] body,
+            long maxBytes,
+            NetworkScope scope)
+            throws Exception {
+        HttpURLConnection conn = open(urlString, scope);
+        conn.setRequestMethod(method);
+        applyHeaders(conn, contentType, headers);
+        writeBody(conn, body);
+
+        int status = conn.getResponseCode();
+        Duration retryAfter = retryAfter(conn);
+        InputStream stream = responseStream(conn, status);
+        if (stream == null) {
+            return new RawResponse(status, null, retryAfter);
+        }
+        try (stream) {
+            byte[] bytes = readCapped(stream, maxBytes);
+            if (bytes == null) {
+                throw new IOException("response body exceeds the " + maxBytes + " byte limit");
+            }
+            return new RawResponse(status, bytes, retryAfter);
+        }
+    }
+
+    /**
      * A response reduced to its status and one header, for a caller following a redirect chain by hand.
      *
      * @param status the HTTP status code
