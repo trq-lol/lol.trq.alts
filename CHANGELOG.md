@@ -55,10 +55,11 @@ part of a result. The [Error kinds](#error-kinds) table below maps every former 
 | `BulkEntryResult.failure(index, label, FailureReason, message, attempts)` | `BulkEntryResult.failure(index, label, AltsFailure, attempts)` |
 | store `loadError()`, `saveError()`, `loadWarning()` strings | `Optional<AltsFailure>` of kind `STORAGE` |
 
-**Value types that may grow are classes.** Seven former records are final classes, so a later field is
-an addition and not a break. Accessors, `equals`/`hashCode` over the same fields, the redacted
-`toString` where there was one, and every `withX` method are unchanged; the public canonical
-constructors are gone, and so are deconstruction patterns over them.
+**Value types that may grow are classes.** Six records of 0.12 are final classes (and the new
+`AltsFailure` is one too), so a later field is an addition and not a break. Accessors,
+`equals`/`hashCode` over the same fields, the redacted `toString` where there was one, and every `withX`
+method are unchanged; the public canonical constructors are gone, and so are deconstruction patterns
+over them.
 
 | 0.12 | 1.0 |
 | --- | --- |
@@ -315,9 +316,10 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
 
 - **Breaking: `AltAccount` is a final class.** It was a record; its accessors, value equality, redacted
   `toString` and copy methods are kept, and `builder(...)`, `toBuilder()` and `AltAccount.Builder` replace
-  the canonical constructor. Gson still reads and writes it field by field under the same names and in
-  the same order, so an account file written by 0.12 loads and is written back byte for byte (pinned by
-  a fixture captured from 0.12.0). The module opens `lol.trq.alts.model` to Gson for that.
+  the canonical constructor. The stores read and write it through an internal record with the same
+  components under the same names and in the same order, so an account file written by 0.12 loads and is
+  written back byte for byte (pinned by a fixture captured from 0.12.0). No final field is set by
+  reflection, and `lol.trq.alts.model` is not opened to Gson.
 - **Breaking: the default loopback redirect path changed.** `MicrosoftAuthConfig.DEFAULT_REDIRECT_PATH`
   is now `/lol_trq_alts_loopback_redirect_long_enough_to_avoid_accidental_leaks_on_screenshare`, a neutral
   path, still long to reduce accidental exposure on a shared screen. The
