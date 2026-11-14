@@ -19,6 +19,8 @@ replay_pid*
 .gradle/
 build/
 !gradle/wrapper/gradle-wrapper.jar
+# The Windows wrapper script is not tracked; `gradle wrapper` generates it.
+gradlew.bat
 
 # IDEs
 .idea/
