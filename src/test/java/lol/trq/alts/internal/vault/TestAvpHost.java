@@ -55,11 +55,11 @@ import lol.trq.alts.internal.avp.Tokens.LeaveRequest;
  * asking the honest host and rewriting what it says. Every request is recorded, headers and body, for the
  * zero-knowledge checks.
  */
-final class TestAvpHost implements AutoCloseable {
+public final class TestAvpHost implements AutoCloseable {
 
     /** One recorded request. */
-    record Request(String method, String path, Map<String, List<String>> headers, byte[] body) {
-        String header(String name) {
+    public record Request(String method, String path, Map<String, List<String>> headers, byte[] body) {
+        public String header(String name) {
             for (Map.Entry<String, List<String>> e : headers.entrySet()) {
                 if (e.getKey() != null
                         && e.getKey().equalsIgnoreCase(name)
@@ -70,32 +70,32 @@ final class TestAvpHost implements AutoCloseable {
             return null;
         }
 
-        JsonObject json() {
+        public JsonObject json() {
             return AvpJson.object(AvpJson.parse(body), "request");
         }
     }
 
     /** One answer. */
-    record Response(int status, byte[] body, Map<String, String> headers) {
-        static Response json(int status, JsonElement body) {
+    public record Response(int status, byte[] body, Map<String, String> headers) {
+        public static Response json(int status, JsonElement body) {
             return new Response(status, AvpJson.write(body), Map.of("Content-Type", "application/json"));
         }
 
-        static Response error(int status, String code, String text) {
+        public static Response error(int status, String code, String text) {
             JsonObject o = new JsonObject();
             o.addProperty("error", text);
             o.addProperty("code", code);
             return json(status, o);
         }
 
-        JsonObject json() {
+        public JsonObject json() {
             return AvpJson.object(AvpJson.parse(body), "response");
         }
     }
 
     /** The hostile layer: decides the answer to a request, usually by asking the honest host first. */
     @FunctionalInterface
-    interface Interceptor {
+    public interface Interceptor {
         Response handle(Request request, Function<Request, Response> honest);
     }
 
@@ -103,7 +103,7 @@ final class TestAvpHost implements AutoCloseable {
 
     private final HttpServer server;
     private final List<Request> log = new ArrayList<>();
-    volatile Interceptor interceptor = HONEST;
+    public volatile Interceptor interceptor = HONEST;
 
     private byte[] seed = AvpCrypto.randomBytes(32);
     private byte[] key = Ed25519Strict.publicKey(seed);
@@ -115,18 +115,18 @@ final class TestAvpHost implements AutoCloseable {
 
     private record Minted(String subject, String hostKey, long expiresAt) {}
 
-    TestAvpHost() throws IOException {
+    public TestAvpHost() throws IOException {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/", this::serve);
         server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
         server.start();
     }
 
-    URI base() {
+    public URI base() {
         return URI.create("http://127.0.0.1:" + server.getAddress().getPort());
     }
 
-    synchronized byte[] key() {
+    public synchronized byte[] key() {
         return key.clone();
     }
 
@@ -135,22 +135,22 @@ final class TestAvpHost implements AutoCloseable {
     }
 
     /** Becomes another host at the same address: a new host key, tokens of the old one no longer valid. */
-    synchronized void rekey() {
+    public synchronized void rekey() {
         seed = AvpCrypto.randomBytes(32);
         key = Ed25519Strict.publicKey(seed);
     }
 
-    List<Request> requests() {
+    public List<Request> requests() {
         synchronized (log) {
             return List.copyOf(log);
         }
     }
 
-    long count(String pathSuffix) {
+    public long count(String pathSuffix) {
         return requests().stream().filter(r -> r.path().endsWith(pathSuffix)).count();
     }
 
-    void clearLog() {
+    public void clearLog() {
         synchronized (log) {
             log.clear();
         }
@@ -354,17 +354,17 @@ final class TestAvpHost implements AutoCloseable {
     }
 
     /** A test's direct view of a repository's heads. */
-    synchronized List<byte[]> heads(String repoId) {
+    public synchronized List<byte[]> heads(String repoId) {
         List<byte[]> out = new ArrayList<>();
         repos.get(repoId).heads.forEach(h -> out.add(AvpBytes.fromBase64(h, "id")));
         return out;
     }
 
-    synchronized SignedManifest tip(String repoId) {
+    public synchronized SignedManifest tip(String repoId) {
         return repos.get(repoId).tip();
     }
 
-    synchronized Commit commit(String repoId, byte[] id) {
+    public synchronized Commit commit(String repoId, byte[] id) {
         return repos.get(repoId).accepted.get(AvpBytes.base64(id));
     }
 
