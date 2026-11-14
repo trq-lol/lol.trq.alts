@@ -257,11 +257,12 @@ public final class VaultIdentity {
     }
 
     /**
-     * Returns the X25519 private key, used to unwrap repository data keys wrapped to this member.
+     * Returns the X25519 private key, used to unwrap repository data keys wrapped to this member. Not
+     * public: the vault reaches the private keys inside the library and never hands them to a host.
      *
      * @return the key-agreement private key
      */
-    public PrivateKey keyAgreementPrivateKey() {
+    PrivateKey keyAgreementPrivateKey() {
         return xPrivate;
     }
 
