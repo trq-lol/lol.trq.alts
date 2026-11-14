@@ -1,6 +1,11 @@
 package lol.trq.alts.tools.api;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.lang.classfile.Attributes;
+import java.lang.classfile.ClassFile;
+import java.lang.classfile.FieldModel;
+import java.lang.constant.ConstantDesc;
 import java.lang.module.ModuleDescriptor;
 import java.lang.module.ModuleFinder;
 import java.lang.module.ModuleReference;
@@ -18,7 +23,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.jar.JarEntry;
@@ -93,7 +100,7 @@ public final class ApiDump {
                     continue;
                 }
                 if (accessible(type)) {
-                    describe(type, lines);
+                    describe(type, constants(file, name), lines);
                 }
             }
         }
@@ -153,7 +160,62 @@ public final class ApiDump {
         return Modifier.isPublic(modifiers) || Modifier.isProtected(modifiers);
     }
 
-    private static void describe(Class<?> type, List<String> lines) {
+    /**
+     * The compile-time constants of a class, read from its fields' {@code ConstantValue} attributes with the
+     * JDK class-file API, so nothing is initialized. A host's compiler inlines these values, so changing one
+     * is a change to the API even though no signature moves.
+     */
+    private static Map<String, String> constants(JarFile file, String className) throws IOException {
+        JarEntry entry = file.getJarEntry(className.replace('.', '/') + ".class");
+        Map<String, String> out = new HashMap<>();
+        byte[] bytes;
+        try (InputStream in = file.getInputStream(entry)) {
+            bytes = in.readAllBytes();
+        }
+        for (FieldModel field : ClassFile.of().parse(bytes).fields()) {
+            field.findAttribute(Attributes.constantValue())
+                    .ifPresent(constant -> out.put(
+                            field.fieldName().stringValue(),
+                            render(
+                                    constant.constant().constantValue(),
+                                    field.fieldTypeSymbol().descriptorString())));
+        }
+        return out;
+    }
+
+    /** A constant as Java source would write it, so the dump line reads like the declaration. */
+    static String render(ConstantDesc value, String descriptor) {
+        return switch (descriptor) {
+            case "Z" -> Boolean.toString(((Integer) value) != 0);
+            case "C" -> "'" + escape(String.valueOf((char) ((Integer) value).intValue())) + "'";
+            case "J" -> value + "L";
+            case "F" -> value + "F";
+            case "D" -> value + "D";
+            case "Ljava/lang/String;" -> "\"" + escape((String) value) + "\"";
+            default -> String.valueOf(value);
+        };
+    }
+
+    private static String escape(String text) {
+        StringBuilder out = new StringBuilder();
+        for (char c : text.toCharArray()) {
+            switch (c) {
+                case '\\' -> out.append("\\\\");
+                case '"' -> out.append("\\\"");
+                case '\'' -> out.append("\\'");
+                default -> {
+                    if (c < 0x20 || c > 0x7e) {
+                        out.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        out.append(c);
+                    }
+                }
+            }
+        }
+        return out.toString();
+    }
+
+    private static void describe(Class<?> type, Map<String, String> constants, List<String> lines) {
         String owner = type.getName();
         lines.add(owner + " type " + header(type));
         if (type.isRecord()) {
@@ -168,7 +230,7 @@ public final class ApiDump {
             lines.add(
                     field.isEnumConstant()
                             ? owner + " constant " + field.getName()
-                            : owner + " field " + field.toGenericString());
+                            : owner + " field " + field.toGenericString() + constantSuffix(field, constants));
         }
         for (Constructor<?> constructor : type.getDeclaredConstructors()) {
             if (!constructor.isSynthetic() && exposed(constructor.getModifiers())) {
@@ -180,6 +242,12 @@ public final class ApiDump {
                 lines.add(owner + " method " + method.toGenericString());
             }
         }
+    }
+
+    private static String constantSuffix(Field field, Map<String, String> constants) {
+        int mods = field.getModifiers();
+        String value = Modifier.isStatic(mods) && Modifier.isFinal(mods) ? constants.get(field.getName()) : null;
+        return value == null ? "" : " = " + value;
     }
 
     private static String header(Class<?> type) {

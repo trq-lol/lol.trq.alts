@@ -87,7 +87,7 @@ lol.trq.alts.AltsRuntime$Builder method public lol.trq.alts.AltsRuntime<H> lol.t
 lol.trq.alts.AltsRuntime$Builder type public static final class Builder<H>
 lol.trq.alts.account.AccountEndpoints component java.lang.String base
 lol.trq.alts.account.AccountEndpoints ctor public lol.trq.alts.account.AccountEndpoints(java.lang.String)
-lol.trq.alts.account.AccountEndpoints field public static final java.lang.String lol.trq.alts.account.AccountEndpoints.DEFAULT_BASE
+lol.trq.alts.account.AccountEndpoints field public static final java.lang.String lol.trq.alts.account.AccountEndpoints.DEFAULT_BASE = "https://api.minecraftservices.com"
 lol.trq.alts.account.AccountEndpoints method public final boolean lol.trq.alts.account.AccountEndpoints.equals(java.lang.Object)
 lol.trq.alts.account.AccountEndpoints method public final int lol.trq.alts.account.AccountEndpoints.hashCode()
 lol.trq.alts.account.AccountEndpoints method public final java.lang.String lol.trq.alts.account.AccountEndpoints.toString()
@@ -182,12 +182,12 @@ lol.trq.alts.account.EntitlementService method public abstract lol.trq.alts.acco
 lol.trq.alts.account.EntitlementService type public interface EntitlementService
 lol.trq.alts.account.Entitlements component java.util.Set<java.lang.String> products
 lol.trq.alts.account.Entitlements ctor public lol.trq.alts.account.Entitlements(java.util.Set<java.lang.String>)
-lol.trq.alts.account.Entitlements field public static final java.lang.String lol.trq.alts.account.Entitlements.PRODUCT_BEDROCK
-lol.trq.alts.account.Entitlements field public static final java.lang.String lol.trq.alts.account.Entitlements.PRODUCT_DUNGEONS
-lol.trq.alts.account.Entitlements field public static final java.lang.String lol.trq.alts.account.Entitlements.PRODUCT_GAME_PASS_PC
-lol.trq.alts.account.Entitlements field public static final java.lang.String lol.trq.alts.account.Entitlements.PRODUCT_GAME_PASS_ULTIMATE
-lol.trq.alts.account.Entitlements field public static final java.lang.String lol.trq.alts.account.Entitlements.PRODUCT_JAVA
-lol.trq.alts.account.Entitlements field public static final java.lang.String lol.trq.alts.account.Entitlements.PRODUCT_LEGENDS
+lol.trq.alts.account.Entitlements field public static final java.lang.String lol.trq.alts.account.Entitlements.PRODUCT_BEDROCK = "product_minecraft_bedrock"
+lol.trq.alts.account.Entitlements field public static final java.lang.String lol.trq.alts.account.Entitlements.PRODUCT_DUNGEONS = "product_dungeons"
+lol.trq.alts.account.Entitlements field public static final java.lang.String lol.trq.alts.account.Entitlements.PRODUCT_GAME_PASS_PC = "product_game_pass_pc"
+lol.trq.alts.account.Entitlements field public static final java.lang.String lol.trq.alts.account.Entitlements.PRODUCT_GAME_PASS_ULTIMATE = "product_game_pass_ultimate"
+lol.trq.alts.account.Entitlements field public static final java.lang.String lol.trq.alts.account.Entitlements.PRODUCT_JAVA = "product_minecraft"
+lol.trq.alts.account.Entitlements field public static final java.lang.String lol.trq.alts.account.Entitlements.PRODUCT_LEGENDS = "product_legends"
 lol.trq.alts.account.Entitlements method public boolean lol.trq.alts.account.Entitlements.isEmpty()
 lol.trq.alts.account.Entitlements method public boolean lol.trq.alts.account.Entitlements.ownsBedrock()
 lol.trq.alts.account.Entitlements method public boolean lol.trq.alts.account.Entitlements.ownsJava()
@@ -255,7 +255,7 @@ lol.trq.alts.account.PlayerAttributes component java.util.Map<java.lang.String, 
 lol.trq.alts.account.PlayerAttributes component java.util.Map<java.lang.String, lol.trq.alts.account.PlayerAttributes$Ban> bannedScopes
 lol.trq.alts.account.PlayerAttributes component lol.trq.alts.account.PlayerAttributes$Privileges privileges
 lol.trq.alts.account.PlayerAttributes ctor public lol.trq.alts.account.PlayerAttributes(lol.trq.alts.account.PlayerAttributes$Privileges,java.lang.Boolean,java.util.Map<java.lang.String, java.lang.String>,java.util.Map<java.lang.String, java.lang.String>,java.util.Map<java.lang.String, lol.trq.alts.account.PlayerAttributes$Ban>)
-lol.trq.alts.account.PlayerAttributes field public static final java.lang.String lol.trq.alts.account.PlayerAttributes.SCOPE_MULTIPLAYER
+lol.trq.alts.account.PlayerAttributes field public static final java.lang.String lol.trq.alts.account.PlayerAttributes.SCOPE_MULTIPLAYER = "MULTIPLAYER"
 lol.trq.alts.account.PlayerAttributes method public boolean lol.trq.alts.account.PlayerAttributes.banned()
 lol.trq.alts.account.PlayerAttributes method public boolean lol.trq.alts.account.PlayerAttributes.bannedAt(java.time.Instant)
 lol.trq.alts.account.PlayerAttributes method public boolean lol.trq.alts.account.PlayerAttributes.canChat()
@@ -415,7 +415,7 @@ lol.trq.alts.account.SkinProblem constant WRONG_DIMENSIONS
 lol.trq.alts.account.SkinProblem method public static lol.trq.alts.account.SkinProblem lol.trq.alts.account.SkinProblem.valueOf(java.lang.String)
 lol.trq.alts.account.SkinProblem method public static lol.trq.alts.account.SkinProblem[] lol.trq.alts.account.SkinProblem.values()
 lol.trq.alts.account.SkinProblem type public final enum SkinProblem
-lol.trq.alts.account.SkinService field public static final int lol.trq.alts.account.SkinService.MAX_SKIN_BYTES
+lol.trq.alts.account.SkinService field public static final int lol.trq.alts.account.SkinService.MAX_SKIN_BYTES = 1048576
 lol.trq.alts.account.SkinService method public abstract java.util.Optional<lol.trq.alts.account.SkinProblem> lol.trq.alts.account.SkinService.validate(byte[])
 lol.trq.alts.account.SkinService method public abstract lol.trq.alts.account.PlayerProfile lol.trq.alts.account.SkinService.setFromUrl(java.lang.String,lol.trq.alts.account.SkinModel)
 lol.trq.alts.account.SkinService method public abstract lol.trq.alts.account.PlayerProfile lol.trq.alts.account.SkinService.upload(byte[],lol.trq.alts.account.SkinModel)
@@ -463,7 +463,7 @@ lol.trq.alts.auth.AltLoginService method public abstract lol.trq.alts.auth.AltLo
 lol.trq.alts.auth.AltLoginService method public default java.util.concurrent.CompletableFuture<lol.trq.alts.auth.LoginResult> lol.trq.alts.auth.AltLoginService.loginDeviceCode(lol.trq.alts.spi.DeviceCodePrompt,lol.trq.alts.model.LoginMode)
 lol.trq.alts.auth.AltLoginService type public interface AltLoginService
 lol.trq.alts.auth.CookieFile field public static final java.util.List<java.lang.String> lol.trq.alts.auth.CookieFile.EXTENSIONS
-lol.trq.alts.auth.CookieFile field public static final long lol.trq.alts.auth.CookieFile.MAX_BYTES
+lol.trq.alts.auth.CookieFile field public static final long lol.trq.alts.auth.CookieFile.MAX_BYTES = 1048576L
 lol.trq.alts.auth.CookieFile method public static java.lang.String lol.trq.alts.auth.CookieFile.read(java.nio.file.Path)
 lol.trq.alts.auth.CookieFile type public final class CookieFile
 lol.trq.alts.auth.LoginResult component java.util.Optional<lol.trq.alts.AltsFailure> failure
@@ -495,20 +495,20 @@ lol.trq.alts.auth.MicrosoftAuthConfig component java.lang.String xboxLiveAuthUrl
 lol.trq.alts.auth.MicrosoftAuthConfig component java.lang.String xstsAuthUrl
 lol.trq.alts.auth.MicrosoftAuthConfig ctor public lol.trq.alts.auth.MicrosoftAuthConfig(java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String)
 lol.trq.alts.auth.MicrosoftAuthConfig ctor public lol.trq.alts.auth.MicrosoftAuthConfig(java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String)
-lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_AUTHORIZE_URL
-lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_DEVICE_CODE_URL
-lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_DEVICE_TOKEN_URL
-lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_MINECRAFT_LOGIN_URL
-lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_MINECRAFT_PROFILE_URL
-lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_REDIRECT_PATH
-lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_RPS_TICKET_PREFIX
-lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_SCOPE
-lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_TOKEN_URL
-lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_XBOX_LIVE_AUTH_URL
-lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_XSTS_AUTH_URL
-lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.LEGACY_MSA_REDIRECT_URI
-lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.LEGACY_MSA_RPS_TICKET_PREFIX
-lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.LEGACY_MSA_SCOPE
+lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_AUTHORIZE_URL = "https://login.live.com/oauth20_authorize.srf"
+lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_DEVICE_CODE_URL = "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode"
+lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_DEVICE_TOKEN_URL = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
+lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_MINECRAFT_LOGIN_URL = "https://api.minecraftservices.com/authentication/login_with_xbox"
+lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_MINECRAFT_PROFILE_URL = "https://api.minecraftservices.com/minecraft/profile"
+lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_REDIRECT_PATH = "/in_game_account_switcher_long_enough_uri_to_prevent_accidental_leaks_on_screensharing_even_if_you_have_like_extremely_big_screen_though_it_might_not_mork_but_we_will_try_it_anyway_to_prevent_funny_things_from_happening_or_something"
+lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_RPS_TICKET_PREFIX = "d="
+lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_SCOPE = "XboxLive.signin XboxLive.offline_access"
+lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_TOKEN_URL = "https://login.live.com/oauth20_token.srf"
+lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_XBOX_LIVE_AUTH_URL = "https://user.auth.xboxlive.com/user/authenticate"
+lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_XSTS_AUTH_URL = "https://xsts.auth.xboxlive.com/xsts/authorize"
+lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.LEGACY_MSA_REDIRECT_URI = "https://login.live.com/oauth20_desktop.srf"
+lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.LEGACY_MSA_RPS_TICKET_PREFIX = "t="
+lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.LEGACY_MSA_SCOPE = "service::user.auth.xboxlive.com::MBI_SSL"
 lol.trq.alts.auth.MicrosoftAuthConfig method public final boolean lol.trq.alts.auth.MicrosoftAuthConfig.equals(java.lang.Object)
 lol.trq.alts.auth.MicrosoftAuthConfig method public final int lol.trq.alts.auth.MicrosoftAuthConfig.hashCode()
 lol.trq.alts.auth.MicrosoftAuthConfig method public final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.toString()
@@ -629,7 +629,7 @@ lol.trq.alts.bulk.CredentialKind type public final enum CredentialKind
 lol.trq.alts.cache.AsyncCache ctor public lol.trq.alts.cache.AsyncCache(java.util.concurrent.Executor,java.util.function.Function<K, V>)
 lol.trq.alts.cache.AsyncCache ctor public lol.trq.alts.cache.AsyncCache(java.util.concurrent.Executor,java.util.function.Function<K, V>,long)
 lol.trq.alts.cache.AsyncCache ctor public lol.trq.alts.cache.AsyncCache(java.util.concurrent.Executor,java.util.function.Function<K, V>,long,int)
-lol.trq.alts.cache.AsyncCache field public static final int lol.trq.alts.cache.AsyncCache.DEFAULT_MAX_ENTRIES
+lol.trq.alts.cache.AsyncCache field public static final int lol.trq.alts.cache.AsyncCache.DEFAULT_MAX_ENTRIES = 4096
 lol.trq.alts.cache.AsyncCache method public V lol.trq.alts.cache.AsyncCache.get(K)
 lol.trq.alts.cache.AsyncCache method public int lol.trq.alts.cache.AsyncCache.size()
 lol.trq.alts.cache.AsyncCache method public void lol.trq.alts.cache.AsyncCache.clear()
@@ -811,7 +811,7 @@ lol.trq.alts.spi.StaticGameStatsSource ctor public lol.trq.alts.spi.StaticGameSt
 lol.trq.alts.spi.StaticGameStatsSource method public java.lang.String lol.trq.alts.spi.StaticGameStatsSource.serverId()
 lol.trq.alts.spi.StaticGameStatsSource method public lol.trq.alts.model.GameStats lol.trq.alts.spi.StaticGameStatsSource.fetch(java.lang.String)
 lol.trq.alts.spi.StaticGameStatsSource type public final class StaticGameStatsSource implements lol.trq.alts.spi.GameStatsSource
-lol.trq.alts.spi.StoreKeyProvider field public static final int lol.trq.alts.spi.StoreKeyProvider.MIN_LENGTH
+lol.trq.alts.spi.StoreKeyProvider field public static final int lol.trq.alts.spi.StoreKeyProvider.MIN_LENGTH = 16
 lol.trq.alts.spi.StoreKeyProvider method public abstract byte[] lol.trq.alts.spi.StoreKeyProvider.keyMaterial() throws java.lang.Exception
 lol.trq.alts.spi.StoreKeyProvider type public interface StoreKeyProvider
 lol.trq.alts.spi.TextureUploader method public abstract H lol.trq.alts.spi.TextureUploader.upload(java.io.InputStream)
@@ -903,7 +903,7 @@ lol.trq.alts.vault.LinkSession method public lol.trq.alts.vault.OwnerIdentity lo
 lol.trq.alts.vault.LinkSession method public static lol.trq.alts.vault.LinkGrant lol.trq.alts.vault.LinkSession.approve(lol.trq.alts.vault.OwnerIdentity,lol.trq.alts.vault.LinkRequest,java.util.function.Predicate<java.lang.String>)
 lol.trq.alts.vault.LinkSession method public static lol.trq.alts.vault.LinkSession lol.trq.alts.vault.LinkSession.start()
 lol.trq.alts.vault.LinkSession type public final class LinkSession
-lol.trq.alts.vault.OwnerIdentity field public static final int lol.trq.alts.vault.OwnerIdentity.ENTROPY_BYTES
+lol.trq.alts.vault.OwnerIdentity field public static final int lol.trq.alts.vault.OwnerIdentity.ENTROPY_BYTES = 32
 lol.trq.alts.vault.OwnerIdentity method public byte[] lol.trq.alts.vault.OwnerIdentity.entropy()
 lol.trq.alts.vault.OwnerIdentity method public java.lang.String lol.trq.alts.vault.OwnerIdentity.fingerprint()
 lol.trq.alts.vault.OwnerIdentity method public java.lang.String lol.trq.alts.vault.OwnerIdentity.memberId()
@@ -983,8 +983,8 @@ lol.trq.alts.vault.VaultHosts method public java.util.concurrent.CompletableFutu
 lol.trq.alts.vault.VaultHosts method public java.util.concurrent.CompletableFuture<lol.trq.alts.vault.VaultHost> lol.trq.alts.vault.VaultHosts.connect(lol.trq.alts.vault.VaultSnapshot)
 lol.trq.alts.vault.VaultHosts method public java.util.concurrent.CompletableFuture<lol.trq.alts.vault.VaultHost> lol.trq.alts.vault.VaultHosts.connectFirstContact(java.lang.String)
 lol.trq.alts.vault.VaultHosts type public final class VaultHosts
-lol.trq.alts.vault.VaultIdentity field public static final int lol.trq.alts.vault.VaultIdentity.MAX_CHALLENGE_BYTES
-lol.trq.alts.vault.VaultIdentity field public static final int lol.trq.alts.vault.VaultIdentity.MIN_CHALLENGE_BYTES
+lol.trq.alts.vault.VaultIdentity field public static final int lol.trq.alts.vault.VaultIdentity.MAX_CHALLENGE_BYTES = 1024
+lol.trq.alts.vault.VaultIdentity field public static final int lol.trq.alts.vault.VaultIdentity.MIN_CHALLENGE_BYTES = 16
 lol.trq.alts.vault.VaultIdentity method public byte[] lol.trq.alts.vault.VaultIdentity.signChallenge(byte[])
 lol.trq.alts.vault.VaultIdentity method public java.lang.String lol.trq.alts.vault.VaultIdentity.fingerprint()
 lol.trq.alts.vault.VaultIdentity method public java.lang.String lol.trq.alts.vault.VaultIdentity.identityId()

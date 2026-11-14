@@ -258,7 +258,7 @@ class ApiGateTest {
                 lines.contains("fx.Api type public final class Api<T extends java.lang.Comparable<T>>"
                         + " implements java.io.Serializable"),
                 lines::toString);
-        assertTrue(lines.contains("fx.Api field public static final int fx.Api.LIMIT"), lines::toString);
+        assertTrue(lines.contains("fx.Api field public static final int fx.Api.LIMIT = 3"), lines::toString);
         assertTrue(lines.contains("fx.Api field protected java.lang.String fx.Api.hidden"), lines::toString);
         assertTrue(lines.contains("fx.Api ctor public fx.Api()"), lines::toString);
         assertTrue(
@@ -274,6 +274,52 @@ class ApiGateTest {
                 lines::toString);
         assertTrue(lines.stream().noneMatch(l -> l.contains("secret") || l.contains("Hidden")), lines::toString);
         assertEquals(lines.stream().sorted().toList(), lines, "the dump is sorted");
+    }
+
+    @Test
+    void theDumpRecordsConstantValues() throws IOException {
+        String source = """
+                package fx;
+                public final class Consts {
+                    public static final String NAME = "a \\"b\\"\\n";
+                    public static final boolean ON = true;
+                    public static final char MARK = 'x';
+                    public static final long BIG = 5L;
+                    public static final double HALF = 0.5;
+                    public static final Object NOT_CONSTANT = new Object();
+                    public final int notStatic = 4;
+                    static { System.exit(99); }
+                }
+                """;
+
+        List<String> lines = dump(MODULE, Map.of("fx/Consts.java", source)).lines();
+
+        assertTrue(
+                lines.contains(
+                        "fx.Consts field public static final java.lang.String fx.Consts.NAME = \"a \\\"b\\\"\\u000a\""),
+                lines::toString);
+        assertTrue(lines.contains("fx.Consts field public static final boolean fx.Consts.ON = true"), lines::toString);
+        assertTrue(lines.contains("fx.Consts field public static final char fx.Consts.MARK = 'x'"), lines::toString);
+        assertTrue(lines.contains("fx.Consts field public static final long fx.Consts.BIG = 5L"), lines::toString);
+        assertTrue(lines.contains("fx.Consts field public static final double fx.Consts.HALF = 0.5D"), lines::toString);
+        assertTrue(
+                lines.contains("fx.Consts field public static final java.lang.Object fx.Consts.NOT_CONSTANT"),
+                lines::toString);
+        assertTrue(lines.contains("fx.Consts field public final int fx.Consts.notStatic"), lines::toString);
+        // The class was never initialized: its static block would have ended this JVM.
+    }
+
+    @Test
+    void aChangedConstantValueFailsInTheSameMajor() throws IOException {
+        String v1 = "package fx;\npublic final class Consts { public static final int LIMIT = 3; }\n";
+        String v2 = v1.replace("= 3", "= 4");
+        List<String> baseline = ApiGate.baseline(dump(MODULE, Map.of("fx/Consts.java", v1)), "1.0.0");
+
+        List<String> problems = ApiGate.check(baseline, dump(MODULE, Map.of("fx/Consts.java", v2)), "1.2.0");
+
+        assertTrue(
+                problems.stream().anyMatch(p -> p.contains("removed or changed") && p.contains("LIMIT = 3")),
+                problems::toString);
     }
 
     private List<String> baseline(String api, String version) throws IOException {
