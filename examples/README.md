@@ -31,7 +31,8 @@ The file is compiled with `-Xlint:deprecation -Werror`, so it cannot use depreca
 
 The AVP 0.5 shared vault end to end: `createRepository` (the owner key kept as its entropy, the
 snapshot in the host secrets), `requestInvite` and `join` on the joiner's side, `invite` on the owner's
-after comparing fingerprints, and `shareAndSync`, which resumes from the snapshot, shares an account,
+after comparing fingerprints, `resumeOwner` (the owner key and the snapshot back out of the host secrets),
+and `shareAndSync`, which resumes from the snapshot, shares an account,
 renews another with `update` (which never reverts a field another member changed), syncs and acts on the
 report. Compiled the same way, and inlined into the guide's "Shared vault" section.
 
