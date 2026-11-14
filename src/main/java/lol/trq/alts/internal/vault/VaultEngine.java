@@ -1,5 +1,6 @@
 package lol.trq.alts.internal.vault;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -32,11 +33,14 @@ import lol.trq.alts.internal.avp.Manifest;
 import lol.trq.alts.internal.avp.Manifest.HostRef;
 import lol.trq.alts.internal.avp.Manifest.ManifestState;
 import lol.trq.alts.internal.avp.Manifest.MemberEntry;
+import lol.trq.alts.internal.avp.Manifest.Removal;
 import lol.trq.alts.internal.avp.Manifest.SignedManifest;
 import lol.trq.alts.internal.avp.OwnerKeys;
 import lol.trq.alts.internal.avp.Payload;
 import lol.trq.alts.internal.avp.Tokens;
+import lol.trq.alts.internal.avp.Tokens.InviteToken;
 import lol.trq.alts.internal.avp.Tokens.LeaveRequest;
+import lol.trq.alts.internal.avp.Tokens.RepoLocator;
 
 /**
  * One member device's copy of one AVP 0.5 repository, synced through its home host (SPEC 5 to 8, 10, 11).
@@ -475,6 +479,24 @@ public final class VaultEngine {
     }
 
     /**
+     * A repo locator naming this device's home host as the owner's home host (SPEC 11.2).
+     *
+     * @return the locator
+     * @throws AltsException of kind {@code INVALID_INPUT} unless this device is the owner
+     */
+    public RepoLocator locator() {
+        if (!isOwner()) {
+            throw notOwner();
+        }
+        View v = view;
+        return new RepoLocator(
+                v.repoId(),
+                host.key(),
+                host.locator(),
+                Tokens.ownerFingerprint(v.tip().state().ownerKey()));
+    }
+
+    /**
      * Names the repository and the pin only; never a key or a plaintext.
      *
      * @return a description
@@ -491,6 +513,20 @@ public final class VaultEngine {
     private boolean share() {
         // SPEC 5.1, fail closed: on only when the latest verified state says true.
         return chain.tip().state().shareRefreshTokens();
+    }
+
+    private boolean owner() {
+        return me.is(chain.tip().state().ownerKey());
+    }
+
+    private static AltsException notOwner() {
+        return VaultFailures.invalid("only the owner changes the members, the policy or the hosts");
+    }
+
+    private void requireOwner() {
+        if (!owner()) {
+            throw notOwner();
+        }
     }
 
     private void requireSyncing() {
@@ -787,5 +823,299 @@ public final class VaultEngine {
         host.push(me, tip.repoId(), c);
         recordOwn(c);
         return c.commitId();
+    }
+
+    // --- Owner operations (SPEC 8) -----------------------------------------------------------------
+
+    /** A mutable copy of the tip, the next state an owner operation builds. */
+    private static final class Next {
+        final ManifestState base;
+        final long seq;
+        final byte[] prev;
+        long keyEpoch;
+        boolean share;
+        final List<HostRef> hosts;
+        List<MemberEntry> members;
+        final List<Removal> removals;
+
+        Next(ManifestState base, long seq, byte[] prev) {
+            this.base = base;
+            this.seq = seq;
+            this.prev = prev;
+            this.keyEpoch = base.keyEpoch();
+            this.share = base.shareRefreshTokens();
+            this.hosts = new ArrayList<>(base.hosts());
+            this.members = new ArrayList<>(base.members());
+            this.removals = new ArrayList<>(base.removals());
+        }
+
+        ManifestState build() {
+            return new ManifestState(
+                    base.repoId(),
+                    seq,
+                    prev,
+                    base.ownerKey(),
+                    new byte[0],
+                    base.schemeId(),
+                    keyEpoch,
+                    share,
+                    hosts,
+                    members,
+                    removals);
+        }
+    }
+
+    /** The next state after the tip, changed by {@code change} and signed by the owner. */
+    private SignedManifest signNext(Consumer<Next> change) {
+        ManifestState tip = chain.tip().state();
+        if (tip.manifestSeq() == Long.MAX_VALUE) {
+            throw VaultFailures.protocol("the manifest sequence cannot grow");
+        }
+        Next n = new Next(tip, tip.manifestSeq() + 1, chain.tipHash());
+        change.accept(n);
+        return Manifest.sign(n.build(), me.seedRef());
+    }
+
+    /**
+     * Publishes a signed next state (with its commit) and, once the host accepts it, pins it. The state is
+     * checked against the tip first, so the owner never publishes what a client rejects.
+     */
+    private void publish(SignedManifest signed, Commit commit) {
+        VerifiedChain next = chain.copy();
+        next.extend(signed);
+        host.publish(me, chain.repoId(), signed, commit);
+        int from = chain.size();
+        chain = next;
+        adoptKeys(from);
+        local = local.underPolicy(share());
+    }
+
+    /**
+     * Runs {@code attempt} once more when the host answers {@code 409 manifest_conflict} (SPEC 6.3, 6.4),
+     * after re-pulling the whole chain from seq 0 so the attempt rebuilds on the verified tip. One re-pull and
+     * one retry: a second conflict is the operation's failure.
+     */
+    private <T> T retryConflict(Supplier<T> attempt) {
+        try {
+            return attempt.get();
+        } catch (AltsException e) {
+            if (!VaultFailures.hasCode(e, "manifest_conflict")) {
+                throw e;
+            }
+        }
+        resync();
+        return attempt.get();
+    }
+
+    /**
+     * Invites a member from an invite token (SPEC 8.1, 8.2). The token's acceptance must verify under its host
+     * key, name this repository and the token's Ed25519 key and home host, and not have expired. The current
+     * data key is wrapped to exactly the token's X25519 key, never to a key a host served, and the home host
+     * is added to {@code hosts} when it is not listed yet.
+     *
+     * @param token the joiner's invite token
+     * @return completes when the state is published; fails with {@code PROTOCOL} for a token whose acceptance
+     *     does not check, {@code INVALID_INPUT} unless this device is the owner, or for a current or removed
+     *     member, and the pull's and the publication's failures
+     */
+    public CompletableFuture<Void> invite(InviteToken token) {
+        Objects.requireNonNull(token, "token");
+        return serial(() -> {
+            requireOwner();
+            if (!Tokens.verifyInvite(token, chain.repoId(), clock.getAsLong())) {
+                throw VaultFailures.protocol("the invite token's host acceptance does not verify for this repository"
+                        + " and member, or has expired");
+            }
+            retryConflict(() -> {
+                fetch(false);
+                mergeHeadsNow();
+                ManifestState s = chain.tip().state();
+                if (s.hasMember(token.ed25519PublicKey())) {
+                    throw VaultFailures.invalid("the invited key is already a member");
+                }
+                if (s.removalOf(token.ed25519PublicKey()).isPresent()) {
+                    throw VaultFailures.invalid("a removed key is never a member again");
+                }
+                byte[] key = retained.get(s.keyEpoch());
+                if (key == null) {
+                    throw VaultFailures.crypto("this device holds no data key for the current epoch");
+                }
+                MemberEntry entry = new MemberEntry(
+                        token.ed25519PublicKey(),
+                        token.x25519PublicKey(),
+                        AvpCrypto.wrap(token.x25519PublicKey(), key, WrapLabel.DATA_KEY),
+                        s.keyEpoch(),
+                        token.homeHostKey());
+                publish(
+                        signNext(n -> {
+                            n.members.add(entry);
+                            if (n.hosts.stream().noneMatch(h -> AvpBytes.same(h.hostKey(), token.homeHostKey()))) {
+                                n.hosts.add(new HostRef(token.homeHostKey(), token.homeHostLocator()));
+                            }
+                        }),
+                        null);
+                return null;
+            });
+            return null;
+        });
+    }
+
+    /**
+     * Removes a member (SPEC 8.3) in one {@code publishManifest}: pulls and merges every readable head,
+     * generates the next epoch's data key and wraps it to every remaining member of the verified tip, drops
+     * the member with a removal whose frontier is every merged head plus every verified commit by the member
+     * that is not an ancestor of one, and carries the rotation commit (the merged state under the new epoch,
+     * parents the merged heads, citing the new state).
+     *
+     * @param member the member's 32-byte Ed25519 key
+     * @return completes when the state is published; fails with {@code INVALID_INPUT} unless this device is
+     *     the owner, for the owner key or a key that is not a member, and the pull's and the publication's
+     *     failures
+     */
+    public CompletableFuture<Void> remove(byte[] member) {
+        byte[] key = member.clone();
+        return serial(() -> {
+            removeNow(key);
+            return null;
+        });
+    }
+
+    private void removeNow(byte[] member) {
+        requireOwner();
+        if (me.is(member)) {
+            throw VaultFailures.invalid("the owner is never removed");
+        }
+        retryConflict(() -> {
+            fetch(false);
+            absorb();
+            ManifestState tip = chain.tip().state();
+            if (!tip.hasMember(member)) {
+                throw VaultFailures.invalid("the key is not a member");
+            }
+            if (tip.keyEpoch() == Long.MAX_VALUE) {
+                throw VaultFailures.protocol("the key epoch cannot grow");
+            }
+            long epoch = tip.keyEpoch() + 1;
+            byte[] newKey = AvpCrypto.randomBytes(32);
+            try {
+                List<MemberEntry> members = new ArrayList<>();
+                for (MemberEntry m : tip.members()) {
+                    if (!AvpBytes.same(m.ed25519PublicKey(), member)) {
+                        members.add(new MemberEntry(
+                                m.ed25519PublicKey(),
+                                m.x25519PublicKey(),
+                                AvpCrypto.wrap(m.x25519PublicKey(), newKey, WrapLabel.DATA_KEY),
+                                epoch,
+                                m.homeHostKey()));
+                    }
+                }
+                List<byte[]> parents = HostClient.copyIds(heads);
+                List<byte[]> frontier = frontier(member, parents);
+                SignedManifest signed = signNext(n -> {
+                    n.keyEpoch = epoch;
+                    n.members = members;
+                    n.removals.add(new Removal(member, n.seq, frontier));
+                });
+                byte[] plain =
+                        local.underPolicy(signed.state().shareRefreshTokens()).encode();
+                Commit rotation;
+                try {
+                    rotation = Commits.seal(
+                            newKey,
+                            new Commits.Header(
+                                    signed.state().repoId(),
+                                    parents,
+                                    signed.state().manifestSeq(),
+                                    Manifest.hash(signed),
+                                    epoch),
+                            plain,
+                            me.seedRef());
+                } finally {
+                    Arrays.fill(plain, (byte) 0);
+                }
+                publish(signed, rotation);
+                retained.put(epoch, newKey.clone());
+                recordOwn(rotation);
+                leaves = new ArrayList<>(leaves);
+                leaves.removeIf(l -> AvpBytes.same(l.memberKey(), member));
+                return null;
+            } finally {
+                Arrays.fill(newKey, (byte) 0);
+            }
+        });
+    }
+
+    /**
+     * The removal frontier (SPEC 8.3): the merged heads, plus every verified commit by {@code member} that is
+     * neither one of them nor an ancestor of one, sorted.
+     */
+    private List<byte[]> frontier(byte[] member, List<byte[]> merged) {
+        Set<String> listed = new HashSet<>();
+        List<byte[]> out = new ArrayList<>();
+        for (byte[] h : merged) {
+            listed.add(AvpBytes.base64(h));
+            out.add(h.clone());
+        }
+        for (Map.Entry<String, byte[]> e : authors.entrySet()) {
+            if (!AvpBytes.same(e.getValue(), member) || listed.contains(e.getKey())) {
+                continue;
+            }
+            byte[] id = java.util.Base64.getDecoder().decode(e.getKey());
+            if (!ancestry.isAncestor(id, merged)) {
+                listed.add(e.getKey());
+                out.add(id);
+            }
+        }
+        out.sort(AvpBytes::compare);
+        return out;
+    }
+
+    /**
+     * Sets the refresh-token policy (SPEC 5.1, 8.5): a new owner-signed state, no commit. Setting the value the
+     * tip already has publishes nothing.
+     *
+     * @param on whether members share refresh tokens
+     * @return completes when the state is published; fails with {@code INVALID_INPUT} unless this device is
+     *     the owner, and the publication's failures
+     */
+    public CompletableFuture<Void> setShareRefreshTokens(boolean on) {
+        return serial(() -> {
+            requireOwner();
+            retryConflict(() -> {
+                fetch(false);
+                mergeHeadsNow();
+                if (share() != on) {
+                    publish(signNext(n -> n.share = on), null);
+                }
+                return null;
+            });
+            return null;
+        });
+    }
+
+    /**
+     * Processes pending leave requests (SPEC 8.4): pulls, then removes each leaving member that passes the
+     * SPEC 8.4 checks against the tip (a signature under its key, this repository, a current member who is
+     * not the owner), one removal each.
+     *
+     * @return the removed keys; fails with {@code INVALID_INPUT} unless this device is the owner, and with the
+     *     pull's and the removals' failures
+     */
+    public CompletableFuture<List<byte[]>> processLeaves() {
+        return serial(() -> {
+            requireOwner();
+            fetch(false);
+            mergeHeadsNow();
+            List<byte[]> removed = new ArrayList<>();
+            ArrayDeque<LeaveRequest> pending = new ArrayDeque<>(leaves);
+            while (!pending.isEmpty()) {
+                LeaveRequest l = pending.poll();
+                if (Tokens.leaveVerdict(l, chain.tip().state()) == Tokens.LeaveVerdict.OK) {
+                    removeNow(l.memberKey());
+                    removed.add(l.memberKey());
+                }
+            }
+            return removed;
+        });
     }
 }
