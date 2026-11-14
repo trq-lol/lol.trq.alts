@@ -97,6 +97,9 @@ public final class VaultEngine {
     private List<LeaveRequest> leaves = new ArrayList<>();
     private boolean left;
     private OptionalLong lastDivergence = OptionalLong.empty();
+    /** What the pull that opened this vault found; an empty report for a vault this device created. */
+    private PullReport opening = new PullReport(
+            0, OptionalLong.empty(), false, List.of(), List.of(), List.of(), 0, List.of(), Optional.empty());
 
     private final Object order = new Object();
     private CompletableFuture<?> tail = CompletableFuture.completedFuture(null);
@@ -338,8 +341,9 @@ public final class VaultEngine {
         requireHome(chain, me, host);
         VaultEngine v = new VaultEngine(host, me, chain, clock, new Hlc(0, 0));
         v.adoptKeys(0);
-        v.digest(answer, 0, OptionalLong.empty(), false);
-        v.mergeHeadsNow();
+        // A first open learns the whole chain, and a policy that shares is new to this device.
+        PullReport found = v.digest(answer, chain.size(), OptionalLong.empty(), v.share());
+        v.opening = found.withMerge(v.mergeHeadsNow());
         v.publishView();
         return v;
     }
@@ -383,10 +387,14 @@ public final class VaultEngine {
         state.retainedKeys().forEach(v.retained::put);
         int fork = VerifiedChain.fork(pinned, chain.hashes());
         v.lastDivergence = fork < 0 ? OptionalLong.empty() : OptionalLong.of(fork + 1L);
-        v.adoptKeys(fork < 0 ? Math.min(pinned.size(), chain.size()) : fork);
+        // The states past what this device had verified: past the pin, or past the fork it lost.
+        int known = fork < 0 ? Math.min(pinned.size(), chain.size()) : fork;
+        boolean sharedBefore =
+                chain.states().get(Math.max(known, 1) - 1).state().shareRefreshTokens();
+        v.adoptKeys(known);
         v.local = state.local().underPolicy(v.share());
-        v.digest(answer, 0, v.lastDivergence, false);
-        v.mergeHeadsNow();
+        PullReport found = v.digest(answer, chain.size() - known, v.lastDivergence, !sharedBefore && v.share());
+        v.opening = found.withMerge(v.mergeHeadsNow());
         v.publishView();
         return v;
     }
@@ -447,6 +455,17 @@ public final class VaultEngine {
      */
     public String repoId() {
         return view.repoId();
+    }
+
+    /**
+     * What the pull that opened this vault found and did: for {@link #open} and {@link #join} every state of
+     * the chain is new and a sharing policy counts as turned on; for {@link #resume}, the states past the
+     * persisted pin (or past the fork it lost); for {@link #create}, nothing.
+     *
+     * @return the report
+     */
+    public PullReport openReport() {
+        return opening;
     }
 
     /**
