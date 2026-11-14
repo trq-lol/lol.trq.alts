@@ -77,7 +77,7 @@ Requirements:
 //    is populated the moment it returns. Close the runtime when the host is done with it.
 AltsRuntime<MyHandle> alts = new AltsRuntime.Builder<MyHandle>()
         .sessionInjector(new MySessionInjector())   // REQUIRED: install a SessionData as the live session
-        .vaultDirectory(() -> myDataDir)             // REQUIRED: where the encrypted account file lives
+        .vaultDirectory(() -> myDataDir)             // REQUIRED: where the two encrypted store files live
         .mainThread(myExecutor::execute)             // REQUIRED: run a task on the host's main thread
         .toastSink(new MyToastSink())                // REQUIRED: surface a notification
         .textureUploader(new MyUploader())           // optional: avatar bytes -> host texture
@@ -143,7 +143,7 @@ The points most often gotten wrong:
 10. **House style.** palantir-java-format (4-space, 120 column), full Javadoc on public and protected
     members with an `@since` on each one. Run `./gradlew spotlessApply` before committing, and
     `./gradlew build` (JDK 25) to test.
-11. **Documentation snippets are compiled.** Every Java block in
+11. **Documentation snippets are compiled.** Every multi-line Java block in
     [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) is inlined from
     [`examples/`](examples/), which `check` compiles. Change the example first, then the guide.
 
