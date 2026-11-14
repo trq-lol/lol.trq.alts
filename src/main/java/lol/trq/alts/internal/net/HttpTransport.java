@@ -1038,10 +1038,23 @@ public final class HttpTransport implements AutoCloseable {
      *
      * @param status the HTTP status code
      * @param value the requested header's value, or {@code null} when the response did not carry it
+     * @param retryAfter how long the service asked the caller to wait, or {@code null} when it did not;
+     *     added in 1.0.0
      * @author trq
      * @since 0.8.0
      */
-    public record HeaderResponse(int status, String value) {
+    public record HeaderResponse(int status, String value, Duration retryAfter) {
+
+        /**
+         * Creates a response that stated no wait.
+         *
+         * @param status the HTTP status code
+         * @param value the requested header's value, or {@code null}
+         * @since 1.0.0
+         */
+        public HeaderResponse(int status, String value) {
+            this(status, value, null);
+        }
 
         /**
          * Returns whether the service is asking the caller to slow down, so a throttled step in a chain
@@ -1086,8 +1099,9 @@ public final class HttpTransport implements AutoCloseable {
         applyHeaders(conn, null, headers);
         int status = conn.getResponseCode();
         String value = conn.getHeaderField(headerName);
+        Duration wait = retryAfter(conn);
         discardBody(conn, status);
-        return new HeaderResponse(status, value);
+        return new HeaderResponse(status, value, wait);
     }
 
     /**

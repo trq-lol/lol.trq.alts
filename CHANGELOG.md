@@ -592,6 +592,9 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
 - A successful answer that carried nothing usable was misreported: an XSTS `2xx` with no readable
   body came back as `XBOX_DENIED` (with `XstsError.UNKNOWN`), and a profile naming a JSON `null` for
   its name or id escaped the profile hop unclassified. Both are now `PROTOCOL`.
+- The cookie route dropped a stated wait: a `429` with `Retry-After` on one of its redirect hops, or on
+  its profile hop, was `RATE_LIMITED` with no `retryAfter()`. It now carries the wait, as every other
+  route does.
 
 ## [0.12.0] - 2026-11-12
 

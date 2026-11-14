@@ -1034,7 +1034,21 @@ public final class MicrosoftAuthUtil {
      * @return the exception to fail the flow with
      */
     static AltsException stepFailure(String step, int status) {
-        return new AltsException(kindForStatus(status), step + " failed with status " + status);
+        return stepFailure(step, status, null);
+    }
+
+    /**
+     * Classifies a failure status that came with a stated wait, which the failure keeps; see
+     * {@link #stepFailure(String, HttpTransport.HttpResponse)}.
+     *
+     * @param step the step's name
+     * @param status the failing HTTP status
+     * @param retryAfter the wait the service stated, or {@code null}
+     * @return the exception to fail the flow with
+     */
+    static AltsException stepFailure(String step, int status, java.time.Duration retryAfter) {
+        return new AltsException(
+                AltsFailure.of(kindForStatus(status), step + " failed with status " + status, retryAfter));
     }
 
     /**

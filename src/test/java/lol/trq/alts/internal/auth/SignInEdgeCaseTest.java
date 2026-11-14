@@ -6,7 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.sun.net.httpserver.HttpServer;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.Base64;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -14,6 +20,7 @@ import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure;
 import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.auth.LoginResult;
+import lol.trq.alts.auth.MicrosoftAuthConfig;
 import lol.trq.alts.auth.XstsError;
 import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.internal.net.TestTransports;
@@ -107,6 +114,72 @@ class SignInEdgeCaseTest {
 
             assertEquals(Optional.of(Kind.PROTOCOL), session.failure().map(AltsFailure::kind), profile);
             assertEquals(Optional.of(Kind.PROTOCOL), refreshed.failure().map(AltsFailure::kind), profile);
+        }
+    }
+
+    @Test
+    void aThrottledProfileHopOnTheCookieRouteKeepsItsStatedWait() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        server.createContext("/mclogin", exchange -> {
+            byte[] bytes = "{\"access_token\":\"mc-access\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.createContext("/mcprofile", exchange -> {
+            exchange.getResponseHeaders().set("Retry-After", "7");
+            byte[] bytes = "{}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(429, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        try {
+            String base = "http://" + InetAddress.getLoopbackAddress().getHostAddress() + ":"
+                    + server.getAddress().getPort();
+            MicrosoftAuthConfig config = MicrosoftAuthConfig.of("test-client")
+                    .withEndpoints(
+                            base + "/authorize",
+                            base + "/token",
+                            base + "/xbl",
+                            base + "/xsts",
+                            base + "/mclogin",
+                            base + "/mcprofile");
+            String bundle = "[{\"Item1\":\"rp://api.minecraftservices.com/\",\"Item2\":{\"Token\":\"xsts-token\","
+                    + "\"DisplayClaims\":{\"xui\":[{\"uhs\":\"hash\"}]}}}]";
+            String landing = "https://www.minecraft.net/en-us/login#state=login&accessToken="
+                    + Base64.getEncoder().encodeToString(bundle.getBytes(StandardCharsets.UTF_8));
+
+            AltsException thrown = assertThrows(
+                    AltsException.class, () -> new CookieAuthUtil(http).completeFromLanding(landing, config, null));
+
+            assertEquals(Kind.RATE_LIMITED, thrown.failure().kind());
+            assertEquals(Optional.of(Duration.ofSeconds(7)), thrown.failure().retryAfter());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void aThrottledRedirectHopOnTheCookieRouteKeepsItsStatedWait() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        server.createContext("/hop", exchange -> {
+            exchange.getResponseHeaders().set("Retry-After", "9");
+            exchange.sendResponseHeaders(429, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            String hop = "http://" + InetAddress.getLoopbackAddress().getHostAddress() + ":"
+                    + server.getAddress().getPort() + "/hop";
+
+            AltsException thrown =
+                    assertThrows(AltsException.class, () -> new CookieAuthUtil(http).followRedirect(hop, null, null));
+
+            assertEquals(Kind.RATE_LIMITED, thrown.failure().kind());
+            assertEquals(Optional.of(Duration.ofSeconds(9)), thrown.failure().retryAfter());
+        } finally {
+            server.stop(0);
         }
     }
 }

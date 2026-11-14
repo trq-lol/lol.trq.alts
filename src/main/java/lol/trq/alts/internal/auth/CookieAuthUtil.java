@@ -505,6 +505,7 @@ public final class CookieAuthUtil {
 
     /**
      * Performs a GET request to a URL and returns the {@code Location} header for redirection.
+     * Package-private so a throttled hop can be tested against a loopback server.
      *
      * <p>Goes through {@link HttpTransport} like every other request the library makes, which is what gives
      * this chain the finite timeouts, the refusal to follow redirects on its own, and the host's proxy.
@@ -516,7 +517,7 @@ public final class CookieAuthUtil {
      * @return the target redirection URL
      * @throws lol.trq.alts.AltsException if the server does not return a redirect or cannot be reached
      */
-    private String followRedirect(String urlString, String cookies, NetworkScope scope) {
+    String followRedirect(String urlString, String cookies, NetworkScope scope) {
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8");
         headers.put("Accept-Encoding", "*");
@@ -537,7 +538,7 @@ public final class CookieAuthUtil {
 
         if (response.value() == null) {
             if (response.status() >= 400) {
-                throw MicrosoftAuthUtil.stepFailure("Cookie sign-in", response.status());
+                throw MicrosoftAuthUtil.stepFailure("Cookie sign-in", response.status(), response.retryAfter());
             }
             // A page instead of a redirect is the sign-in form: the cookies no longer sign anyone in.
             throw new AltsException(AltsFailure.Kind.UNAUTHORIZED, "Cookie sign-in did not redirect");
@@ -700,7 +701,7 @@ public final class CookieAuthUtil {
         if (!lookup.found()) {
             throw lookup.status() >= 200 && lookup.status() < 300
                     ? MicrosoftAuthUtil.unexpected("Profile fetch", null)
-                    : MicrosoftAuthUtil.stepFailure("Profile fetch", lookup.status());
+                    : MicrosoftAuthUtil.stepFailure("Profile fetch", lookup.status(), lookup.retryAfter());
         }
         return new MinecraftProfile(lookup.username(), AuthFormats.dashedUuid(lookup.uuid()), mcToken, null, 0L);
     }
