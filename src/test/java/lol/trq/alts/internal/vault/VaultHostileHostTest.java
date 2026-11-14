@@ -496,6 +496,26 @@ class VaultHostileHostTest {
     }
 
     @Test
+    void aForbiddenWithoutItsCodeIsTreatedAsForbidden() {
+        VaultEngine owner = fx.create(newOwner());
+        fx.host.interceptor = (req, honest) ->
+                req.path().endsWith("/push") ? new TestAvpHost.Response(403, new byte[0], Map.of()) : honest.apply(req);
+        fx.host.clearLog();
+        assertEquals(
+                Kind.UNAUTHORIZED,
+                failure(owner.write(e -> e.setField(ACCOUNT, "a", new com.google.gson.JsonPrimitive("b"))))
+                        .kind());
+        assertEquals(
+                1,
+                fx.host.requests().stream()
+                        .filter(r -> r.path().endsWith("/pull")
+                                && r.json().get("sinceManifestSeq").getAsLong() == 0)
+                        .count(),
+                "the stale-pin re-pull ran for a bare 403 too");
+        assertEquals(1, fx.host.count("/push"), "and, the pin unchanged, no retry");
+    }
+
+    @Test
     void ofTwoDivergedOwnerStatesTheLowerHashWinsAndAHigherOneIsARollback() {
         VaultFixture.Owner o = newOwner();
         VaultEngine owner = fx.create(o);

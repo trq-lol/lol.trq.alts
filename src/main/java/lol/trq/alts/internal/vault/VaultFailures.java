@@ -144,14 +144,38 @@ public final class VaultFailures {
     }
 
     /**
-     * Whether a failure is a host refusal with the given code.
+     * Whether a failure is a host refusal with the given code. A refusal without a code from the table (SPEC
+     * 10.4: the client then falls back to the status) counts as the one code its status stands for: {@code
+     * 400} bad_request, {@code 401} unauthorized, {@code 403} forbidden, {@code 404} not_found, {@code 413}
+     * too_large, {@code 422} missing_parents, {@code 429} quota_exceeded. A {@code 409} has three codes and
+     * stands for none of them.
      *
      * @param e the failure
      * @param code a SPEC 10.4 code
      * @return whether it is
      */
     static boolean hasCode(AltsException e, String code) {
-        return refusal(e).flatMap(Refusal::code).filter(code::equals).isPresent();
+        return refusal(e)
+                .flatMap(VaultFailures::effectiveCode)
+                .filter(code::equals)
+                .isPresent();
+    }
+
+    private static Optional<String> effectiveCode(Refusal r) {
+        if (r.code().isPresent()) {
+            return r.code();
+        }
+        return Optional.ofNullable(
+                switch (r.status()) {
+                    case 400 -> "bad_request";
+                    case 401 -> "unauthorized";
+                    case 403 -> "forbidden";
+                    case 404 -> "not_found";
+                    case 413 -> "too_large";
+                    case 422 -> "missing_parents";
+                    case 429 -> "quota_exceeded";
+                    default -> null;
+                });
     }
 
     /**
