@@ -62,6 +62,7 @@ Limits a host relying on a proxy for privacy should know:
 - **Authenticated SOCKS5 is not supported.** A SOCKS5 route with credentials is refused when it is built.
 - **`NtpTimeSource` is not proxied.** It is opt-in, sends one UDP datagram to the NTP server directly, and does not consult the `ProxyProvider`.
 - **A direct route uses the JVM's own proxy configuration**, if the host set one. "Direct" means the library adds no proxy of its own.
+- **A host-installed `CookieHandler` sees library requests.** `HttpURLConnection` consults the process-wide `java.net.CookieHandler.getDefault()` on every request, and the library cannot turn that off per connection. A handler the host (or another library in the process) installed is offered the URL and response headers of every library request, including the sign-in hops, and may add cookies to them. The library installs none. The JVM's response cache, by contrast, is off for every library connection (`setUseCaches(false)`), so no body carrying a token is handed to a host-installed `ResponseCache`.
 
 ### Tokens in logs and messages
 

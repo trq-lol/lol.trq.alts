@@ -67,7 +67,15 @@ import lol.trq.alts.spi.ProxyProvider;
  *   <li>Redirects are not followed, except by the binary fetch, which never carries a credential across
  *       origins and never steps down from {@code https} to {@code http}.
  *   <li>A JSON or text body is read up to one mebibyte; a longer one fails the request.
+ *   <li>The JVM's URL-connection caches are off for every connection, so no response, and no token
+ *       in one, is offered to a host-installed {@link java.net.ResponseCache}.
  * </ul>
+ *
+ * <p>Known limit: {@link HttpURLConnection} consults the process-wide
+ * {@link java.net.CookieHandler#getDefault()} on every request and offers no per-connection opt-out. A
+ * {@code CookieHandler} the host, or anything else in the process, installed therefore sees the URL and
+ * response headers of every request made here, the sign-in hops included, and may add cookies to them.
+ * The library installs none.
  *
  * <p>The request methods block. Run them on {@link #executor()} rather than the common pool.
  *
@@ -441,6 +449,8 @@ public final class HttpTransport implements AutoCloseable {
      * replays the caller's request properties to the redirect target, which would send an
      * {@code Authorization: Bearer} header to whatever host a {@code 3xx} names. The one call that does
      * follow redirects, {@link #getBytesForStatus(String, Map, long, NetworkScope)}, does so by hand.
+     * Caches are off: a host may have installed a process-wide {@link java.net.ResponseCache}, and a
+     * response here may carry a token.
      *
      * @param conn the connection to configure
      */
@@ -448,6 +458,7 @@ public final class HttpTransport implements AutoCloseable {
         conn.setConnectTimeout(CONNECT_TIMEOUT_MILLIS);
         conn.setReadTimeout(READ_TIMEOUT_MILLIS);
         conn.setInstanceFollowRedirects(false);
+        conn.setUseCaches(false);
     }
 
     /**

@@ -74,6 +74,9 @@ class HttpUtilConnectionTest {
                 conn.getReadTimeout() > 0 && conn.getReadTimeout() <= 60_000,
                 "a silent endpoint must fail rather than park the thread forever: " + conn.getReadTimeout());
         assertFalse(conn.getInstanceFollowRedirects(), "a redirect must never be followed automatically");
+        assertFalse(
+                conn.getUseCaches(),
+                "a response carrying a token must never be offered to a host-installed ResponseCache");
     }
 
     @Test

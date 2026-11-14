@@ -577,6 +577,10 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   which sends the user through a fresh sign-in that fails the same way. Minecraft services answers
   every account so while the host's client registration is not approved for it, so it is now
   `NOT_CONFIGURED`, on sign-in and on renewal alike.
+- Library connections used the JVM's URL-connection caches, so a host that installed a process-wide
+  `ResponseCache` was offered every response, a token-bearing sign-in answer included. Caches are now
+  off for every library connection. SECURITY.md states the limit that remains: a host-installed
+  default `CookieHandler` still sees library requests, which `HttpURLConnection` gives no way to stop.
 
 ## [0.12.0] - 2026-11-12
 
