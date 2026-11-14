@@ -139,7 +139,7 @@ dependencies {
     apiToolTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
-def apiTool = { JavaExec task, String mode, String dumpVersion ->
+def apiTool = { JavaExec task, String mode, String dumpVersion, List<String> extra = [] ->
     def libraryJar = tasks.named('jar').flatMap { it.archiveFile }
     def dependencyJars = configurations.runtimeClasspath
     task.group = 'verification'
@@ -150,13 +150,16 @@ def apiTool = { JavaExec task, String mode, String dumpVersion ->
     task.inputs.file(libraryJar).withPropertyName('libraryJar').withNormalizer(ClasspathNormalizer)
     task.argumentProviders.add({
         [mode, libraryJar.get().asFile.path, file('api/lol.trq.alts.api').path, dumpVersion] +
-                dependencyJars.files.collect { it.path }
+                extra + dependencyJars.files.collect { it.path }
     } as CommandLineArgumentProvider)
 }
 
 tasks.register('apiDump', JavaExec) {
-    description = 'Writes api/lol.trq.alts.api from the built jar (-PapiVersion=X.Y.Z names its version).'
-    apiTool(it, 'dump', (findProperty('apiVersion') ?: project.version).toString())
+    description = 'Writes api/lol.trq.alts.api from the built jar (-PapiVersion=X.Y.Z names its version). ' +
+            'Refuses to erase API within the major version unless -PapiAllowBreaking=<reason> is given.'
+    def breaking = findProperty('apiAllowBreaking')
+    apiTool(it, 'dump', (findProperty('apiVersion') ?: project.version).toString(),
+            breaking ? ["--allow-breaking=${breaking}".toString()] : [])
 }
 
 def apiCheck = tasks.register('apiCheck', JavaExec) {

@@ -109,6 +109,52 @@ class ApiGateTest {
     }
 
     @Test
+    void aSameMajorDumpOverARemovalIsRefused() throws IOException {
+        List<String> baseline = baseline(API_V1, "1.0.0");
+        String v2 = API_V1.replace("    public void removed() {}\n", "");
+        ApiDump.Result current = dump(MODULE, Map.of("fx/Api.java", v2));
+
+        List<String> refusal = ApiGate.dumpRefusal(baseline, current, "1.1.0", null);
+
+        assertEquals(1, refusal.size(), refusal::toString);
+        assertTrue(refusal.get(0).contains("would be erased"), refusal::toString);
+        assertTrue(refusal.get(0).contains("fx.Api.removed()"), refusal::toString);
+        // A blank reason is no reason.
+        assertEquals(1, ApiGate.dumpRefusal(baseline, current, "1.0.0", " ").size());
+    }
+
+    @Test
+    void aMajorBumpDumpOverARemovalIsWritten() throws IOException {
+        List<String> baseline = baseline(API_V1, "1.0.0");
+        String v2 = API_V1.replace("    public void removed() {}\n", "");
+
+        assertEquals(List.of(), ApiGate.dumpRefusal(baseline, dump(MODULE, Map.of("fx/Api.java", v2)), "2.0.0", null));
+    }
+
+    @Test
+    void aDumpThatOnlyAddsIsWritten() throws IOException {
+        List<String> baseline = baseline(API_V1, "1.0.0");
+        String v2 =
+                API_V1.replace("public void kept() {}", "public void kept() {}\n    public int added() { return 1; }");
+
+        assertEquals(List.of(), ApiGate.dumpRefusal(baseline, dump(MODULE, Map.of("fx/Api.java", v2)), "1.1.0", null));
+        assertEquals(List.of(), ApiGate.dumpRefusal(null, dump(MODULE, Map.of("fx/Api.java", v2)), "1.1.0", null));
+    }
+
+    @Test
+    void anAllowedBreakingDumpIsWrittenWithItsReason() throws IOException {
+        List<String> baseline = baseline(API_V1, "1.0.0");
+        String v2 = API_V1.replace("    public void removed() {}\n", "");
+        ApiDump.Result current = dump(MODULE, Map.of("fx/Api.java", v2));
+
+        assertEquals(List.of(), ApiGate.dumpRefusal(baseline, current, "1.1.0", "removed() was never usable"));
+        List<String> written = ApiGate.baseline(current, "1.1.0", "removed() was never usable");
+
+        assertTrue(written.contains(ApiGate.BREAKING_PREFIX + "removed() was never usable"), written::toString);
+        assertEquals(List.of(), ApiGate.check(written, current, "1.1.0"), "the recorded dump checks clean");
+    }
+
+    @Test
     void aBaselineWithoutAVersionFails() throws IOException {
         List<String> baseline = baseline(API_V1, "1.0.0").stream()
                 .filter(l -> !l.startsWith(ApiGate.VERSION_PREFIX))

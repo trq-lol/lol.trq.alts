@@ -20,6 +20,10 @@ import java.util.Set;
  *   <li>A current line the baseline lacks fails the gate until the dump is regenerated ({@code apiDump}).
  *   <li>A problem with the surface itself (an exported internal package, an internal type in an exported
  *       signature) always fails it.
+ *   <li>{@code dump} refuses to write over a baseline whose lines it would erase within the baseline's major
+ *       version, so regenerating the dump records additions and cannot launder a removal. {@code
+ *       --allow-breaking=<reason>} ({@code -PapiAllowBreaking}) overrides that, and the reason is written into
+ *       the dump's header.
  * </ul>
  *
  * <p>Usage: {@code dump <jar> <baseline> <version> [dependency...]} writes the baseline; {@code check <jar>
@@ -29,6 +33,12 @@ public final class ApiGate {
 
     /** The header line that records the version the dump belongs to. */
     static final String VERSION_PREFIX = "# version ";
+
+    /** The header line that records why a dump dropped lines within its major version. */
+    static final String BREAKING_PREFIX = "# breaking: ";
+
+    /** The argument that gives a reason to drop lines within the major version ({@code -PapiAllowBreaking}). */
+    static final String ALLOW_BREAKING_ARG = "--allow-breaking=";
 
     private ApiGate() {}
 
@@ -54,9 +64,74 @@ public final class ApiGate {
      * @return the lines to write
      */
     static List<String> baseline(ApiDump.Result dump, String version) {
+        return baseline(dump, version, null);
+    }
+
+    /**
+     * The text of a baseline file that records why it was allowed to drop lines in the same major version.
+     *
+     * @param dump the dump
+     * @param version the version it belongs to
+     * @param breakingReason the reason given for dropping lines, or {@code null}
+     * @return the lines to write
+     */
+    static List<String> baseline(ApiDump.Result dump, String version, String breakingReason) {
         List<String> out = new ArrayList<>(header(version));
+        if (breakingReason != null) {
+            out.add(BREAKING_PREFIX + breakingReason);
+        }
         out.addAll(dump.lines());
         return out;
+    }
+
+    /**
+     * Why a dump must not be written over an existing baseline: writing it would erase lines of the
+     * baseline's API in the same major version, which is exactly what {@link #check} refuses. Regenerating
+     * the dump records additions; it never launders a removal.
+     *
+     * @param existing the current baseline file's lines, or {@code null} when there is none yet
+     * @param dump the new dump
+     * @param version the version the new dump is written for
+     * @param breakingReason the reason given to drop lines anyway ({@code -PapiAllowBreaking}), or {@code null}
+     * @return every reason to refuse; empty when the dump may be written
+     */
+    static List<String> dumpRefusal(List<String> existing, ApiDump.Result dump, String version, String breakingReason) {
+        List<String> problems = new ArrayList<>(dump.problems());
+        if (existing == null) {
+            return problems;
+        }
+        Optional<String> baselineVersion = versionOf(existing);
+        if (baselineVersion.isEmpty()) {
+            return problems;
+        }
+        Set<String> now = new LinkedHashSet<>(dump.lines());
+        List<String> removed =
+                lines(existing).stream().filter(l -> !now.contains(l)).sorted().toList();
+        boolean allowed = breakingReason != null && !breakingReason.isBlank();
+        if (!removed.isEmpty() && major(version) <= major(baselineVersion.get()) && !allowed) {
+            problems.add(removed.size() + " line(s) of the " + baselineVersion.get()
+                    + " API would be erased by a dump for " + version
+                    + "; only a new major version may remove API (or pass -PapiAllowBreaking=<reason>):\n"
+                    + bulleted("- ", removed));
+        }
+        return problems;
+    }
+
+    private static Optional<String> versionOf(List<String> baseline) {
+        return baseline.stream()
+                .filter(l -> l.startsWith(VERSION_PREFIX))
+                .map(l -> l.substring(VERSION_PREFIX.length()).trim())
+                .findFirst();
+    }
+
+    private static Set<String> lines(List<String> baseline) {
+        Set<String> base = new LinkedHashSet<>();
+        for (String line : baseline) {
+            if (!line.isBlank() && !line.startsWith("#")) {
+                base.add(line);
+            }
+        }
+        return base;
     }
 
     /**
@@ -69,20 +144,12 @@ public final class ApiGate {
      */
     static List<String> check(List<String> baseline, ApiDump.Result current, String buildVersion) {
         List<String> problems = new ArrayList<>(current.problems());
-        Optional<String> baselineVersion = baseline.stream()
-                .filter(l -> l.startsWith(VERSION_PREFIX))
-                .map(l -> l.substring(VERSION_PREFIX.length()).trim())
-                .findFirst();
+        Optional<String> baselineVersion = versionOf(baseline);
         if (baselineVersion.isEmpty()) {
             problems.add("the baseline has no '" + VERSION_PREFIX.trim() + "' header line");
             return problems;
         }
-        Set<String> base = new LinkedHashSet<>();
-        for (String line : baseline) {
-            if (!line.isBlank() && !line.startsWith("#")) {
-                base.add(line);
-            }
-        }
+        Set<String> base = lines(baseline);
         Set<String> now = new LinkedHashSet<>(current.lines());
         List<String> removed =
                 base.stream().filter(l -> !now.contains(l)).sorted().toList();
@@ -94,8 +161,8 @@ public final class ApiGate {
                     + buildVersion + "):\n" + bulleted("- ", removed));
         }
         if (!added.isEmpty()) {
-            problems.add(added.size() + " line(s) of API are not in the baseline; run ./gradlew apiDump and commit"
-                    + " the dump:\n" + bulleted("+ ", added));
+            problems.add(added.size() + " line(s) of API are not in the baseline (additions only: run ./gradlew"
+                    + " apiDump and commit the dump):\n" + bulleted("+ ", added));
         }
         return problems;
     }
@@ -138,17 +205,32 @@ public final class ApiGate {
         Path baselineFile = Path.of(args[2]);
         String version = args[3];
         List<Path> dependencies = new ArrayList<>();
+        String breakingReason = null;
         for (int i = 4; i < args.length; i++) {
-            dependencies.add(Path.of(args[i]));
+            if (args[i].startsWith(ALLOW_BREAKING_ARG)) {
+                String reason = args[i].substring(ALLOW_BREAKING_ARG.length()).trim();
+                breakingReason = reason.isEmpty() ? null : reason;
+            } else {
+                dependencies.add(Path.of(args[i]));
+            }
         }
         ApiDump.Result dump = ApiDump.dump(jar, dependencies);
         if (args[0].equals("dump")) {
-            if (!dump.problems().isEmpty()) {
-                fail("not dumped", dump.problems());
+            List<String> existing =
+                    Files.isRegularFile(baselineFile) ? Files.readAllLines(baselineFile, StandardCharsets.UTF_8) : null;
+            List<String> refusal = dumpRefusal(existing, dump, version, breakingReason);
+            if (!refusal.isEmpty()) {
+                fail("not dumped", refusal);
+            }
+            if (breakingReason != null) {
+                System.out.println("writing the dump with removals allowed: " + breakingReason);
             }
             Files.createDirectories(baselineFile.toAbsolutePath().getParent());
             // LF on every platform, so the committed dump does not change with the machine that wrote it.
-            Files.writeString(baselineFile, String.join("\n", baseline(dump, version)) + "\n", StandardCharsets.UTF_8);
+            Files.writeString(
+                    baselineFile,
+                    String.join("\n", baseline(dump, version, breakingReason)) + "\n",
+                    StandardCharsets.UTF_8);
             System.out.println("wrote " + dump.lines().size() + " API lines for " + version + " to " + baselineFile);
             return;
         }
