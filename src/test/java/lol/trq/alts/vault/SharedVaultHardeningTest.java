@@ -14,7 +14,6 @@ import java.util.List;
 import lol.trq.alts.crypto.CryptoException;
 import lol.trq.alts.crypto.Ed25519;
 import lol.trq.alts.crypto.PayloadCipher;
-import lol.trq.alts.crypto.VaultIdentity;
 import lol.trq.alts.crypto.X25519;
 import lol.trq.alts.crypto.X25519HkdfAesGcmKeyWrap;
 import lol.trq.alts.model.AccountType;

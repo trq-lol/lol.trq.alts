@@ -1,7 +1,9 @@
-package lol.trq.alts.crypto;
+package lol.trq.alts.vault;
 
 import java.security.SecureRandom;
 import javax.crypto.SecretKey;
+import lol.trq.alts.crypto.CryptoException;
+import lol.trq.alts.crypto.Pbkdf2;
 
 /**
  * Offline recovery codes for a {@link VaultIdentity}. A high-entropy code is shown to the user once;

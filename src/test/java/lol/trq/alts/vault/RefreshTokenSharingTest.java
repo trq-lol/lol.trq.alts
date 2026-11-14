@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
-import lol.trq.alts.crypto.VaultIdentity;
 import lol.trq.alts.crypto.X25519HkdfAesGcmKeyWrap;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;

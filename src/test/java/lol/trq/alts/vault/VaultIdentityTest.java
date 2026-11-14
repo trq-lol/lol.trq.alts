@@ -1,4 +1,4 @@
-package lol.trq.alts.crypto;
+package lol.trq.alts.vault;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -10,6 +10,14 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure;
+import lol.trq.alts.crypto.CryptoException;
+import lol.trq.alts.crypto.Ed25519;
+import lol.trq.alts.crypto.KeyWrapScheme;
+import lol.trq.alts.crypto.Pbkdf2;
+import lol.trq.alts.crypto.RepoDataKey;
+import lol.trq.alts.crypto.WrappedKey;
+import lol.trq.alts.crypto.X25519;
+import lol.trq.alts.crypto.X25519HkdfAesGcmKeyWrap;
 import lol.trq.alts.internal.avp.Challenge;
 import lol.trq.alts.internal.avp.Commits;
 import lol.trq.alts.internal.avp.Tokens;

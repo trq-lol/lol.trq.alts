@@ -1,7 +1,6 @@
 package lol.trq.alts.vault;
 
 import lol.trq.alts.crypto.RepoDataKey;
-import lol.trq.alts.crypto.VaultIdentity;
 
 /**
  * The in-memory working state for an opened repository: the repo id, the member's unlocked identity,

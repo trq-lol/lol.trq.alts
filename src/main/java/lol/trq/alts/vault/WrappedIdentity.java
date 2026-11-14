@@ -1,4 +1,4 @@
-package lol.trq.alts.crypto;
+package lol.trq.alts.vault;
 
 import com.google.gson.annotations.SerializedName;
 import java.util.Objects;

@@ -10,7 +10,7 @@ import com.google.gson.annotations.SerializedName;
  *
  * <p>The host keeps one pin per repository, alongside whatever else it remembers about that
  * repository, passes it to {@link SharedVault#openRepo(lol.trq.alts.vault.transport.VaultManifest,
- * lol.trq.alts.crypto.VaultIdentity, RepoPin)}, and stores {@link RepoContext#pin()} again whenever the
+ * lol.trq.alts.vault.VaultIdentity, RepoPin)}, and stores {@link RepoContext#pin()} again whenever the
  * context advances. The record is plain data and safe to persist: it holds two counters and no key.
  *
  * @param minimumKeyEpoch the lowest key epoch to accept

@@ -16,7 +16,6 @@ import lol.trq.alts.crypto.CryptoException;
 import lol.trq.alts.crypto.KeyWrapScheme;
 import lol.trq.alts.crypto.PayloadCipher;
 import lol.trq.alts.crypto.RepoDataKey;
-import lol.trq.alts.crypto.VaultIdentity;
 import lol.trq.alts.crypto.X25519;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.vault.transport.EncryptedEnvelope;

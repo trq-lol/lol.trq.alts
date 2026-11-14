@@ -1,4 +1,4 @@
-package lol.trq.alts.crypto;
+package lol.trq.alts.vault;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -9,6 +9,11 @@ import java.util.Base64;
 import javax.crypto.SecretKey;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure;
+import lol.trq.alts.crypto.CryptoException;
+import lol.trq.alts.crypto.Ed25519;
+import lol.trq.alts.crypto.PayloadCipher;
+import lol.trq.alts.crypto.Pbkdf2;
+import lol.trq.alts.crypto.X25519;
 
 /**
  * A member's cryptographic identity: an Ed25519 key pair (the stable public identity used to
