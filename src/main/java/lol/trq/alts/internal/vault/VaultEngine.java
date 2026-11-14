@@ -641,9 +641,20 @@ public final class VaultEngine {
         }
     }
 
+    /**
+     * Records who wrote a verified commit, for the removal frontier, up to {@link
+     * VerifiedChain.Ancestry#MAX_HEADERS} commits. Past that a removed member's commit may be left out of a
+     * frontier, and is then cut off by the removal: a lost write, never an accepted one.
+     */
+    private void learnAuthor(String id, byte[] author) {
+        if (authors.size() < VerifiedChain.Ancestry.MAX_HEADERS || authors.containsKey(id)) {
+            authors.put(id, author);
+        }
+    }
+
     private void recordOwn(Commit c) {
         ancestry.learn(c);
-        authors.put(AvpBytes.base64(c.commitId()), c.author());
+        learnAuthor(AvpBytes.base64(c.commitId()), c.author());
         heads = new ArrayList<>(List.of(c.commitId()));
         unreadable = new ArrayList<>();
     }
@@ -731,7 +742,7 @@ public final class VaultEngine {
             if (!once.add(id)) {
                 continue;
             }
-            authors.put(id, c.author());
+            learnAuthor(id, c.author());
             Payload p = read(c);
             if (p != null) {
                 heads.add(c.commitId());

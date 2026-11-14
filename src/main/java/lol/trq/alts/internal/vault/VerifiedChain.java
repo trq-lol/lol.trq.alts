@@ -255,10 +255,24 @@ public final class VerifiedChain {
      */
     public static final class Ancestry {
 
-        private final Map<String, List<byte[]>> parents = new HashMap<>();
+        /**
+         * The most headers one vault learns. Every header comes from a host, so the graph is bounded; past the
+         * bound new headers are not learned. That fails closed: a missing edge can only make a removed member's
+         * ancestor of a frontier commit look like a commit after the cutoff, which is then discarded.
+         */
+        public static final int MAX_HEADERS = 65_536;
 
-        /** An empty graph. */
-        public Ancestry() {}
+        private final Map<String, List<byte[]>> parents = new HashMap<>();
+        private final int cap;
+
+        /** An empty graph, bounded by {@link #MAX_HEADERS}. */
+        public Ancestry() {
+            this(MAX_HEADERS);
+        }
+
+        Ancestry(int cap) {
+            this.cap = cap;
+        }
 
         /**
          * A copy of the graph.
@@ -266,18 +280,19 @@ public final class VerifiedChain {
          * @return the copy
          */
         public Ancestry copy() {
-            Ancestry a = new Ancestry();
+            Ancestry a = new Ancestry(cap);
             a.parents.putAll(parents);
             return a;
         }
 
         /**
-         * Learns a commit's parents, if its id recomputes and its signature verifies.
+         * Learns a commit's parents, if its id recomputes, its signature verifies, and the graph is not full.
          *
          * @param c the commit
          */
         public void learn(Commit c) {
-            if (Commits.verify(c)) {
+            boolean room = parents.size() < cap || parents.containsKey(AvpBytes.base64(c.commitId()));
+            if (room && Commits.verify(c)) {
                 parents.put(AvpBytes.base64(c.commitId()), c.parents());
             }
         }
