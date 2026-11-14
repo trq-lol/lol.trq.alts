@@ -3,7 +3,7 @@ package lol.trq.alts.internal.vault;
 import java.net.URI;
 import java.util.Objects;
 import java.util.function.Function;
-import lol.trq.alts.net.HttpTransport;
+import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.vault.VaultHosts;
 
 /**

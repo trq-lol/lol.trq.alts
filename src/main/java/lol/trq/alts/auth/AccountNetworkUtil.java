@@ -3,7 +3,7 @@ package lol.trq.alts.auth;
 import com.google.gson.JsonObject;
 import java.util.Map;
 import java.util.Objects;
-import lol.trq.alts.net.HttpTransport;
+import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 
 /**

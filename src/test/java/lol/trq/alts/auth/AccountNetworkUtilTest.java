@@ -10,8 +10,8 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicReference;
+import lol.trq.alts.internal.net.TestTransports;
 import lol.trq.alts.net.NetworkScope;
-import lol.trq.alts.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 

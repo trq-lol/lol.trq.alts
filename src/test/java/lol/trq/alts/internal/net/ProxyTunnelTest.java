@@ -1,4 +1,4 @@
-package lol.trq.alts.net;
+package lol.trq.alts.internal.net;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -21,6 +21,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.net.ssl.SSLException;
+import lol.trq.alts.net.NetworkScope;
+import lol.trq.alts.net.ProxyRoute;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -438,7 +440,7 @@ class ProxyTunnelTest {
         http.get(originUrl(), null, NetworkScope.forAccount(NetworkScope.Purpose.PROFILE, null, "b"));
 
         assertEquals(
-                List.of(first.authorizationHeader(), second.authorizationHeader()),
+                List.of(ProxyRoutes.authorizationHeader(first), ProxyRoutes.authorizationHeader(second)),
                 proxy.authorizations(),
                 "each identity must open its own tunnel, authenticated as itself");
     }
@@ -480,7 +482,9 @@ class ProxyTunnelTest {
         http.get(originUrl(), null, PROFILE);
         http.get(originUrl(), null, PROFILE);
 
-        assertEquals(List.of(before.authorizationHeader(), after.authorizationHeader()), proxy.authorizations());
+        assertEquals(
+                List.of(ProxyRoutes.authorizationHeader(before), ProxyRoutes.authorizationHeader(after)),
+                proxy.authorizations());
     }
 
     @Test

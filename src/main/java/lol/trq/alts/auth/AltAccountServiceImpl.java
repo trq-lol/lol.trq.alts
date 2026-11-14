@@ -8,10 +8,10 @@ import lol.trq.alts.AltsFailure;
 import lol.trq.alts.AltsFailure.Kind;
 import lol.trq.alts.auth.AccountNetworkUtil.ProfileLookup;
 import lol.trq.alts.auth.AccountStatus.State;
+import lol.trq.alts.internal.net.FailureText;
+import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.model.AccountType;
 import lol.trq.alts.model.AltAccount;
-import lol.trq.alts.net.FailureText;
-import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.store.AccountStore;
 

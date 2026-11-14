@@ -4,7 +4,7 @@ import java.util.Objects;
 import lol.trq.alts.account.AccountEndpoints;
 import lol.trq.alts.account.AccountServices;
 import lol.trq.alts.account.ProfileLookupService;
-import lol.trq.alts.net.HttpTransport;
+import lol.trq.alts.internal.net.HttpTransport;
 
 /**
  * How the runtime builds the account services and the profile lookup without either having a public

@@ -1,4 +1,4 @@
-package lol.trq.alts.net;
+package lol.trq.alts.internal.net;
 
 import com.google.gson.JsonParseException;
 import java.io.IOException;

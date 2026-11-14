@@ -1,9 +1,11 @@
-package lol.trq.alts.net;
+package lol.trq.alts.internal.net;
 
 import java.io.IOException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import javax.net.ssl.SSLSocketFactory;
+import lol.trq.alts.net.NetworkScope;
+import lol.trq.alts.net.ProxyRoute;
 import lol.trq.alts.spi.ProxyProvider;
 
 /**

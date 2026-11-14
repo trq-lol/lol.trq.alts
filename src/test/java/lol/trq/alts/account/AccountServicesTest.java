@@ -17,7 +17,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure.Kind;
-import lol.trq.alts.net.TestTransports;
+import lol.trq.alts.internal.net.TestTransports;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

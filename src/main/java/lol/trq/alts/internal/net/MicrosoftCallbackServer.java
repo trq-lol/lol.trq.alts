@@ -1,4 +1,4 @@
-package lol.trq.alts.net;
+package lol.trq.alts.internal.net;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;

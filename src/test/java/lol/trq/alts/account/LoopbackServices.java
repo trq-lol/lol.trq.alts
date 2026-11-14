@@ -7,7 +7,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
-import lol.trq.alts.net.TestTransports;
+import lol.trq.alts.internal.net.TestTransports;
 
 /**
  * A loopback stand-in for the Minecraft services, shared by the account tests: it answers every request

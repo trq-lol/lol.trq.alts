@@ -1,4 +1,4 @@
-package lol.trq.alts.net;
+package lol.trq.alts.internal.net;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -34,6 +34,8 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLSocketFactory;
+import lol.trq.alts.net.NetworkScope;
+import lol.trq.alts.net.ProxyRoute;
 import lol.trq.alts.spi.ProxyProvider;
 
 /**
@@ -468,7 +470,7 @@ public final class HttpTransport implements AutoCloseable {
         if (route.isDirect()) {
             opened = uri.toURL().openConnection();
         } else {
-            opened = uri.toURL().openConnection(tunnelled ? Proxy.NO_PROXY : route.toProxy());
+            opened = uri.toURL().openConnection(tunnelled ? Proxy.NO_PROXY : ProxyRoutes.toProxy(route));
         }
         if (!(opened instanceof HttpURLConnection conn)) {
             throw new IOException("the JVM's URL handler for " + scheme + " is not an HTTP connection");
@@ -486,7 +488,7 @@ public final class HttpTransport implements AutoCloseable {
             if (tls != null && conn instanceof HttpsURLConnection secure) {
                 secure.setSSLSocketFactory(tls);
             }
-            String authorization = route.authorizationHeader();
+            String authorization = ProxyRoutes.authorizationHeader(route);
             if (authorization != null) {
                 conn.setRequestProperty("Proxy-Authorization", authorization);
                 conn.setRequestProperty("Connection", "close");
@@ -513,7 +515,10 @@ public final class HttpTransport implements AutoCloseable {
      */
     private ProxyTunnelSocketFactory tunnelFactory(ProxyRoute route) throws IOException {
         TunnelIdentity identity = new TunnelIdentity(
-                route.host().toLowerCase(Locale.ROOT), route.port(), route.username(), route.authorizationHeader());
+                route.host().toLowerCase(Locale.ROOT),
+                route.port(),
+                route.username(),
+                ProxyRoutes.authorizationHeader(route));
         synchronized (tunnels.factories) {
             // A request that resolved its route just before close() must not open a tunnel after it:
             // close() would never see that tunnel's factory.

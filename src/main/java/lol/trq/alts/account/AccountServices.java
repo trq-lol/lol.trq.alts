@@ -2,7 +2,7 @@ package lol.trq.alts.account;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import lol.trq.alts.net.HttpTransport;
+import lol.trq.alts.internal.net.HttpTransport;
 
 /**
  * The whole post-login account surface, built over one live Minecraft access token. Hands out the

@@ -1,10 +1,6 @@
 package lol.trq.alts.net;
 
-import java.net.InetSocketAddress;
-import java.net.Proxy;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.Objects;
 
 /**
@@ -173,35 +169,6 @@ public record ProxyRoute(Kind kind, String host, int port, String username, char
      */
     public String endpoint() {
         return isDirect() ? "DIRECT" : kind + "://" + host + ":" + port;
-    }
-
-    /**
-     * Returns this route as a JDK proxy.
-     *
-     * @return the proxy, or {@link Proxy#NO_PROXY} for the direct route
-     * @since 0.8.0
-     */
-    public Proxy toProxy() {
-        if (isDirect()) {
-            return Proxy.NO_PROXY;
-        }
-        Proxy.Type type = kind == Kind.SOCKS5 ? Proxy.Type.SOCKS : Proxy.Type.HTTP;
-        return new Proxy(type, InetSocketAddress.createUnresolved(host, port));
-    }
-
-    /**
-     * Returns the {@code Proxy-Authorization} value for this route. Set per connection, so no global
-     * authenticator is installed.
-     *
-     * @return the header value, or {@code null} when the route does not authenticate
-     * @since 0.8.0
-     */
-    public String authorizationHeader() {
-        if (!authenticated()) {
-            return null;
-        }
-        String pair = username + ":" + (password == null ? "" : new String(password));
-        return "Basic " + Base64.getEncoder().encodeToString(pair.getBytes(StandardCharsets.UTF_8));
     }
 
     /**

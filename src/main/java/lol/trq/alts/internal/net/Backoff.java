@@ -1,4 +1,4 @@
-package lol.trq.alts.net;
+package lol.trq.alts.internal.net;
 
 import java.time.Duration;
 import java.util.concurrent.ThreadLocalRandom;

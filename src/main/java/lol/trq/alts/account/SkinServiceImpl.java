@@ -10,7 +10,7 @@ import java.util.HexFormat;
 import java.util.Optional;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure.Kind;
-import lol.trq.alts.net.Multipart;
+import lol.trq.alts.internal.net.Multipart;
 import lol.trq.alts.net.NetworkScope;
 
 /**

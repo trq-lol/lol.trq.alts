@@ -1,7 +1,7 @@
 package lol.trq.alts.account;
 
 import lol.trq.alts.internal.account.AccountAccess;
-import lol.trq.alts.net.HttpTransport;
+import lol.trq.alts.internal.net.HttpTransport;
 
 /**
  * The account package's side of {@link AccountAccess}: the runtime builds the services through it, so

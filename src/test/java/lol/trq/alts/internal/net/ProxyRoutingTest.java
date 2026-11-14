@@ -1,4 +1,4 @@
-package lol.trq.alts.net;
+package lol.trq.alts.internal.net;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -22,6 +22,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
+import lol.trq.alts.net.NetworkScope;
+import lol.trq.alts.net.ProxyRoute;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -237,12 +239,12 @@ class ProxyRoutingTest {
     void thePasswordHandedOutIsACopy() {
         char[] supplied = "hunter2".toCharArray();
         ProxyRoute route = ProxyRoute.http("proxy.example", 8080).withCredentials("user", supplied);
-        String before = route.authorizationHeader();
+        String before = ProxyRoutes.authorizationHeader(route);
 
         Arrays.fill(route.password(), 'x');
         Arrays.fill(supplied, 'y');
 
-        assertEquals(before, route.authorizationHeader(), "neither array may reach the stored credential");
+        assertEquals(before, ProxyRoutes.authorizationHeader(route), "neither array may reach the stored credential");
         assertEquals("hunter2", new String(route.password()));
     }
 

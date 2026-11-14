@@ -2,8 +2,8 @@ package lol.trq.alts.vault;
 
 import java.net.URI;
 import java.util.function.Function;
+import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.internal.vault.VaultAccess;
-import lol.trq.alts.net.HttpTransport;
 
 /**
  * The vault package's side of {@link VaultAccess}: the runtime builds and closes its {@link VaultHosts}

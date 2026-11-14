@@ -1,7 +1,7 @@
 package lol.trq.alts.internal.skin;
 
 import java.util.Objects;
-import lol.trq.alts.net.HttpTransport;
+import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.spi.AvatarSource;
 

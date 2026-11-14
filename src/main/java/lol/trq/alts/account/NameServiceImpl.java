@@ -16,8 +16,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import lol.trq.alts.AltsFailure;
 import lol.trq.alts.AltsFailure.Kind;
-import lol.trq.alts.net.FailureText;
-import lol.trq.alts.net.HttpTransport;
+import lol.trq.alts.internal.net.FailureText;
+import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.time.TimeSource;
 

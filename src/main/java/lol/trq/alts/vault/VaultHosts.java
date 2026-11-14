@@ -8,9 +8,9 @@ import java.util.function.LongSupplier;
 import java.util.regex.Pattern;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.internal.avp.AvpBytes;
+import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.internal.vault.HostClient;
 import lol.trq.alts.internal.vault.TokenCache;
-import lol.trq.alts.net.HttpTransport;
 
 /**
  * The runtime's way to AVP hosts: {@code alts.vault()}. Each {@code connect} reaches a host by its locator,

@@ -20,7 +20,7 @@ import lol.trq.alts.AltsException;
 import lol.trq.alts.internal.avp.AvpCrypto;
 import lol.trq.alts.internal.avp.OwnerKeys;
 import lol.trq.alts.internal.avp.Payload;
-import lol.trq.alts.net.HttpTransport;
+import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.net.ProxyRoute;
 

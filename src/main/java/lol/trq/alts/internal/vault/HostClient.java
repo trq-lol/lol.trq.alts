@@ -24,7 +24,7 @@ import lol.trq.alts.internal.avp.Manifest.SignedManifest;
 import lol.trq.alts.internal.avp.Tokens;
 import lol.trq.alts.internal.avp.Tokens.Acceptance;
 import lol.trq.alts.internal.avp.Tokens.LeaveRequest;
-import lol.trq.alts.net.HttpTransport;
+import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 
 /**

@@ -20,11 +20,11 @@ import lol.trq.alts.auth.AccountStatus;
 import lol.trq.alts.auth.AltAccountService;
 import lol.trq.alts.auth.AltLoginService;
 import lol.trq.alts.auth.LoginResult;
+import lol.trq.alts.internal.net.Backoff;
+import lol.trq.alts.internal.net.FailureText;
+import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.model.AltAccount;
 import lol.trq.alts.model.LoginMode;
-import lol.trq.alts.net.Backoff;
-import lol.trq.alts.net.FailureText;
-import lol.trq.alts.net.HttpTransport;
 import lol.trq.alts.store.AccountStore;
 
 /**

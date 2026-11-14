@@ -1,4 +1,4 @@
-package lol.trq.alts.net;
+package lol.trq.alts.internal.net;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;

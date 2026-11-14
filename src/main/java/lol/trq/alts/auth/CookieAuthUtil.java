@@ -17,7 +17,7 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.AltsFailure;
-import lol.trq.alts.net.HttpTransport;
+import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.net.NetworkScope;
 
 /**

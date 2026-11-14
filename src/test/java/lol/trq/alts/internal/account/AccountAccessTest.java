@@ -10,7 +10,7 @@ import lol.trq.alts.account.AccountEndpoints;
 import lol.trq.alts.account.AccountServices;
 import lol.trq.alts.account.ProfileLookupService;
 import lol.trq.alts.internal.ChildFirstLoader;
-import lol.trq.alts.net.HttpTransport;
+import lol.trq.alts.internal.net.HttpTransport;
 import org.junit.jupiter.api.Test;
 
 /**
