@@ -197,7 +197,7 @@ public final class VaultSnapshot {
      */
     @Override
     public String toString() {
-        return "VaultSnapshot[" + state.repoId() + ", seq " + pinnedSeq() + ", "
-                + state.retainedKeys().size() + " epoch keys, left=" + state.left() + "]";
+        return "VaultSnapshot[" + state.repoId() + ", seq " + pinnedSeq() + ", " + state.epochKeyCount()
+                + " epoch keys, left=" + state.left() + "]";
     }
 }

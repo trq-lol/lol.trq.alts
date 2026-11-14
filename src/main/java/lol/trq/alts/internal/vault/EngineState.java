@@ -62,6 +62,15 @@ public record EngineState(
     }
 
     /**
+     * How many epoch keys are retained, without copying any.
+     *
+     * @return the count
+     */
+    public int epochKeyCount() {
+        return retainedKeys.size();
+    }
+
+    /**
      * The chain hashes.
      *
      * @return copies
