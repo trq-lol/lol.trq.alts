@@ -268,8 +268,9 @@ public final class VaultEngine {
      * @param me this device's member keys
      * @param repoId the repository
      * @param clock epoch milliseconds
-     * @return the vault; fails with {@code PROTOCOL} if the chain does not verify or is another repository,
-     *     and {@code INVALID_INPUT} if its tip does not list this member
+     * @return the vault; fails with {@code PROTOCOL} if the chain does not verify, is another repository, or
+     *     does not list {@code host} among its hosts, and {@code INVALID_INPUT} if its tip does not list this
+     *     member
      */
     public static CompletableFuture<VaultEngine> open(
             HostClient host, MemberKeys me, String repoId, LongSupplier clock) {
@@ -303,6 +304,7 @@ public final class VaultEngine {
         if (!AvpBytes.same(chain.repoId(), repoId)) {
             throw VaultFailures.protocol("the host served another repository");
         }
+        requireListed(chain, host);
         if (ownerFingerprint != null && !AvpBytes.same(Tokens.ownerFingerprint(chain.ownerKey()), ownerFingerprint)) {
             throw VaultFailures.protocol("the repository's owner key does not match the locator's owner fingerprint");
         }
@@ -326,8 +328,9 @@ public final class VaultEngine {
      * @param me this device's member keys
      * @param state the persisted state
      * @param clock epoch milliseconds
-     * @return the vault; fails with {@code PROTOCOL} for a rollback or another repository, and with {@code
-     *     INVALID_INPUT} if this member left or is no longer a member
+     * @return the vault; fails with {@code PROTOCOL} for a rollback, another repository, or a host that is not
+     *     this member's home host in the verified tip, and with {@code INVALID_INPUT} if this member left or is
+     *     no longer a member
      */
     public static CompletableFuture<VaultEngine> resume(
             HostClient host, MemberKeys me, EngineState state, LongSupplier clock) {
@@ -349,8 +352,13 @@ public final class VaultEngine {
         if (!VerifiedChain.accepts(pinned, chain.hashes())) {
             throw rollback();
         }
-        if (!chain.tip().state().hasMember(me.ed25519Public())) {
+        requireListed(chain, host);
+        Optional<MemberEntry> mine = chain.tip().state().member(me.ed25519Public());
+        if (mine.isEmpty()) {
             throw VaultFailures.invalid("this device is not a member of the repository");
+        }
+        if (!AvpBytes.same(mine.get().homeHostKey(), host.key())) {
+            throw VaultFailures.protocol("the host is not this member's home host in the verified state");
         }
         VaultEngine v = new VaultEngine(host, me, chain, clock, new Hlc(state.hlcAt(), state.hlcN()));
         state.retainedKeys().forEach(v.retained::put);
@@ -362,6 +370,16 @@ public final class VaultEngine {
         v.mergeHeadsNow();
         v.publishView();
         return v;
+    }
+
+    /**
+     * A host is matched by key (SPEC 3.3, 11.7): the host a vault is opened from must be one the verified tip
+     * lists, so a host reached by its locator alone, whose key nobody vouched for, cannot stand in for one.
+     */
+    private static void requireListed(VerifiedChain chain, HostClient host) {
+        if (!chain.tip().state().hasHost(host.key())) {
+            throw VaultFailures.protocol("the repository's verified state does not list the host it was opened from");
+        }
     }
 
     /**

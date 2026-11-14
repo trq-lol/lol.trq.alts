@@ -725,13 +725,48 @@ class VaultHostileHostTest {
         fx.host.clearLog();
         HostClient again = fx.connect();
         assertFalse(AvpBytes.same(first, again.key()));
-        await(VaultEngine.open(again, owner.member(), owner.repoId(), fx.clock));
+        // It is not listed in the repository either, so the open is refused once the chain is checked.
+        assertEquals(
+                Kind.PROTOCOL,
+                failure(VaultEngine.open(again, owner.member(), owner.repoId(), fx.clock))
+                        .kind());
         for (TestAvpHost.Request r : fx.host.requests()) {
             String auth = r.header("Authorization");
             if (auth != null) {
                 assertFalse(fx.host.tokensMintedUnder(first).contains(auth.substring("Bearer ".length())));
             }
         }
+    }
+
+    @Test
+    void aVaultIsNeverOpenedFromAHostItsVerifiedStateDoesNotList() {
+        VaultEngine owner = fx.create(newOwner());
+        set(owner, "username", "x");
+        fx.host.rekey();
+        HostClient unlisted = fx.connect();
+        assertEquals(
+                Kind.PROTOCOL,
+                failure(VaultEngine.open(unlisted, owner.member(), owner.repoId(), fx.clock))
+                        .kind());
+        assertEquals(
+                Kind.PROTOCOL,
+                failure(VaultEngine.resume(unlisted, owner.member(), owner.state(), fx.clock))
+                        .kind());
+    }
+
+    @Test
+    void aVaultIsResumedOnlyFromTheMembersHomeHost() throws Exception {
+        VaultEngine owner = fx.create(newOwner());
+        TestAvpHost home = fx.anotherHost();
+        MemberKeys bobKeys = MemberKeys.generate();
+        await(owner.invite(await(VaultEngine.prepareJoin(fx.connect(home), bobKeys, owner.repoId()))));
+        // Bob's home host is the other one; the owner's host is listed too, so it may serve an open.
+        VaultEngine bob = await(VaultEngine.open(fx.connect(), bobKeys, owner.repoId(), fx.clock));
+        assertEquals(
+                Kind.PROTOCOL,
+                failure(VaultEngine.resume(fx.connect(), bobKeys, bob.state(), fx.clock))
+                        .kind());
+        await(VaultEngine.resume(fx.connect(), owner.member(), owner.state(), fx.clock));
     }
 
     @Test
