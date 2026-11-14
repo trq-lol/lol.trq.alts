@@ -133,7 +133,7 @@ says the kind); *none* means success, so `failure()` is empty.
 | `FailureReason.NONE` | none | |
 | `FailureReason.UNKNOWN` | `UNKNOWN` | |
 | `FailureReason.REAUTH_REQUIRED` | `REAUTH_REQUIRED` | The credential is spent and was discarded. |
-| `FailureReason.INVALID_TOKEN` | `UNAUTHORIZED` | Empty, malformed or refused; a refresh token may still renew. Where nothing was sent because the input is no credential at all (an offline name that is not a name, a bulk line of no known form), `INVALID_INPUT`. |
+| `FailureReason.INVALID_TOKEN` | `UNAUTHORIZED` | Empty, malformed or refused; a refresh token may still renew. Where nothing was sent because the input is no credential at all (an offline name that is not a name, a bulk line of no known form), `INVALID_INPUT`. A `403` from the Minecraft services Xbox login, which refuses the host's client registration, is `NOT_CONFIGURED`. |
 | `FailureReason.NETWORK` | `NETWORK` | |
 | `FailureReason.NOT_CONFIGURED` | `NOT_CONFIGURED` | A missing `DeviceCodePrompt` argument is `INVALID_INPUT`. |
 | `FailureReason.NOT_ENTITLED` | `NOT_ENTITLED` | |
@@ -573,6 +573,10 @@ An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in
   rotated one, so the next renewal replayed a token the service may already have retired. The rotated
   token is now written to the stored account as soon as the token endpoint issues it, and the failed
   status carries it too.
+- A `403` from the Minecraft services Xbox login (`login_with_xbox`) was reported as `UNAUTHORIZED`,
+  which sends the user through a fresh sign-in that fails the same way. Minecraft services answers
+  every account so while the host's client registration is not approved for it, so it is now
+  `NOT_CONFIGURED`, on sign-in and on renewal alike.
 
 ## [0.12.0] - 2026-11-12
 

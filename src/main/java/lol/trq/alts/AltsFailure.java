@@ -162,7 +162,8 @@ public record AltsFailure(
          * The host's configuration is missing or was refused: Microsoft sign-in without a
          * {@code MicrosoftAuthConfig}, or a login service that does not support device-code sign-in, or
          * a token endpoint answering {@code invalid_client} or {@code unauthorized_client} to the host's
-         * client registration. Neither a retry nor a fresh sign-in fixes it.
+         * client registration, or Minecraft services refusing that registration's Xbox login with a
+         * {@code 403}. Neither a retry nor a fresh sign-in fixes it.
          *
          * @since 1.0.0
          */

@@ -848,7 +848,8 @@ public final class MicrosoftAuthUtil {
                     body.addProperty("identityToken", "XBL3.0 x=" + xstsData.uhs() + ";" + xstsData.token());
                     JsonObject json = send(
                                     "Minecraft services auth",
-                                    () -> postJson(config.minecraftLoginUrl(), body, account))
+                                    () -> postJson(config.minecraftLoginUrl(), body, account),
+                                    MicrosoftAuthUtil::minecraftLoginFailure)
                             .body();
                     return read("Minecraft services auth", () -> {
                         long expiresIn =
@@ -928,6 +929,22 @@ public final class MicrosoftAuthUtil {
      * @return the successful response, whose body is never null
      */
     private static HttpTransport.HttpResponse send(String step, Callable<HttpTransport.HttpResponse> request) {
+        return send(step, request, response -> stepFailure(step, response));
+    }
+
+    /**
+     * Sends one step's request and insists on a successful JSON answer, classifying a failure status with
+     * {@code onFailure}.
+     *
+     * @param step the step's name, for the failure message
+     * @param request the request to send
+     * @param onFailure classifies a failure status
+     * @return the successful response, whose body is never null
+     */
+    private static HttpTransport.HttpResponse send(
+            String step,
+            Callable<HttpTransport.HttpResponse> request,
+            java.util.function.Function<HttpTransport.HttpResponse, AltsException> onFailure) {
         HttpTransport.HttpResponse response;
         try {
             response = request.call();
@@ -935,7 +952,7 @@ public final class MicrosoftAuthUtil {
             throw unreachable(step, transportFailure);
         }
         if (!response.successful()) {
-            throw stepFailure(step, response);
+            throw onFailure.apply(response);
         }
         if (response.body() == null) {
             throw unexpected(step, null);
@@ -973,6 +990,22 @@ public final class MicrosoftAuthUtil {
                 clientRefused(response) ? Kind.NOT_CONFIGURED : kindForStatus(response.status()),
                 step + " failed with status " + response.status(),
                 response.retryAfter()));
+    }
+
+    /**
+     * Classifies a failed Minecraft services login ({@code login_with_xbox}). A {@code 403} there is the
+     * service refusing the host's client registration, which it answers to every account until the
+     * registration is approved for it, so it is {@link Kind#NOT_CONFIGURED}: no retry and no fresh
+     * sign-in fixes it. Every other status is classified as any step's.
+     *
+     * @param response the failing response
+     * @return the exception to fail the flow with
+     */
+    private static AltsException minecraftLoginFailure(HttpTransport.HttpResponse response) {
+        if (response.status() == 403) {
+            return new AltsException(Kind.NOT_CONFIGURED, "Minecraft services auth refused the client registration");
+        }
+        return stepFailure("Minecraft services auth", response);
     }
 
     /**

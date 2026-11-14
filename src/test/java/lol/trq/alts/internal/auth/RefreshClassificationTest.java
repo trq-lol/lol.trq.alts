@@ -148,9 +148,21 @@ class RefreshClassificationTest {
         assertBothRoutesReport(Kind.RATE_LIMITED);
     }
 
+    /**
+     * Minecraft services answers {@code login_with_xbox} with a {@code 403} when the host's client
+     * registration is not allowed to use it, whoever signs in: the host's configuration is what has to
+     * change, so it is reported as {@code NOT_CONFIGURED}, never as a refused credential.
+     */
+    @Test
+    void aForbiddenMinecraftServicesLoginIsReportedAsNotConfigured() throws Exception {
+        answer("/mclogin", 403, "{}");
+
+        assertBothRoutesReport(Kind.NOT_CONFIGURED);
+    }
+
     @Test
     void aRefusalFromMinecraftServicesIsReportedAsARefusal() throws Exception {
-        answer("/mclogin", 403, "{}");
+        answer("/mclogin", 401, "{}");
 
         assertBothRoutesReport(Kind.UNAUTHORIZED);
     }
