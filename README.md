@@ -11,18 +11,19 @@
 ## Features
 
 - **Sign-in routes.** Microsoft browser login (authorization code with PKCE), Microsoft device-code login for a host with no browser or loopback port, OAuth refresh token, browser-cookie text, an exported cookie file (Netscape or JSON, byte-order-mark aware, size-capped), session token, and offline. All return a `CompletableFuture` from one `AltLoginService`. You supply your own Azure application client id (`MicrosoftAuthConfig`); the library ships no default, and a legacy MSA application is a supported dialect through `MicrosoftAuthConfig.legacyMsa`.
-- **Typed outcomes.** Every result carries a `FailureReason` (`INVALID_TOKEN`, `REAUTH_REQUIRED`, `NETWORK`, `RATE_LIMITED`, `NOT_ENTITLED`, `XBOX_DENIED`, `DECLINED`, `TIMED_OUT`, ...), the decoded Xbox Live refusal when there is one, and the wait a rate limit stated.
+- **One error model.** Every failure in the library is an `AltsFailure`: a `Kind` to branch on (`UNAUTHORIZED`, `REAUTH_REQUIRED`, `NETWORK`, `RATE_LIMITED`, `NOT_ENTITLED`, `XBOX_DENIED`, `DECLINED`, `TIMED_OUT`, `CANCELLED`, ...), a message the library builds and that never carries a token or a path, the wait a rate limit stated, and the decoded Xbox Live refusal when there is one. A result a host branches on carries it as `failure()`; everything else throws the unchecked `AltsException`.
 - **Account management over a token.** `accountServices(account)` reads the full profile (skins, capes, pending actions), entitlements as a product set, player attributes and platform ban status, the chat-signing certificate and the blocklist; creates a profile for an entitled account that has none; and changes the name, skin and cape, including a scheduled name claim around a known time. None of it installs a session.
 - **Public profile lookup.** `profileLookup()` resolves a player by name or UUID, and a list of names ten per request, with no token and no account.
 - **Operate on accounts without logging into them.** `accountService().check(...)` asks whether a stored token still works; `refresh(...)` renews it and persists the rotation. Stored Microsoft sessions renew from their refresh token, so a saved account does not need a browser round each time its access token lapses.
 - **Bulk operations.** `bulk().checkAll(...)`, `refreshAll(...)`, `entitlementsAll(...)` and `importCredentials(...)` run one operation over many accounts with bounded concurrency, spacing, a retry budget, progress and cancellation. A rate limit stops the run or pauses it, as configured.
-- **Encrypted local store.** Accounts are kept in an AES-256-GCM file in a host-chosen directory, written atomically with a rolling backup. By default the key is derived from machine properties, which keeps credentials out of plaintext but is obfuscation only; a host can supply real key material through `StoreKeyProvider`. A file that cannot be read is never treated as an empty store: it is reported on `AltStore.loadError()` and copied aside before anything replaces it. [SECURITY.md](SECURITY.md) states what each key does and does not protect against.
-- **Per-account proxy routing.** A `ProxyProvider` names the route of each request. HTTP proxies, with or without a username and password, tunnel HTTPS targets through `CONNECT`; unauthenticated SOCKS5 is supported, authenticated SOCKS5 is not. Resolution fails closed, the proxy credential is sent on the `CONNECT` only, and connections are not shared between proxy identities. One limit: on the tunnel path the JVM still resolves the target host name through the local resolver.
-- **Shared vault.** Share a set of accounts between members with client-side encryption (Ed25519 identities, X25519-wrapped per-repository keys, AES-256-GCM payloads). A server that stores and relays faithfully sees only ciphertext, wrapped keys, public keys and counters. A `KeyBindingVerifier` runs before every key wrap, and a host-persisted `RepoPin` rejects a rolled-back manifest. The protocol does not yet resist an actively malicious server; [SECURITY.md](SECURITY.md) states the gaps. Refresh tokens are withheld from a repository unless its manifest opts in.
-- **Federated addressing.** Repositories are addressed `avp://host/repoId` and reachable across independently hosted servers with one portable identity. The wire contract is the open [Alt Vault Protocol](https://github.com/trqlmao/avp).
+- **Encrypted local store.** Each runtime owns an `AccountStore` (`alts.store()`) and a `HostSecrets` (`alts.secrets()`), AES-256-GCM files in a host-chosen directory, written atomically with a rolling backup and locked to that runtime, so two runtimes, in one process or two, never write the same file. By default the key is derived from machine properties, which keeps credentials out of plaintext but is obfuscation only; a host can supply real key material through `StoreKeyProvider`. A file that cannot be read is never treated as an empty store: it is reported on `loadError()`, copied aside, and never written over until a load succeeds or the host calls `discardUnreadable()`. [SECURITY.md](SECURITY.md) states what each key does and does not protect against.
+- **Per-account proxy routing.** A `ProxyProvider` names the route of each request, and a route tag routes a first sign-in that has no account yet. HTTP proxies, with or without a username and password, tunnel HTTPS targets through `CONNECT`; unauthenticated SOCKS5 is supported, authenticated SOCKS5 is not. Resolution fails closed, the proxy credential is sent on the `CONNECT` only, and connections are not shared between proxy identities or runtimes. One limit: on the tunnel path the JVM still resolves the target host name through the local resolver.
+- **Shared vault on AVP 0.5.** Share a set of accounts between members through hosts that see only ciphertext, implementing the open [Alt Vault Protocol](https://github.com/trqlmao/avp) 0.5 (a draft specification). The owner's keys come from a 24-word BIP39 phrase, and every change to the members, the refresh-token policy or the hosts is a state the owner signs; every write is a commit a member signs; the client verifies the whole chain itself, wraps the data key only to keys from an invite token, and refuses a forged state or a rollback. A repository can live on several hosts, each matched by its key. Refresh tokens are withheld unless the owner turns sharing on. [SECURITY.md](SECURITY.md) states what this resists and what it does not (availability, metadata, a member who is the attacker). `LegacyVaultReader` reads a repository of the 0.4 vault once, so its accounts can move.
 - **Async caches.** `AsyncCache<K,V>` (lazy, non-blocking, stale-while-revalidate, bounded) backs player-head avatars, keyed by UUID and fetched from Mojang by default, and optional per-server game stats that a host supplies through `GameStatsSource`.
-- **A library executor.** Blocking work runs on one virtual thread per task, or on the executor the host passes to the builder. Nothing runs on the common pool.
+- **A runtime executor.** Each runtime runs its blocking work on one virtual thread per task, or on the executor the host passes to the builder, and `close()` shuts down only the one it created. Nothing runs on the common pool.
+- **A closeable runtime.** `AltsRuntime` is `AutoCloseable`: `close()` flushes and unlocks the stores, closes the transport, and ends whatever was still waiting on the runtime.
 - **Host-agnostic.** The library never imports a host type. The host implements a few seams (session injection, storage directory, main-thread executor, notifications, and optionally texture upload, stats, proxy routing, store key, device-code prompt) and wires them once.
+- **A frozen, narrow API.** The jar is the named module `lol.trq.alts`; the implementation lives under `lol.trq.alts.internal`, which is not exported or documented. A committed dump of the exported API gates every build, so 1.x does not break it.
 - **Obfuscation-safe.** DTOs are records with `@SerializedName` on every component.
 
 The device-code route and the cookie route were tested against loopback and scripted servers, not against the live services; see the [changelog](CHANGELOG.md).
@@ -31,7 +32,7 @@ The device-code route and the cookie route were tested against loopback and scri
 
 [![](https://jitpack.io/v/trq-lol/lol.trq.alts.svg)](https://jitpack.io/#trq-lol/lol.trq.alts)
 
-The coordinate is `com.github.trq-lol:lol.trq.alts`. Replace `VERSION` with the release tag, for example `v0.12.0`. Releases up to 0.11.1 were published under the repository's previous owner and are not served under this coordinate.
+The coordinate is `com.github.trq-lol:lol.trq.alts`. Replace `VERSION` with the release tag, for example `v1.0.0`. Releases up to 0.11.1 were published under the repository's previous owner and are not served under this coordinate.
 
 <details>
 <summary>Gradle (Groovy)</summary>
@@ -64,16 +65,16 @@ dependencies {
 Requirements:
 
 - **Java 25.** The library is compiled for Java 25 and uses virtual threads.
-- **Gson at runtime.** Gson types appear in the public API, so the library declares Gson as a compile-time API dependency (`compileOnlyApi`): a Gradle consumer gets it on the compile classpath and not on the runtime one. The host provides Gson at runtime. An application that already ships Gson needs nothing more; any other adds `com.google.code.gson:gson` itself. A Maven consumer reads the POM, where the same dependency has compile scope.
-- **Module path.** The jar carries `Automatic-Module-Name: lol.trq.alts`. There is no module descriptor yet.
+- **Gson, as a transitive dependency.** `@SerializedName` sits on the public records, so Gson is part of the API and the library declares it as an ordinary `api` dependency: Gradle and Maven consumers receive `com.google.code.gson:gson` at compile and run time without declaring it. An application that ships its own Gson resolves the version as for any other dependency.
+- **Module path.** The jar is the named module `lol.trq.alts` (a `module-info.java`, no `Automatic-Module-Name`). It exports the API packages only and `requires transitive com.google.gson`, so `requires lol.trq.alts;` is all a consumer module needs. On the class path the jar is sealed, so no other jar can add classes to its packages.
 
 ## Quick start
 
 ```java
 // 1. Wire the host seams once at startup. H is your texture-handle type; a host that draws no
 //    avatars can use any type and leave textureUploader unset.
-//    build() also reads whatever store is already on disk, so AltStore.accounts()
-//    is populated the moment it returns.
+//    build() also reads whatever store is already on disk, so alts.store().accounts()
+//    is populated the moment it returns. Close the runtime when the host is done with it.
 AltsRuntime<MyHandle> alts = new AltsRuntime.Builder<MyHandle>()
         .sessionInjector(new MySessionInjector())   // REQUIRED: install a SessionData as the live session
         .vaultDirectory(() -> myDataDir)             // REQUIRED: where the encrypted account file lives
@@ -85,18 +86,22 @@ AltsRuntime<MyHandle> alts = new AltsRuntime.Builder<MyHandle>()
 
 // 2. Sign in through the browser.
 alts.loginService().loginMicrosoft(LoginMode.ADD)
-        .thenAccept(result -> { /* result.success(), result.account(), result.reason() */ });
+        .thenAccept(result -> { /* result.success(), result.account(), result.failure() */ });
 
 // Or with a device code, when there is no browser to open.
 alts.loginService().loginDeviceCode(
                 (userCode, verificationUri, expiresAt) -> show(verificationUri, userCode),
                 LoginMode.ADD)
-        .thenAccept(result -> { /* result.success(), result.reason() */ });
+        .thenAccept(result -> { /* result.success(), result.failure().map(AltsFailure::kind) */ });
 
-// 3. Operate on a stored account without logging into it.
+// 3. Operate on a stored account without logging into it. A failure throws AltsException;
+//    switch on e.kind().
 AccountServices services = alts.accountServices(account);
 PlayerProfile profile = services.profile().fetch();
 Entitlements owned = services.entitlements().fetch();
+
+// 4. On shutdown: write what is pending and release the store files.
+alts.close();
 ```
 
 See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for a full walkthrough and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the internals.
@@ -121,25 +126,29 @@ The points most often gotten wrong:
 5. **A refresh token is a durable credential, not another access token.** It renews a session for as
    long as it is valid, so it is redacted from every `toString`, never persisted for an account the
    store does not already hold, and withheld from a shared repository unless the manifest opts in.
-   Keep those three properties when touching `AltAccount`, `AltStore`, or `SharedVault`.
-6. **Branch on `AltLoginCallback.FailureReason`, never on the message.** Messages change under
-   obfuscation and localization; the reason is the contract. `NETWORK` means retry, `RATE_LIMITED` means
-   wait, `INVALID_TOKEN` and `REAUTH_REQUIRED` mean the credential is the problem. Keep any new route
-   classifying them apart.
-7. **An unreadable store is not an empty store.** `AltStore`/`SecretStore` never overwrite a file they
-   failed to read, report why on `loadError()`, and refuse to write at all while a host-supplied store
-   key is unavailable. Preserve that whenever you touch persistence.
-8. **Blocking work runs on the library executor.** Pass `IoExecutor.executor()` to every `supplyAsync`
-   and `runAsync`; the one-argument forms run on the common pool, which the library no longer uses.
-9. **House style.** palantir-java-format (4-space, 120 column), full Javadoc on public and protected
-   members with an `@since` on each new one. Run `./gradlew spotlessApply` before committing, and
-   `./gradlew build` (JDK 25) to test.
-10. **Documentation snippets are compiled.** Every Java block in
+   Keep those three properties when touching `AltAccount`, `AccountStore`, or the vault.
+6. **Branch on `AltsFailure.Kind`, never on the message.** Messages change under obfuscation and
+   localization; the kind is the contract. `NETWORK` means retry, `RATE_LIMITED` means wait,
+   `UNAUTHORIZED` and `REAUTH_REQUIRED` mean the credential is the problem. Keep any new route
+   classifying them apart, and throw nothing but `AltsException`.
+7. **An unreadable store is not an empty store.** `AccountStore`/`HostSecrets` never overwrite a file
+   they failed to read: they report why on `loadError()` and refuse every write until a load succeeds or
+   the host calls `discardUnreadable()`. Preserve that whenever you touch persistence.
+8. **The runtime owns its state.** The stores, the transport and the executor belong to one
+   `AltsRuntime` and reach services through constructors; there are no statics. Blocking work runs on
+   the runtime's executor, never the common pool.
+9. **Never export `internal`.** Implementation lives under `lol.trq.alts.internal`. The exported API is
+   frozen by `api/lol.trq.alts.api`, which `apiCheck` enforces; record an intended addition with
+   `./gradlew apiDump`.
+10. **House style.** palantir-java-format (4-space, 120 column), full Javadoc on public and protected
+    members with an `@since` on each one. Run `./gradlew spotlessApply` before committing, and
+    `./gradlew build` (JDK 25) to test.
+11. **Documentation snippets are compiled.** Every Java block in
     [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) is inlined from
     [`examples/`](examples/), which `check` compiles. Change the example first, then the guide.
 
-The shared vault implements the [Alt Vault Protocol](https://github.com/trqlmao/avp); consult that
-spec for the wire contract and the fixed byte constructions (AAD, key binding).
+The shared vault implements the [Alt Vault Protocol](https://github.com/trqlmao/avp) 0.5; consult that
+spec for the wire contract and the fixed byte constructions (canonical encoding, signatures, AAD).
 
 ## Building
 
@@ -148,8 +157,9 @@ spec for the wire contract and the fixed byte constructions (AAD, key binding).
 ```
 
 Requires JDK 25. The library is pure JDK + Gson and has no Minecraft dependency, so it builds standalone.
-The tests use package-private seams that are refused unless the JVM carries
-`-Dlol.trq.alts.testSeams=true`. The Gradle `test` task sets it; a test run from an IDE has to add it.
+`check` runs the tests twice, on the class path and with the jar as a named module, and also checks the
+exported API against `api/lol.trq.alts.api`, the published Javadoc for internal types, and the examples.
+The tests need no system property: each builds its own runtime, store or transport.
 
 ## Versioning
 
