@@ -51,10 +51,19 @@ public final class TokenCache {
      */
     Optional<String> get(byte[] hostKey, String origin, byte[] subject, long nowMillis) {
         Token t = tokens.get(key(hostKey, origin, subject));
-        if (t == null || t.expiresAt() - SLACK_MILLIS <= nowMillis) {
+        if (t == null || renewBy(t.expiresAt()) <= nowMillis) {
             return Optional.empty();
         }
         return Optional.of(t.value());
+    }
+
+    /**
+     * When a token that expires at {@code expiresAt} is renewed: {@link #SLACK_MILLIS} before, held to
+     * {@link Long#MIN_VALUE}, so a host-stated expiry near the bottom of the range never wraps round to a
+     * token that looks good for ever.
+     */
+    private static long renewBy(long expiresAt) {
+        return expiresAt < Long.MIN_VALUE + SLACK_MILLIS ? Long.MIN_VALUE : expiresAt - SLACK_MILLIS;
     }
 
     /**
