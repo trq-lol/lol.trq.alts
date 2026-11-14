@@ -5,6 +5,8 @@ import java.util.concurrent.CompletableFuture;
 /**
  * A running bulk operation.
  *
+ * <p>Not designed for host implementation; methods may be added in minor releases.
+ *
  * @author trq
  * @since 0.9.0
  */

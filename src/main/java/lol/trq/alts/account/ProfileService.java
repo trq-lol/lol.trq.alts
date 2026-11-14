@@ -7,6 +7,8 @@ import java.util.Optional;
  * actions — and creates one for an entitled account that has none. The slim name-and-UUID read the auth
  * chain performs is separate and internal; this is the whole picture a host shows.
  *
+ * <p>Not designed for host implementation; methods may be added in minor releases.
+ *
  * @author trq
  * @since 0.11.0
  */

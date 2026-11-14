@@ -16,6 +16,8 @@ import lol.trq.alts.spi.DeviceCodePrompt;
  * {@link LoginResult#failure()} says what kind it was ({@link lol.trq.alts.AltsFailure.Kind#CANCELLED}
  * for a closed runtime or a refusing executor).
  *
+ * <p>Not designed for host implementation; methods may be added in minor releases.
+ *
  * @author trq
  * @since 0.1.0
  */

@@ -3,6 +3,8 @@ package lol.trq.alts.account;
 /**
  * Obtains the account's chat-signing key pair.
  *
+ * <p>Not designed for host implementation; methods may be added in minor releases.
+ *
  * @author trq
  * @since 0.12.0
  */

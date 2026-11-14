@@ -14,6 +14,8 @@ import java.util.Optional;
  * <p>"No such player" is an answer here, not a failure: a lookup that finds nobody returns empty, and an
  * {@link lol.trq.alts.AltsException} is kept for a service that could not be reached or refused to answer.
  *
+ * <p>Not designed for host implementation; methods may be added in minor releases.
+ *
  * @author trq
  * @since 0.12.0
  */

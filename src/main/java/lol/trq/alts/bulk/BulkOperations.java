@@ -11,6 +11,8 @@ import lol.trq.alts.model.LoginMode;
  * {@link lol.trq.alts.auth.AltLoginService#loginAccount} gets fifty session switches and, on account
  * nine, a rate limit it has no way to recognise.
  *
+ * <p>Not designed for host implementation; methods may be added in minor releases.
+ *
  * @author trq
  * @since 0.9.0
  */

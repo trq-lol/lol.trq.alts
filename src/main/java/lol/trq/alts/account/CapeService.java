@@ -6,6 +6,8 @@ import java.util.List;
  * Shows or hides the account's capes. The account's owned capes come from the profile read
  * ({@link ProfileService#fetch()} → {@link PlayerProfile#capes()}), so there is no separate list call.
  *
+ * <p>Not designed for host implementation; methods may be added in minor releases.
+ *
  * @author trq
  * @since 0.11.0
  */

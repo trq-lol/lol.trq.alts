@@ -6,6 +6,8 @@ import java.util.Optional;
 /**
  * Changes the account's skin.
  *
+ * <p>Not designed for host implementation; methods may be added in minor releases.
+ *
  * @author trq
  * @since 0.11.0
  */

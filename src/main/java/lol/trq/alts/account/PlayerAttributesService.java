@@ -7,6 +7,8 @@ package lol.trq.alts.account;
  * <p>The friends and presence endpoints that sit beside these are deliberately absent: the services mark
  * them unstable, and a surface that is about to be frozen should not be built on them.
  *
+ * <p>Not designed for host implementation; methods may be added in minor releases.
+ *
  * @author trq
  * @since 0.12.0
  */

@@ -7,6 +7,8 @@ import java.util.concurrent.CompletableFuture;
  * Everything an account can do about its name: check whether one is free, learn whether it may change
  * now, change it, and — for a name dropping at a known time — claim it the instant it opens.
  *
+ * <p>Not designed for host implementation; methods may be added in minor releases.
+ *
  * @author trq
  * @since 0.11.0
  */

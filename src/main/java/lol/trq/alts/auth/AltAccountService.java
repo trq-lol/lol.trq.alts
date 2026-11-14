@@ -18,6 +18,8 @@ import lol.trq.alts.model.AltAccount;
  * closed before the call included, is an {@link AccountStatus} whose {@link AccountStatus#failure()}
  * says what kind it was.
  *
+ * <p>Not designed for host implementation; methods may be added in minor releases.
+ *
  * @author trq
  * @since 0.8.0
  */
