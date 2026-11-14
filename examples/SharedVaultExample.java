@@ -1,3 +1,4 @@
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.CompletionException;
@@ -43,9 +44,17 @@ public final class SharedVaultExample {
         HostSecrets secrets = alts.secrets();
         OwnerIdentity owner = OwnerIdentity.generate();
         showOnce(owner.phrase()); // the owner writes it down: it is the only way back to the owner key
-        secrets.put(OWNER_ENTROPY, Base64.getEncoder().encodeToString(owner.entropy()));
+        byte[] entropy = owner.entropy();
+        try {
+            secrets.put(OWNER_ENTROPY, Base64.getEncoder().encodeToString(entropy));
+        } finally {
+            Arrays.fill(entropy, (byte) 0);
+        }
 
+        // A first contact: nobody vouched for this host's key yet, so show it to compare out of band. From
+        // here on the snapshot and every token carry it, and each later connection pins it.
         VaultHost home = alts.vault().connectFirstContact(homeHost).join();
+        showOnce("Vault host key: " + home.hostKey());
         SharedVault vault = SharedVault.create(home, owner).join();
         secrets.put(SNAPSHOT, vault.snapshot().toJson());
         return vault.locator().text();
@@ -102,16 +111,22 @@ public final class SharedVaultExample {
     }
 
     /**
-     * The owner, on a later run: resume from the snapshot, share an account, sync, and act on what the sync
-     * reports.
+     * The owner, on a later run: resume from the snapshot, share a new account, renew the tokens of one it
+     * shares, sync, and act on what the sync reports. {@code update} edits the account as the copy holds it
+     * when the write runs, so a field another member changed meanwhile is never reverted.
      *
      * @param alts the runtime
-     * @param account the account to share
+     * @param account a new account to share
+     * @param renewed an account the repository holds, freshly renewed
      */
-    public static void shareAndSync(AltsRuntime<?> alts, AltAccount account) {
+    public static void shareAndSync(AltsRuntime<?> alts, AltAccount account, AltAccount renewed) {
         SharedVault vault = resumeOwner(alts);
         try {
             vault.put(account).join();
+            vault.update(
+                            renewed.uuid(),
+                            held -> held.withTokens(renewed.accessToken(), renewed.refreshToken(), renewed.expiresAt()))
+                    .join();
             SyncReport report = vault.sync().join();
             if (report.policyTurnedOn()) {
                 showOnce("This repository now shares refresh tokens.");
@@ -131,7 +146,13 @@ public final class SharedVaultExample {
 
     private static SharedVault resumeOwner(AltsRuntime<?> alts) {
         HostSecrets secrets = alts.secrets();
-        OwnerIdentity owner = OwnerIdentity.fromEntropy(Base64.getDecoder().decode(secrets.get(OWNER_ENTROPY)));
+        byte[] entropy = Base64.getDecoder().decode(secrets.get(OWNER_ENTROPY));
+        OwnerIdentity owner;
+        try {
+            owner = OwnerIdentity.fromEntropy(entropy);
+        } finally {
+            Arrays.fill(entropy, (byte) 0);
+        }
         VaultSnapshot snapshot = VaultSnapshot.fromJson(secrets.get(SNAPSHOT));
         VaultHost home = alts.vault().connect(snapshot).join(); // the home host, by the key it had
         return SharedVault.resume(home, owner, snapshot).join();

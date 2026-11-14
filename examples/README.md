@@ -29,8 +29,9 @@ The file is compiled with `-Xlint:deprecation -Werror`, so it cannot use depreca
 
 The AVP 0.5 shared vault end to end: `createRepository` (the owner key kept as its entropy, the
 snapshot in the host secrets), `requestInvite` and `join` on the joiner's side, `invite` on the owner's
-after comparing fingerprints, and `shareAndSync`, which resumes from the snapshot, writes an account,
-syncs and acts on the report. Compiled the same way; not yet inlined into the guide.
+after comparing fingerprints, and `shareAndSync`, which resumes from the snapshot, shares an account,
+renews another with `update` (which never reverts a field another member changed), syncs and acts on the
+report. Compiled the same way; not yet inlined into the guide.
 
 This file is the authoritative copy; the guide inlines from it. Change the library API and the
 build breaks here, which is the point: markdown alone rots silently. Keep the two in step when either
