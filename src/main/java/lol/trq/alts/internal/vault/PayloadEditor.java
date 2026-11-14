@@ -29,6 +29,7 @@ public final class PayloadEditor {
     private final Hlc hlc;
     private final LongSupplier clock;
     private final String by;
+    private int edits;
 
     PayloadEditor(Payload base, Hlc hlc, LongSupplier clock, String by) {
         this.accounts = new TreeMap<>(base.accounts());
@@ -71,6 +72,7 @@ public final class PayloadEditor {
         SortedMap<String, Field> fields = new TreeMap<>(a.fields());
         fields.put(name, new Field(value, tick()));
         accounts.put(uuid, new Account(a.deleted(), fields, a.bans()));
+        edits++;
     }
 
     /**
@@ -85,6 +87,7 @@ public final class PayloadEditor {
         SortedMap<String, Field> bans = new TreeMap<>(a.bans());
         bans.put(serverId, new Field(value, tick()));
         accounts.put(uuid, new Account(a.deleted(), a.fields(), bans));
+        edits++;
     }
 
     /**
@@ -96,6 +99,16 @@ public final class PayloadEditor {
     public void deleteAccount(String uuid) {
         Account a = account(uuid);
         accounts.put(uuid, new Account(Optional.of(tick()), a.fields(), a.bans()));
+        edits++;
+    }
+
+    /**
+     * How many fields, bans and deletion markers this edit stamped.
+     *
+     * @return the count; {@code 0} for an edit that changed nothing
+     */
+    public int edits() {
+        return edits;
     }
 
     /**

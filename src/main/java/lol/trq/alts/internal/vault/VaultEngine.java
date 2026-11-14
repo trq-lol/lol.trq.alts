@@ -872,9 +872,12 @@ public final class VaultEngine {
      * the policy (SPEC 5.1, strip on write), sealed under the tip's epoch with the readable heads as parents,
      * and pushed.
      *
+     * <p>An edit that stamps nothing pushes no commit.
+     *
      * @param edit the edits
-     * @return the new commit id; fails with {@code PROTOCOL} and the impossible-timestamp message when the
-     *     clock cannot advance, {@code CRYPTO} without the current epoch's key, or the host's refusal
+     * @return the new commit id, or {@code null} when the edit stamped nothing; fails with {@code PROTOCOL} and
+     *     the impossible-timestamp message when the clock cannot advance, {@code CRYPTO} without the current
+     *     epoch's key, or the host's refusal
      */
     public CompletableFuture<byte[]> write(Consumer<PayloadEditor> edit) {
         Objects.requireNonNull(edit, "edit");
@@ -884,6 +887,9 @@ public final class VaultEngine {
             hlc.observeAll(local);
             PayloadEditor editor = new PayloadEditor(local, hlc, clock, me.id());
             edit.accept(editor);
+            if (editor.edits() == 0) {
+                return null;
+            }
             return pushPayload(editor.payload().underPolicy(share()));
         });
     }
