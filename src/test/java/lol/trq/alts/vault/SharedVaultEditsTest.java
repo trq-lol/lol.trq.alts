@@ -54,7 +54,11 @@ class SharedVaultEditsTest {
     }
 
     private static AltAccount alpha() {
-        return new AltAccount(X, "alpha", "tok1", AccountType.MICROSOFT, 1000L, null, null, "src", "user", null, 0L);
+        return AltAccount.builder(X, "alpha", "tok1", AccountType.MICROSOFT)
+                .lastUsed(1000L)
+                .sourceClient("src")
+                .sourceUser("user")
+                .build();
     }
 
     /** The probe's scenario: Bob reads, the owner renames, Bob syncs, Bob writes new tokens on what he read. */
@@ -102,18 +106,8 @@ class SharedVaultEditsTest {
             await(p.owner().put(alpha()));
             assertEquals(
                     Kind.INVALID_INPUT, failure(p.owner().update(X, a -> null)).kind());
-            AltAccount other = new AltAccount(
-                    "00000000-0000-0000-0000-00000000000b",
-                    "b",
-                    "t",
-                    AccountType.OFFLINE,
-                    0,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    0);
+            AltAccount other = AltAccount.builder("00000000-0000-0000-0000-00000000000b", "b", "t", AccountType.OFFLINE)
+                    .build();
             assertEquals(
                     Kind.INVALID_INPUT, failure(p.owner().update(X, a -> other)).kind());
             assertEquals(

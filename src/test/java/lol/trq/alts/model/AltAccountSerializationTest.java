@@ -75,8 +75,11 @@ class AltAccountSerializationTest {
 
     @Test
     void usedNowKeepsIdentityFieldsAndAdvancesTimestamp() {
-        AltAccount base =
-                new AltAccount("u", "Steve", "t", AccountType.OFFLINE, 1L, null, null, "democlient", "user1", null, 0L);
+        AltAccount base = AltAccount.builder("u", "Steve", "t", AccountType.OFFLINE)
+                .lastUsed(1L)
+                .sourceClient("democlient")
+                .sourceUser("user1")
+                .build();
         AltAccount stamped = base.usedNow();
 
         assertEquals(base.uuid(), stamped.uuid());

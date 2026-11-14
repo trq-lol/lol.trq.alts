@@ -4,13 +4,18 @@ import com.google.gson.annotations.SerializedName;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
  * An immutable Minecraft account stored locally within a client. Holds the credentials and metadata
- * required to reconstruct a game session. Persisted via Gson; every component carries a
- * {@link SerializedName} so serialization survives obfuscation.
+ * required to reconstruct a game session. Persisted via Gson; every field carries a {@link SerializedName}
+ * so serialization survives obfuscation, and the store file keeps the shape it had when this was a record.
+ *
+ * <p>A final class rather than a record since 1.0.0, so a later field is an addition and not a break: build
+ * one with {@link #of}, {@link #builder} or {@link #toBuilder()}, and derive copies with the {@code withX}
+ * methods. Two accounts are equal when every field is.
  *
  * <p>When this account lives in a shared repository, {@code lastUsed}/{@code lastUsedBy} and {@code bans}
  * are shared state so members coordinate (who used it last, where it got banned). For a purely local
@@ -33,44 +38,76 @@ import java.util.stream.Collectors;
  * repository payload unless that repository has explicitly opted in. {@code expiresAt} is epoch millis
  * and {@code 0} means "unknown", which callers read as "assume expired and renew".
  *
- * @param uuid the unique identifier of the Minecraft player
- * @param username the last known display name of the account
- * @param accessToken the sensitive authentication token (OAuth, session, or cookie derived)
- * @param type the protocol used to authenticate this account
- * @param lastUsed the epoch-millis timestamp of the last successful login with this account
- * @param lastUsedBy the member id (Ed25519 identity) that last used this account in a shared repo, or
- *     {@code null} when used locally / unattributed
- * @param bans locally-observed ban records keyed by server id, or {@code null} if never observed banned
- * @param sourceClient the client (mod) the alt was added from, or {@code null} when unattributed
- * @param sourceUser the user within {@code sourceClient} that added the alt, or {@code null}
- * @param refreshToken the OAuth refresh token used to renew the session, or {@code null} when the
- *     account has none (cookie, session, and offline accounts never do); added in 0.6.0
- * @param expiresAt the epoch-millis expiry of {@code accessToken}, or {@code 0} when unknown; added in
- *     0.6.0
  * @author trq
  * @since 0.1.0
  */
-public record AltAccount(
-        @SerializedName("uuid") String uuid,
-        @SerializedName("username") String username,
-        @SerializedName("accessToken") String accessToken,
-        @SerializedName("type") AccountType type,
-        @SerializedName("lastUsed") long lastUsed,
-        @SerializedName("lastUsedBy") String lastUsedBy,
-        @SerializedName("bans") Map<String, BanInfo> bans,
-        @SerializedName("sourceClient") String sourceClient,
-        @SerializedName("sourceUser") String sourceUser,
-        @SerializedName("refreshToken") String refreshToken,
-        @SerializedName("expiresAt") long expiresAt) {
+public final class AltAccount {
 
-    /**
-     * Takes its own copy of {@code bans}, unmodifiable, so neither the map it was built from nor the one
-     * {@link #bans()} returns can change the account. {@code null} stays {@code null}.
-     *
-     * @since 0.6.0
-     */
-    public AltAccount {
-        bans = bans == null ? null : Collections.unmodifiableMap(new LinkedHashMap<>(bans));
+    // The field names and their order are the store file's format: Gson writes them in this order, under
+    // these names, leaving out nulls, exactly as it wrote the record's components.
+    @SerializedName("uuid")
+    private final String uuid;
+
+    @SerializedName("username")
+    private final String username;
+
+    @SerializedName("accessToken")
+    private final String accessToken;
+
+    @SerializedName("type")
+    private final AccountType type;
+
+    @SerializedName("lastUsed")
+    private final long lastUsed;
+
+    @SerializedName("lastUsedBy")
+    private final String lastUsedBy;
+
+    @SerializedName("bans")
+    private final Map<String, BanInfo> bans;
+
+    @SerializedName("sourceClient")
+    private final String sourceClient;
+
+    @SerializedName("sourceUser")
+    private final String sourceUser;
+
+    @SerializedName("refreshToken")
+    private final String refreshToken;
+
+    @SerializedName("expiresAt")
+    private final long expiresAt;
+
+    /** For Gson, which sets every field from the file; a field the file lacks stays null or 0. */
+    private AltAccount() {
+        this(null, null, null, null, 0L, null, null, null, null, null, 0L);
+    }
+
+    private AltAccount(
+            String uuid,
+            String username,
+            String accessToken,
+            AccountType type,
+            long lastUsed,
+            String lastUsedBy,
+            Map<String, BanInfo> bans,
+            String sourceClient,
+            String sourceUser,
+            String refreshToken,
+            long expiresAt) {
+        this.uuid = uuid;
+        this.username = username;
+        this.accessToken = accessToken;
+        this.type = type;
+        this.lastUsed = lastUsed;
+        this.lastUsedBy = lastUsedBy;
+        // Its own copy, unmodifiable, so neither the map it was built from nor the one bans() returns can
+        // change the account. null stays null.
+        this.bans = bans == null ? null : Collections.unmodifiableMap(new LinkedHashMap<>(bans));
+        this.sourceClient = sourceClient;
+        this.sourceUser = sourceUser;
+        this.refreshToken = refreshToken;
+        this.expiresAt = expiresAt;
     }
 
     /**
@@ -89,6 +126,151 @@ public record AltAccount(
     }
 
     /**
+     * Starts an account with every other field empty: never used ({@code lastUsed} 0), unattributed, no
+     * bans, no refresh token, expiry unknown. This is what the record's canonical constructor was for: an
+     * account rebuilt field by field, from a host's own storage, say.
+     *
+     * @param uuid the player's UUID
+     * @param username the player's username
+     * @param accessToken the authentication token
+     * @param type the authentication protocol used
+     * @return a builder holding those four
+     * @since 1.0.0
+     */
+    public static Builder builder(String uuid, String username, String accessToken, AccountType type) {
+        return new Builder(uuid, username, accessToken, type);
+    }
+
+    /**
+     * Returns a builder holding every field of this account, to change several at once.
+     *
+     * @return a builder that builds an account equal to this one until a field is changed
+     * @since 1.0.0
+     */
+    public Builder toBuilder() {
+        return new Builder(uuid, username, accessToken, type)
+                .lastUsed(lastUsed)
+                .lastUsedBy(lastUsedBy)
+                .bans(bans)
+                .sourceClient(sourceClient)
+                .sourceUser(sourceUser)
+                .refreshToken(refreshToken)
+                .expiresAt(expiresAt);
+    }
+
+    /**
+     * Returns the unique identifier of the Minecraft player.
+     *
+     * @return the dashed UUID
+     * @since 0.1.0
+     */
+    public String uuid() {
+        return uuid;
+    }
+
+    /**
+     * Returns the last known display name of the account.
+     *
+     * @return the username
+     * @since 0.1.0
+     */
+    public String username() {
+        return username;
+    }
+
+    /**
+     * Returns the sensitive authentication token (OAuth, session, or cookie derived).
+     *
+     * @return the access token
+     * @since 0.1.0
+     */
+    public String accessToken() {
+        return accessToken;
+    }
+
+    /**
+     * Returns the protocol used to authenticate this account.
+     *
+     * @return the account type
+     * @since 0.1.0
+     */
+    public AccountType type() {
+        return type;
+    }
+
+    /**
+     * Returns the epoch-millis timestamp of the last successful login with this account.
+     *
+     * @return the last-used time, or {@code 0} when never used
+     * @since 0.1.0
+     */
+    public long lastUsed() {
+        return lastUsed;
+    }
+
+    /**
+     * Returns the member id (Ed25519 identity) that last used this account in a shared repo.
+     *
+     * @return the member id, or {@code null} when used locally / unattributed
+     * @since 0.1.0
+     */
+    public String lastUsedBy() {
+        return lastUsedBy;
+    }
+
+    /**
+     * Returns the locally-observed ban records keyed by server id, unmodifiable.
+     *
+     * @return the bans, or {@code null} if never observed banned
+     * @since 0.5.0
+     */
+    public Map<String, BanInfo> bans() {
+        // A map Gson filled in is this account's alone; the view keeps it read-only all the same.
+        return bans == null ? null : Collections.unmodifiableMap(bans);
+    }
+
+    /**
+     * Returns the client (mod) the alt was added from.
+     *
+     * @return the source client, or {@code null} when unattributed
+     * @since 0.2.0
+     */
+    public String sourceClient() {
+        return sourceClient;
+    }
+
+    /**
+     * Returns the user within {@link #sourceClient()} that added the alt.
+     *
+     * @return the source user, or {@code null}
+     * @since 0.2.0
+     */
+    public String sourceUser() {
+        return sourceUser;
+    }
+
+    /**
+     * Returns the OAuth refresh token used to renew the session.
+     *
+     * @return the refresh token, or {@code null} when the account has none (cookie, session, and offline
+     *     accounts never do)
+     * @since 0.6.0
+     */
+    public String refreshToken() {
+        return refreshToken;
+    }
+
+    /**
+     * Returns the epoch-millis expiry of {@link #accessToken()}.
+     *
+     * @return the expiry, or {@code 0} when unknown
+     * @since 0.6.0
+     */
+    public long expiresAt() {
+        return expiresAt;
+    }
+
+    /**
      * Returns a copy of this account with {@code lastUsed} refreshed to now, preserving any existing
      * attribution.
      *
@@ -96,18 +278,7 @@ public record AltAccount(
      * @since 0.1.0
      */
     public AltAccount usedNow() {
-        return new AltAccount(
-                uuid,
-                username,
-                accessToken,
-                type,
-                System.currentTimeMillis(),
-                lastUsedBy,
-                bans,
-                sourceClient,
-                sourceUser,
-                refreshToken,
-                expiresAt);
+        return toBuilder().lastUsed(System.currentTimeMillis()).build();
     }
 
     /**
@@ -119,18 +290,10 @@ public record AltAccount(
      * @since 0.1.0
      */
     public AltAccount usedNow(String byMember) {
-        return new AltAccount(
-                uuid,
-                username,
-                accessToken,
-                type,
-                System.currentTimeMillis(),
-                byMember,
-                bans,
-                sourceClient,
-                sourceUser,
-                refreshToken,
-                expiresAt);
+        return toBuilder()
+                .lastUsed(System.currentTimeMillis())
+                .lastUsedBy(byMember)
+                .build();
     }
 
     /**
@@ -149,18 +312,7 @@ public record AltAccount(
         } else {
             updated.put(serverId, ban);
         }
-        return new AltAccount(
-                uuid,
-                username,
-                accessToken,
-                type,
-                lastUsed,
-                lastUsedBy,
-                updated,
-                sourceClient,
-                sourceUser,
-                refreshToken,
-                expiresAt);
+        return toBuilder().bans(updated).build();
     }
 
     /**
@@ -173,18 +325,7 @@ public record AltAccount(
      * @since 0.10.0
      */
     public AltAccount withUsername(String username) {
-        return new AltAccount(
-                uuid,
-                username,
-                accessToken,
-                type,
-                lastUsed,
-                lastUsedBy,
-                bans,
-                sourceClient,
-                sourceUser,
-                refreshToken,
-                expiresAt);
+        return toBuilder().username(username).build();
     }
 
     /**
@@ -197,18 +338,7 @@ public record AltAccount(
      * @since 0.2.0
      */
     public AltAccount withSource(String sourceClient, String sourceUser) {
-        return new AltAccount(
-                uuid,
-                username,
-                accessToken,
-                type,
-                lastUsed,
-                lastUsedBy,
-                bans,
-                sourceClient,
-                sourceUser,
-                refreshToken,
-                expiresAt);
+        return toBuilder().sourceClient(sourceClient).sourceUser(sourceUser).build();
     }
 
     /**
@@ -222,18 +352,11 @@ public record AltAccount(
      * @since 0.6.0
      */
     public AltAccount withTokens(String accessToken, String refreshToken, long expiresAt) {
-        return new AltAccount(
-                uuid,
-                username,
-                accessToken,
-                type,
-                lastUsed,
-                lastUsedBy,
-                bans,
-                sourceClient,
-                sourceUser,
-                refreshToken,
-                expiresAt);
+        return toBuilder()
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
+                .expiresAt(expiresAt)
+                .build();
     }
 
     /**
@@ -252,18 +375,13 @@ public record AltAccount(
         if (existing == null) {
             return this;
         }
-        return new AltAccount(
-                uuid,
-                username,
-                accessToken,
-                type,
-                lastUsed,
-                lastUsedBy != null ? lastUsedBy : existing.lastUsedBy(),
-                bans != null && !bans.isEmpty() ? bans : existing.bans(),
-                sourceClient != null ? sourceClient : existing.sourceClient(),
-                sourceUser != null ? sourceUser : existing.sourceUser(),
-                refreshToken != null ? refreshToken : existing.refreshToken(),
-                expiresAt);
+        return toBuilder()
+                .lastUsedBy(lastUsedBy != null ? lastUsedBy : existing.lastUsedBy)
+                .bans(bans != null && !bans.isEmpty() ? bans : existing.bans)
+                .sourceClient(sourceClient != null ? sourceClient : existing.sourceClient)
+                .sourceUser(sourceUser != null ? sourceUser : existing.sourceUser)
+                .refreshToken(refreshToken != null ? refreshToken : existing.refreshToken)
+                .build();
     }
 
     /**
@@ -315,10 +433,56 @@ public record AltAccount(
     }
 
     /**
-     * Returns a description of this account with both credentials redacted. The record's generated
-     * {@code toString} would print the access and refresh tokens verbatim, so a host that logs an
-     * account — or anything embedding one, such as a login result — would write a durable credential to
-     * disk. Identity and state stay readable, because that is what a log is for.
+     * Returns whether {@code o} is an account with every field equal to this one's, the bans compared as
+     * maps.
+     *
+     * @param o the object to compare
+     * @return true when every field is equal
+     * @since 0.1.0
+     */
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof AltAccount other
+                && lastUsed == other.lastUsed
+                && expiresAt == other.expiresAt
+                && Objects.equals(uuid, other.uuid)
+                && Objects.equals(username, other.username)
+                && Objects.equals(accessToken, other.accessToken)
+                && type == other.type
+                && Objects.equals(lastUsedBy, other.lastUsedBy)
+                && Objects.equals(bans, other.bans)
+                && Objects.equals(sourceClient, other.sourceClient)
+                && Objects.equals(sourceUser, other.sourceUser)
+                && Objects.equals(refreshToken, other.refreshToken);
+    }
+
+    /**
+     * Returns a hash over every field, consistent with {@link #equals(Object)}.
+     *
+     * @return the hash
+     * @since 0.1.0
+     */
+    @Override
+    public int hashCode() {
+        return Objects.hash(
+                uuid,
+                username,
+                accessToken,
+                type,
+                lastUsed,
+                lastUsedBy,
+                bans,
+                sourceClient,
+                sourceUser,
+                refreshToken,
+                expiresAt);
+    }
+
+    /**
+     * Returns a description of this account with both credentials redacted. Printing the access and
+     * refresh tokens verbatim would let a host that logs an account — or anything embedding one, such as a
+     * login result — write a durable credential to disk. Identity and state stay readable, because that is
+     * what a log is for.
      *
      * @return a loggable description carrying no credential
      * @since 0.6.0
@@ -339,5 +503,176 @@ public record AltAccount(
      */
     private static String redacted(String credential) {
         return credential == null ? "null" : "<redacted>";
+    }
+
+    /**
+     * Builds an {@link AltAccount} field by field. Every setter takes {@code null} (or {@code 0}) as "none",
+     * as the account's fields do. A builder is not thread-safe; the account it builds is immutable and takes
+     * its own copy of the bans.
+     *
+     * @author trq
+     * @since 1.0.0
+     */
+    public static final class Builder {
+
+        private final String uuid;
+        private String username;
+        private String accessToken;
+        private AccountType type;
+        private long lastUsed;
+        private String lastUsedBy;
+        private Map<String, BanInfo> bans;
+        private String sourceClient;
+        private String sourceUser;
+        private String refreshToken;
+        private long expiresAt;
+
+        private Builder(String uuid, String username, String accessToken, AccountType type) {
+            this.uuid = uuid;
+            this.username = username;
+            this.accessToken = accessToken;
+            this.type = type;
+        }
+
+        /**
+         * Sets the username.
+         *
+         * @param value the username
+         * @return this builder
+         * @since 1.0.0
+         */
+        public Builder username(String value) {
+            this.username = value;
+            return this;
+        }
+
+        /**
+         * Sets the access token.
+         *
+         * @param value the access token
+         * @return this builder
+         * @since 1.0.0
+         */
+        public Builder accessToken(String value) {
+            this.accessToken = value;
+            return this;
+        }
+
+        /**
+         * Sets the account type.
+         *
+         * @param value the authentication protocol
+         * @return this builder
+         * @since 1.0.0
+         */
+        public Builder type(AccountType value) {
+            this.type = value;
+            return this;
+        }
+
+        /**
+         * Sets the epoch-millis time of the last successful login.
+         *
+         * @param value the last-used time, or {@code 0} for never
+         * @return this builder
+         * @since 1.0.0
+         */
+        public Builder lastUsed(long value) {
+            this.lastUsed = value;
+            return this;
+        }
+
+        /**
+         * Sets the member that last used the account in a shared repository.
+         *
+         * @param value the member id, or {@code null}
+         * @return this builder
+         * @since 1.0.0
+         */
+        public Builder lastUsedBy(String value) {
+            this.lastUsedBy = value;
+            return this;
+        }
+
+        /**
+         * Sets the ban records keyed by server id. The account takes its own copy when built.
+         *
+         * @param value the bans, or {@code null} for never observed banned
+         * @return this builder
+         * @since 1.0.0
+         */
+        public Builder bans(Map<String, BanInfo> value) {
+            this.bans = value;
+            return this;
+        }
+
+        /**
+         * Sets the client (mod) the alt was added from.
+         *
+         * @param value the source client, or {@code null}
+         * @return this builder
+         * @since 1.0.0
+         */
+        public Builder sourceClient(String value) {
+            this.sourceClient = value;
+            return this;
+        }
+
+        /**
+         * Sets the user within the source client that added the alt.
+         *
+         * @param value the source user, or {@code null}
+         * @return this builder
+         * @since 1.0.0
+         */
+        public Builder sourceUser(String value) {
+            this.sourceUser = value;
+            return this;
+        }
+
+        /**
+         * Sets the OAuth refresh token.
+         *
+         * @param value the refresh token, or {@code null} for none
+         * @return this builder
+         * @since 1.0.0
+         */
+        public Builder refreshToken(String value) {
+            this.refreshToken = value;
+            return this;
+        }
+
+        /**
+         * Sets the epoch-millis expiry of the access token.
+         *
+         * @param value the expiry, or {@code 0} when unknown
+         * @return this builder
+         * @since 1.0.0
+         */
+        public Builder expiresAt(long value) {
+            this.expiresAt = value;
+            return this;
+        }
+
+        /**
+         * Builds the account.
+         *
+         * @return a new immutable account
+         * @since 1.0.0
+         */
+        public AltAccount build() {
+            return new AltAccount(
+                    uuid,
+                    username,
+                    accessToken,
+                    type,
+                    lastUsed,
+                    lastUsedBy,
+                    bans,
+                    sourceClient,
+                    sourceUser,
+                    refreshToken,
+                    expiresAt);
+        }
     }
 }

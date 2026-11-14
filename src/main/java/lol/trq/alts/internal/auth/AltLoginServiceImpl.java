@@ -571,18 +571,7 @@ public class AltLoginServiceImpl implements AltLoginService {
         if (!importing || existing == null) {
             return merged;
         }
-        return new AltAccount(
-                merged.uuid(),
-                merged.username(),
-                merged.accessToken(),
-                merged.type(),
-                existing.lastUsed(),
-                merged.lastUsedBy(),
-                merged.bans(),
-                merged.sourceClient(),
-                merged.sourceUser(),
-                merged.refreshToken(),
-                merged.expiresAt());
+        return merged.toBuilder().lastUsed(existing.lastUsed()).build();
     }
 
     /**

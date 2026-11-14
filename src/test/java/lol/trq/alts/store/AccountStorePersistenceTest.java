@@ -358,8 +358,9 @@ class AccountStorePersistenceTest {
 
     @Test
     void usingAnAccountPersistsItsLastUsedTime() {
-        AltAccount stored =
-                new AltAccount(UUID, "Alex", "access", AccountType.MICROSOFT, 1L, null, null, null, null, null, 0L);
+        AltAccount stored = AltAccount.builder(UUID, "Alex", "access", AccountType.MICROSOFT)
+                .lastUsed(1L)
+                .build();
         store.addAccount(stored);
 
         store.useAccount(stored);

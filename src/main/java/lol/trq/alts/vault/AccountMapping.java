@@ -62,18 +62,15 @@ final class AccountMapping {
                 bans.put(server, ban);
             }
         });
-        return new AltAccount(
-                uuid,
-                string(f, "username"),
-                string(f, "accessToken"),
-                type(string(f, "type")),
-                int64(f, "lastUsed"),
-                string(f, "lastUsedBy"),
-                bans.isEmpty() ? null : bans,
-                string(f, "sourceClient"),
-                string(f, "sourceUser"),
-                string(f, "refreshToken"),
-                int64(f, "expiresAt"));
+        return AltAccount.builder(uuid, string(f, "username"), string(f, "accessToken"), type(string(f, "type")))
+                .lastUsed(int64(f, "lastUsed"))
+                .lastUsedBy(string(f, "lastUsedBy"))
+                .bans(bans.isEmpty() ? null : bans)
+                .sourceClient(string(f, "sourceClient"))
+                .sourceUser(string(f, "sourceUser"))
+                .refreshToken(string(f, "refreshToken"))
+                .expiresAt(int64(f, "expiresAt"))
+                .build();
     }
 
     private static JsonElement value(SortedMap<String, Payload.Field> fields, String name) {

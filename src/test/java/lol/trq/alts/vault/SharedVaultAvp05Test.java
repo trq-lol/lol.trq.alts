@@ -80,18 +80,15 @@ class SharedVaultAvp05Test {
         Map<String, BanInfo> bans = new LinkedHashMap<>();
         bans.put("one.example", new BanInfo(true, 1_700_000_000_111L, "self", "cheating", "observer-1"));
         bans.put("two.example", new BanInfo(false, 1_700_000_000_222L, "login", null, null));
-        return new AltAccount(
-                uuid,
-                "Steve",
-                "access-token-value",
-                AccountType.MICROSOFT,
-                1_700_000_000_333L,
-                "member-who-used-it",
-                bans,
-                "client-name",
-                "client-user",
-                "refresh-token-value",
-                1_700_000_000_444L);
+        return AltAccount.builder(uuid, "Steve", "access-token-value", AccountType.MICROSOFT)
+                .lastUsed(1_700_000_000_333L)
+                .lastUsedBy("member-who-used-it")
+                .bans(bans)
+                .sourceClient("client-name")
+                .sourceUser("client-user")
+                .refreshToken("refresh-token-value")
+                .expiresAt(1_700_000_000_444L)
+                .build();
     }
 
     // --- Create, join, resume ------------------------------------------------------------------------
@@ -709,8 +706,8 @@ class SharedVaultAvp05Test {
             assertEquals(
                     Kind.INVALID_INPUT,
                     failure(p.owner()
-                                    .put(new AltAccount(
-                                            " ", "x", "t", AccountType.OFFLINE, 0, null, null, null, null, null, 0)))
+                                    .put(AltAccount.builder(" ", "x", "t", AccountType.OFFLINE)
+                                            .build()))
                             .kind());
             assertEquals(Kind.INVALID_INPUT, failure(p.bob().remove(" ")).kind());
             // A host that answers with garbage.
@@ -805,7 +802,7 @@ class SharedVaultAvp05Test {
         Payload.Account bare =
                 new Payload.Account(Optional.empty(), new java.util.TreeMap<>(), new java.util.TreeMap<>());
         AltAccount a = AccountMapping.toAccount(UUID_A, bare);
-        assertEquals(new AltAccount(UUID_A, null, null, null, 0L, null, null, null, null, null, 0L), a);
+        assertEquals(AltAccount.builder(UUID_A, null, null, null).build(), a);
     }
 
     private static Map<Path, byte[]> files(Path root) throws Exception {
