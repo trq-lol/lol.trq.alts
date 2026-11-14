@@ -11,7 +11,7 @@ Thanks for your interest in contributing!
 ## Development workflow
 
 - **Format before committing:** `./gradlew spotlessApply`. CI rejects unformatted code.
-- **House style:** palantir-java-format (4-space indent, 120-column limit). Records for DTOs with `@SerializedName` on every component. Full Javadoc on public and protected members.
+- **House style:** palantir-java-format (4-space indent, 120-column limit). Records for DTOs with `@SerializedName` on every component; a value type expected to grow is a final class with static factories and withers, since a record cannot gain a component within a major version. Full Javadoc on public and protected members.
 - **Tests:** add JUnit 5 tests for new behaviour; run `./gradlew test`. Tests pin what the design and the protocol specify, not what the code happens to do.
 - **Test seams:** there is no process-wide state and no system property to set. A test builds its own runtime, store or transport, and closes it. The hooks that remain (`Builder.afterStoresOpenForTests`, `StoreFile.beforeWriteForTests`, `fileForTests`, `SharedVault.engineForTests`, the transport's TLS override for a loopback certificate) are package-private. From another test package, reach them through the helpers in the test sources: `StoreTestHooks` and `StoreFileSeams` for the stores, `TestTransports` for a transport (direct, routed, on a given executor, or trusting a loopback certificate), `AccountStoreTestSupport` for the sign-in tests, and `TestAvpHost` / `VaultWorld` for an in-process AVP 0.5 host. A test run from an IDE needs nothing extra.
 - **Network in tests:** tests talk to loopback and scripted servers only, never to the live services. Do not describe a flow as verified against a live service unless it was.

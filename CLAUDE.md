@@ -68,7 +68,7 @@ Package map (the exported packages are exactly what `module-info.java` exports a
 | `time/` | `TimeSource` seam + `SystemTimeSource` / `NtpTimeSource`, for the scheduled name claim |
 | `cache/` | `AsyncCache<K,V>`: lazy, non-blocking, stale-while-revalidate, bounded |
 | `skin/` | `SkinAvatarCache<H>` (UUID-keyed), reached only as `alts.skinCache()` |
-| `model/` | the records: `AltAccount`, `SessionData`, `GameStats`, `BanInfo`, enums |
+| `model/` | the stored account, `AltAccount` (a final class with a builder), and the records `SessionData`, `GameStats`, `BanInfo`; enums |
 | `vault/` | the AVP 0.5 client API (`VaultHosts`, `VaultHost`, `SharedVault`, `SyncReport`, `VaultSnapshot`, `OwnerIdentity`, `LinkSession`, `VaultIdentity` and its stored forms, the tokens) and the read-only `LegacyVaultReader` |
 | `internal/` | everything else: `internal.net` (`HttpTransport`, the tunnel, `FailureText`, ...), `internal.auth` (the sign-in chain), `internal.account`, `internal.bulk`, `internal.store` (`StoreFile`, `EncryptionUtil`), `internal.skin`, `internal.crypto` (the primitives), `internal.avp` (the AVP 0.5 constructions), `internal.vault` (the client engine; `legacy` is the 0.4 importer). Not exported, not documented, not covered by the API gate |
 
@@ -96,8 +96,8 @@ Package map (the exported packages are exactly what `module-info.java` exports a
   header for review.
 - **Secrets stay out.** No API keys, tokens, or credentials in source or history. A server API key lives
   host-side behind `GameStatsSource` (or another seam). Never commit `.idea/`, `*.iml`, or machine paths.
-- **House style.** palantir-java-format (4-space, 120 column). Records for DTOs with `@SerializedName`
-  on every component. Full Javadoc on public and protected members, with exactly one `@since` naming the
+- **House style.** palantir-java-format (4-space, 120 column). Records for wire DTOs with
+  `@SerializedName` on every component; `AltAccount`, a final class, carries it on every field. Full Javadoc on public and protected members, with exactly one `@since` naming the
   release each one first shipped in (`SinceTagsTest` checks every exported declaration).
 - **Conventional Commits**, one logical change each, and **never** a `Co-Authored-By` or any other
   AI-attribution trailer. See [CONTRIBUTING.md](CONTRIBUTING.md). A breaking commit carries `!` after
@@ -172,8 +172,13 @@ and obfuscation. Any record carrying a credential, a response body or a header v
 changes the canonical constructor and breaks every deconstruction pattern over it, so `apiCheck` fails
 on it, and `apiDump` refuses to record it, even when a constructor of the old arity is kept (the gate
 compares the components of every record the dump already lists). A type that is expected to grow is a
-final class with static factories and withers instead. `AltsFailure` is a value, not a wire DTO, and
-carries no annotations.
+final class with static factories and withers instead: `AltAccount`, `MicrosoftAuthConfig`,
+`BulkOptions`, `NetworkScope`, `ClaimOptions`, `AltsFailure` and `BulkEntryResult` are, with the
+accessors, value `equals`/`hashCode` and (redacted where it applies) `toString` a record would have.
+`AltAccount`'s private fields carry the `@SerializedName`s, and their names and order are the store
+file's format: `StoreFormatCompatTest` loads a file 0.12 wrote and requires the same bytes back, and
+the module opens `model` to Gson for it. `AltsFailure` is a value, not a wire DTO, and carries no
+annotations.
 
 **Logging in is one step more than operating on an account.** `AltAccountService.check`/`refresh` never
 touch the live session; `loginAccount` is `refresh` plus the injection. Keep it that way: anything that
@@ -324,7 +329,8 @@ and its RPS ticket prefix.
   `SharedVault.engineForTests`) stay package-private.
 - **Every test runs twice.** `check` runs the suite on the class path (`test`) and again with the jar as
   a named module (`moduleTest`), so a missing `requires` or `opens` fails there. Gson builds private
-  records by reflection only in `store` and `internal.auth`, which the descriptor opens to Gson alone.
+  types by reflection only in `store`, `internal.auth` and `model` (`AltAccount`'s fields), which the
+  descriptor opens to Gson alone.
 - **Do not edit a docs snippet directly.** Every multi-line Java block in `docs/GETTING_STARTED.md` is
   inlined from a method in `examples/`, which `check` compiles with `-Xlint:deprecation -Werror`. Change
   the example first, then the guide, character for character.

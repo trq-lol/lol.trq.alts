@@ -24,7 +24,8 @@
 - **A closeable runtime.** `AltsRuntime` is `AutoCloseable`: `close()` flushes and unlocks the stores, closes the transport, and ends whatever was still waiting on the runtime.
 - **Host-agnostic.** The library never imports a host type. The host implements a few seams (session injection, storage directory, main-thread executor, notifications, and optionally texture upload, stats, proxy routing, store key, device-code prompt) and wires them once.
 - **A frozen, narrow API.** The jar is the named module `lol.trq.alts`; the implementation lives under `lol.trq.alts.internal`, which is not exported or documented. A committed dump of the exported API gates every build, so 1.x does not break it.
-- **Obfuscation-safe.** DTOs are records with `@SerializedName` on every component.
+- **Obfuscation-safe.** DTOs are records with `@SerializedName` on every component; the stored
+  `AltAccount`, a class, carries it on every field.
 
 The device-code route and the cookie route were tested against loopback and scripted servers, not against the live services; see the [changelog](CHANGELOG.md).
 
@@ -120,7 +121,8 @@ The points most often gotten wrong:
 2. **Never reach into a host type.** The library imports only the JDK, Gson, and its own packages. Host
    platform behavior crosses the `spi/` seam interfaces, which the host implements.
 3. **DTOs are records with `@SerializedName` on every component.** This keeps serialization stable under
-   obfuscation. Do not drop the annotations or switch to field-name reflection.
+   obfuscation. Do not drop the annotations or switch to field-name reflection. `AltAccount` is a final
+   class whose fields carry them, in the order the store file has always had.
 4. **Microsoft login needs a host-supplied client id.** There is no built-in default; the host passes
    one through `MicrosoftAuthConfig`.
 5. **A refresh token is a durable credential, not another access token.** It renews a session for as

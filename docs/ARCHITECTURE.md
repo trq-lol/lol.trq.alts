@@ -67,7 +67,7 @@
 
 ## Module and internal packages
 
-The jar is the named module `lol.trq.alts` (`src/main/java/module-info.java`). It exports the twelve API packages and nothing under `lol.trq.alts.internal`; it `requires transitive com.google.gson`, because `@SerializedName` sits on public records (the build declares Gson as an ordinary `api` dependency), and requires `java.desktop` (the system browser, ImageIO) and `jdk.httpserver` (the loopback redirect). It opens exactly two packages, to Gson only: `store` and `internal.auth`, whose private records Gson builds by reflection.
+The jar is the named module `lol.trq.alts` (`src/main/java/module-info.java`). It exports the twelve API packages and nothing under `lol.trq.alts.internal`; it `requires transitive com.google.gson`, because `@SerializedName` sits on public records (the build declares Gson as an ordinary `api` dependency), and requires `java.desktop` (the system browser, ImageIO) and `jdk.httpserver` (the loopback redirect). It opens exactly three packages, to Gson only: `store` and `internal.auth`, whose private records Gson builds by reflection, and `model`, whose `AltAccount` is a final class Gson reads and fills field by field.
 
 The fences around `internal`:
 
@@ -168,6 +168,10 @@ The constructions are gated byte for byte by the AVP 0.5 vectors vendored under 
 
 - No Minecraft, renderer or consumer imports anywhere in the library; only the JDK and Gson.
 - DTOs are records with `@SerializedName` on every component, so serialization survives obfuscation.
+  The value types expected to grow (`AltAccount`, `MicrosoftAuthConfig`, `BulkOptions`, `NetworkScope`,
+  `ClaimOptions`, `AltsFailure`, `BulkEntryResult`) are final classes with factories instead, because a
+  record cannot gain a component within a major version; `AltAccount` carries `@SerializedName` on its
+  fields, whose names and order are the store file's format.
 - Optional capabilities (avatars, game stats) degrade to `null` when their seam is absent.
 - The runtime owns its state; nothing is reached through a static.
 - Every request goes through the runtime's transport, and every blocking task and wait through its executor.
