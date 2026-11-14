@@ -31,17 +31,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commit a member signs. The client verifies all of it itself, from genesis, and trusts no host:
   - `alts.vault()` returns `VaultHosts`, which connects to a host on the runtime's transport (its proxy,
     timeouts and executor) by the host's key. `connect` takes a `RepoLocator`, a `HostRef`, a
-    `VaultSnapshot` or a locator and key, and refuses a host that serves another key with `PROTOCOL`; a
-    locator alone is a first contact. A locator is reached at `https://<locator>` unless
+    `VaultSnapshot` or a locator and key, and refuses a host that serves another key with `PROTOCOL`;
+    `connectFirstContact(locator)` takes whatever key the host serves, which is then unverified: compare
+    it out of band, persist `VaultHost.ref()` and reconnect with `connect(HostRef)`. A locator is reached at `https://<locator>` unless
     `Builder#vaultHostAddress` maps it elsewhere. Each runtime keeps its own host tokens, and
     `close()` drops them.
   - `SharedVault.create`, `open`, `prepareJoin`, `join` and `resume` give one member device's copy.
     `sync()` returns a `SyncReport`: the new states, a diverged owner chain the tie rule settled
     (`divergedAt`), a policy that turned to sharing (`policyTurnedOn`), the unreadable and discarded
     heads, and the pending leave requests. `openReport()` says the same of the pull that opened the copy.
-  - The accounts are `AltAccount`s with `BanInfo` per server id: `accounts()`, `account(uuid)`, `put`,
-    `remove(uuid)`, `markBanned`. `put` stamps only the fields that changed, so two devices editing
-    different fields of one account both keep their edit. While the repository withholds refresh
+  - The accounts are `AltAccount`s with `BanInfo` per server id: `accounts()`, `account(uuid)`,
+    `update(uuid, edit)`, `put(base, edited)`, `put(account)`, `remove(uuid)`, `markBanned`. `update` is
+    the way to change an account: it edits the account as the copy holds it when the write runs and
+    stamps only the fields the edit changed, so a field another member changed is never reverted.
+    `put(base, edited)` stamps only the fields where the two differ, for an edit of an account read
+    earlier. `put(account)` stamps the fields that differ from the copy as it stands when the write
+    runs, so a stale object can revert remote edits; use `update`. A write that changes nothing sends
+    no commit. While the repository withholds refresh
     tokens, `refreshToken` and `expiresAt` are neither sent nor read. Nothing the vault reads is saved
     to the `AccountStore`.
   - The owner invites from a pasted `InviteToken`, removes a `VaultMember` from `roster()` (the data
