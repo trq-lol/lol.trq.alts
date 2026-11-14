@@ -2,23 +2,18 @@
 # package the module exports. Generated from the built jar by ./gradlew apiDump and checked by
 # ./gradlew apiCheck (part of check); do not edit by hand. Packages under internal are not listed.
 # version 1.0.0
+# breaking: 1.0.0 unreleased: B2 PlayerCertificate.privateKey/publicKey throw AltsException instead of GeneralSecurityException; B3 AltAccount, MicrosoftAuthConfig, NetworkScope, BulkOptions, ClaimOptions, BulkEntryResult and AltsFailure are final classes (record components and public constructors removed, factories and builders added); B4 SharedVault.remove(String) and remove(VaultMember) renamed removeAccount and removeMember; B1 MicrosoftAuthConfig.DEFAULT_REDIRECT_PATH constant changed to a neutral path
 lol.trq.alts.AltsException ctor public lol.trq.alts.AltsException(lol.trq.alts.AltsFailure$Kind,java.lang.String)
 lol.trq.alts.AltsException ctor public lol.trq.alts.AltsException(lol.trq.alts.AltsFailure)
 lol.trq.alts.AltsException ctor public lol.trq.alts.AltsException(lol.trq.alts.AltsFailure,java.lang.Throwable)
 lol.trq.alts.AltsException method public lol.trq.alts.AltsFailure lol.trq.alts.AltsException.failure()
 lol.trq.alts.AltsException method public lol.trq.alts.AltsFailure$Kind lol.trq.alts.AltsException.kind()
 lol.trq.alts.AltsException type public final class AltsException extends java.lang.RuntimeException
-lol.trq.alts.AltsFailure component java.lang.String message
-lol.trq.alts.AltsFailure component java.util.Optional<java.time.Duration> retryAfter
-lol.trq.alts.AltsFailure component java.util.Optional<java.time.Instant> retryAt
-lol.trq.alts.AltsFailure component java.util.Optional<lol.trq.alts.auth.XstsError> xstsError
-lol.trq.alts.AltsFailure component lol.trq.alts.AltsFailure$Kind kind
-lol.trq.alts.AltsFailure ctor public lol.trq.alts.AltsFailure(lol.trq.alts.AltsFailure$Kind,java.lang.String,java.util.Optional<java.time.Duration>,java.util.Optional<lol.trq.alts.auth.XstsError>,java.util.Optional<java.time.Instant>)
+lol.trq.alts.AltsFailure method public boolean lol.trq.alts.AltsFailure.equals(java.lang.Object)
 lol.trq.alts.AltsFailure method public boolean lol.trq.alts.AltsFailure.retryable()
-lol.trq.alts.AltsFailure method public final boolean lol.trq.alts.AltsFailure.equals(java.lang.Object)
-lol.trq.alts.AltsFailure method public final int lol.trq.alts.AltsFailure.hashCode()
-lol.trq.alts.AltsFailure method public final java.lang.String lol.trq.alts.AltsFailure.toString()
+lol.trq.alts.AltsFailure method public int lol.trq.alts.AltsFailure.hashCode()
 lol.trq.alts.AltsFailure method public java.lang.String lol.trq.alts.AltsFailure.message()
+lol.trq.alts.AltsFailure method public java.lang.String lol.trq.alts.AltsFailure.toString()
 lol.trq.alts.AltsFailure method public java.util.Optional<java.time.Duration> lol.trq.alts.AltsFailure.retryAfter()
 lol.trq.alts.AltsFailure method public java.util.Optional<java.time.Instant> lol.trq.alts.AltsFailure.retryAt()
 lol.trq.alts.AltsFailure method public java.util.Optional<lol.trq.alts.auth.XstsError> lol.trq.alts.AltsFailure.xstsError()
@@ -28,7 +23,7 @@ lol.trq.alts.AltsFailure method public static lol.trq.alts.AltsFailure lol.trq.a
 lol.trq.alts.AltsFailure method public static lol.trq.alts.AltsFailure lol.trq.alts.AltsFailure.of(lol.trq.alts.AltsFailure$Kind,java.lang.String,java.time.Duration)
 lol.trq.alts.AltsFailure method public static lol.trq.alts.AltsFailure lol.trq.alts.AltsFailure.rateLimited(java.lang.String,java.time.Duration)
 lol.trq.alts.AltsFailure method public static lol.trq.alts.AltsFailure lol.trq.alts.AltsFailure.xboxDenied(java.lang.String,lol.trq.alts.auth.XstsError)
-lol.trq.alts.AltsFailure type public final record AltsFailure
+lol.trq.alts.AltsFailure type public final class AltsFailure
 lol.trq.alts.AltsFailure$Kind constant CANCELLED
 lol.trq.alts.AltsFailure$Kind constant CONFLICT
 lol.trq.alts.AltsFailure$Kind constant CRYPTO
@@ -139,23 +134,18 @@ lol.trq.alts.account.CapeService method public default lol.trq.alts.account.Play
 lol.trq.alts.account.CapeService type public interface CapeService
 lol.trq.alts.account.CertificateService method public abstract lol.trq.alts.account.PlayerCertificate lol.trq.alts.account.CertificateService.fetch()
 lol.trq.alts.account.CertificateService type public interface CertificateService
-lol.trq.alts.account.ClaimOptions component int concurrency
-lol.trq.alts.account.ClaimOptions component java.time.Duration attemptSpacing
-lol.trq.alts.account.ClaimOptions component java.time.Duration leadTime
-lol.trq.alts.account.ClaimOptions component java.time.Duration window
-lol.trq.alts.account.ClaimOptions component lol.trq.alts.time.TimeSource timeSource
-lol.trq.alts.account.ClaimOptions ctor public lol.trq.alts.account.ClaimOptions(java.time.Duration,java.time.Duration,java.time.Duration,int,lol.trq.alts.time.TimeSource)
-lol.trq.alts.account.ClaimOptions method public final boolean lol.trq.alts.account.ClaimOptions.equals(java.lang.Object)
-lol.trq.alts.account.ClaimOptions method public final int lol.trq.alts.account.ClaimOptions.hashCode()
-lol.trq.alts.account.ClaimOptions method public final java.lang.String lol.trq.alts.account.ClaimOptions.toString()
+lol.trq.alts.account.ClaimOptions method public boolean lol.trq.alts.account.ClaimOptions.equals(java.lang.Object)
 lol.trq.alts.account.ClaimOptions method public int lol.trq.alts.account.ClaimOptions.concurrency()
+lol.trq.alts.account.ClaimOptions method public int lol.trq.alts.account.ClaimOptions.hashCode()
+lol.trq.alts.account.ClaimOptions method public java.lang.String lol.trq.alts.account.ClaimOptions.toString()
 lol.trq.alts.account.ClaimOptions method public java.time.Duration lol.trq.alts.account.ClaimOptions.attemptSpacing()
 lol.trq.alts.account.ClaimOptions method public java.time.Duration lol.trq.alts.account.ClaimOptions.leadTime()
 lol.trq.alts.account.ClaimOptions method public java.time.Duration lol.trq.alts.account.ClaimOptions.window()
 lol.trq.alts.account.ClaimOptions method public lol.trq.alts.account.ClaimOptions lol.trq.alts.account.ClaimOptions.withTimeSource(lol.trq.alts.time.TimeSource)
 lol.trq.alts.account.ClaimOptions method public lol.trq.alts.time.TimeSource lol.trq.alts.account.ClaimOptions.timeSource()
 lol.trq.alts.account.ClaimOptions method public static lol.trq.alts.account.ClaimOptions lol.trq.alts.account.ClaimOptions.defaults()
-lol.trq.alts.account.ClaimOptions type public final record ClaimOptions
+lol.trq.alts.account.ClaimOptions method public static lol.trq.alts.account.ClaimOptions lol.trq.alts.account.ClaimOptions.of(java.time.Duration,java.time.Duration,java.time.Duration,int,lol.trq.alts.time.TimeSource)
+lol.trq.alts.account.ClaimOptions type public final class ClaimOptions
 lol.trq.alts.account.ClaimResult component boolean claimed
 lol.trq.alts.account.ClaimResult component int attempts
 lol.trq.alts.account.ClaimResult component java.util.Optional<lol.trq.alts.AltsFailure> failure
@@ -480,27 +470,12 @@ lol.trq.alts.auth.LoginResult method public static lol.trq.alts.auth.LoginResult
 lol.trq.alts.auth.LoginResult method public static lol.trq.alts.auth.LoginResult lol.trq.alts.auth.LoginResult.failure(lol.trq.alts.AltsFailure)
 lol.trq.alts.auth.LoginResult method public static lol.trq.alts.auth.LoginResult lol.trq.alts.auth.LoginResult.success(lol.trq.alts.model.AltAccount)
 lol.trq.alts.auth.LoginResult type public final record LoginResult
-lol.trq.alts.auth.MicrosoftAuthConfig component java.lang.String authorizeUrl
-lol.trq.alts.auth.MicrosoftAuthConfig component java.lang.String clientId
-lol.trq.alts.auth.MicrosoftAuthConfig component java.lang.String deviceCodeUrl
-lol.trq.alts.auth.MicrosoftAuthConfig component java.lang.String deviceTokenUrl
-lol.trq.alts.auth.MicrosoftAuthConfig component java.lang.String minecraftLoginUrl
-lol.trq.alts.auth.MicrosoftAuthConfig component java.lang.String minecraftProfileUrl
-lol.trq.alts.auth.MicrosoftAuthConfig component java.lang.String redirectPath
-lol.trq.alts.auth.MicrosoftAuthConfig component java.lang.String redirectUri
-lol.trq.alts.auth.MicrosoftAuthConfig component java.lang.String rpsTicketPrefix
-lol.trq.alts.auth.MicrosoftAuthConfig component java.lang.String scope
-lol.trq.alts.auth.MicrosoftAuthConfig component java.lang.String tokenUrl
-lol.trq.alts.auth.MicrosoftAuthConfig component java.lang.String xboxLiveAuthUrl
-lol.trq.alts.auth.MicrosoftAuthConfig component java.lang.String xstsAuthUrl
-lol.trq.alts.auth.MicrosoftAuthConfig ctor public lol.trq.alts.auth.MicrosoftAuthConfig(java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String)
-lol.trq.alts.auth.MicrosoftAuthConfig ctor public lol.trq.alts.auth.MicrosoftAuthConfig(java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String)
 lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_AUTHORIZE_URL = "https://login.live.com/oauth20_authorize.srf"
 lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_DEVICE_CODE_URL = "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode"
 lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_DEVICE_TOKEN_URL = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
 lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_MINECRAFT_LOGIN_URL = "https://api.minecraftservices.com/authentication/login_with_xbox"
 lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_MINECRAFT_PROFILE_URL = "https://api.minecraftservices.com/minecraft/profile"
-lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_REDIRECT_PATH = "/in_game_account_switcher_long_enough_uri_to_prevent_accidental_leaks_on_screensharing_even_if_you_have_like_extremely_big_screen_though_it_might_not_mork_but_we_will_try_it_anyway_to_prevent_funny_things_from_happening_or_something"
+lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_REDIRECT_PATH = "/lol_trq_alts_loopback_redirect_long_enough_to_avoid_accidental_leaks_on_screenshare"
 lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_RPS_TICKET_PREFIX = "d="
 lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_SCOPE = "XboxLive.signin XboxLive.offline_access"
 lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.DEFAULT_TOKEN_URL = "https://login.live.com/oauth20_token.srf"
@@ -509,9 +484,8 @@ lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String
 lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.LEGACY_MSA_REDIRECT_URI = "https://login.live.com/oauth20_desktop.srf"
 lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.LEGACY_MSA_RPS_TICKET_PREFIX = "t="
 lol.trq.alts.auth.MicrosoftAuthConfig field public static final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.LEGACY_MSA_SCOPE = "service::user.auth.xboxlive.com::MBI_SSL"
-lol.trq.alts.auth.MicrosoftAuthConfig method public final boolean lol.trq.alts.auth.MicrosoftAuthConfig.equals(java.lang.Object)
-lol.trq.alts.auth.MicrosoftAuthConfig method public final int lol.trq.alts.auth.MicrosoftAuthConfig.hashCode()
-lol.trq.alts.auth.MicrosoftAuthConfig method public final java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.toString()
+lol.trq.alts.auth.MicrosoftAuthConfig method public boolean lol.trq.alts.auth.MicrosoftAuthConfig.equals(java.lang.Object)
+lol.trq.alts.auth.MicrosoftAuthConfig method public int lol.trq.alts.auth.MicrosoftAuthConfig.hashCode()
 lol.trq.alts.auth.MicrosoftAuthConfig method public java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.authorizeUrl()
 lol.trq.alts.auth.MicrosoftAuthConfig method public java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.clientId()
 lol.trq.alts.auth.MicrosoftAuthConfig method public java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.deviceCodeUrl()
@@ -522,6 +496,7 @@ lol.trq.alts.auth.MicrosoftAuthConfig method public java.lang.String lol.trq.alt
 lol.trq.alts.auth.MicrosoftAuthConfig method public java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.redirectUri()
 lol.trq.alts.auth.MicrosoftAuthConfig method public java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.rpsTicketPrefix()
 lol.trq.alts.auth.MicrosoftAuthConfig method public java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.scope()
+lol.trq.alts.auth.MicrosoftAuthConfig method public java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.toString()
 lol.trq.alts.auth.MicrosoftAuthConfig method public java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.tokenUrl()
 lol.trq.alts.auth.MicrosoftAuthConfig method public java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.xboxLiveAuthUrl()
 lol.trq.alts.auth.MicrosoftAuthConfig method public java.lang.String lol.trq.alts.auth.MicrosoftAuthConfig.xstsAuthUrl()
@@ -529,10 +504,12 @@ lol.trq.alts.auth.MicrosoftAuthConfig method public lol.trq.alts.auth.MicrosoftA
 lol.trq.alts.auth.MicrosoftAuthConfig method public lol.trq.alts.auth.MicrosoftAuthConfig lol.trq.alts.auth.MicrosoftAuthConfig.withDeviceCodeEndpoints(java.lang.String,java.lang.String)
 lol.trq.alts.auth.MicrosoftAuthConfig method public lol.trq.alts.auth.MicrosoftAuthConfig lol.trq.alts.auth.MicrosoftAuthConfig.withEndpoints(java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String)
 lol.trq.alts.auth.MicrosoftAuthConfig method public lol.trq.alts.auth.MicrosoftAuthConfig lol.trq.alts.auth.MicrosoftAuthConfig.withRedirectPath(java.lang.String)
+lol.trq.alts.auth.MicrosoftAuthConfig method public lol.trq.alts.auth.MicrosoftAuthConfig lol.trq.alts.auth.MicrosoftAuthConfig.withRedirectUri(java.lang.String)
+lol.trq.alts.auth.MicrosoftAuthConfig method public lol.trq.alts.auth.MicrosoftAuthConfig lol.trq.alts.auth.MicrosoftAuthConfig.withRpsTicketPrefix(java.lang.String)
 lol.trq.alts.auth.MicrosoftAuthConfig method public lol.trq.alts.auth.MicrosoftAuthConfig lol.trq.alts.auth.MicrosoftAuthConfig.withScope(java.lang.String)
 lol.trq.alts.auth.MicrosoftAuthConfig method public static lol.trq.alts.auth.MicrosoftAuthConfig lol.trq.alts.auth.MicrosoftAuthConfig.legacyMsa(java.lang.String)
 lol.trq.alts.auth.MicrosoftAuthConfig method public static lol.trq.alts.auth.MicrosoftAuthConfig lol.trq.alts.auth.MicrosoftAuthConfig.of(java.lang.String)
-lol.trq.alts.auth.MicrosoftAuthConfig type public final record MicrosoftAuthConfig
+lol.trq.alts.auth.MicrosoftAuthConfig type public final class MicrosoftAuthConfig
 lol.trq.alts.auth.XstsError constant ACCOUNT_BANNED
 lol.trq.alts.auth.XstsError constant ACCOUNT_RESTRICTED
 lol.trq.alts.auth.XstsError constant ADULT_VERIFICATION_REQUIRED
@@ -547,22 +524,14 @@ lol.trq.alts.auth.XstsError method public static lol.trq.alts.auth.XstsError lol
 lol.trq.alts.auth.XstsError method public static lol.trq.alts.auth.XstsError lol.trq.alts.auth.XstsError.valueOf(java.lang.String)
 lol.trq.alts.auth.XstsError method public static lol.trq.alts.auth.XstsError[] lol.trq.alts.auth.XstsError.values()
 lol.trq.alts.auth.XstsError type public final enum XstsError
-lol.trq.alts.bulk.BulkEntryResult component int attempts
-lol.trq.alts.bulk.BulkEntryResult component int index
-lol.trq.alts.bulk.BulkEntryResult component java.lang.String label
-lol.trq.alts.bulk.BulkEntryResult component java.lang.String message
-lol.trq.alts.bulk.BulkEntryResult component java.util.Optional<lol.trq.alts.AltsFailure> failure
-lol.trq.alts.bulk.BulkEntryResult component lol.trq.alts.account.Entitlements entitlements
-lol.trq.alts.bulk.BulkEntryResult component lol.trq.alts.model.AltAccount account
-lol.trq.alts.bulk.BulkEntryResult ctor public lol.trq.alts.bulk.BulkEntryResult(int,java.lang.String,lol.trq.alts.model.AltAccount,java.util.Optional<lol.trq.alts.AltsFailure>,java.lang.String,int,lol.trq.alts.account.Entitlements)
+lol.trq.alts.bulk.BulkEntryResult method public boolean lol.trq.alts.bulk.BulkEntryResult.equals(java.lang.Object)
 lol.trq.alts.bulk.BulkEntryResult method public boolean lol.trq.alts.bulk.BulkEntryResult.success()
-lol.trq.alts.bulk.BulkEntryResult method public final boolean lol.trq.alts.bulk.BulkEntryResult.equals(java.lang.Object)
-lol.trq.alts.bulk.BulkEntryResult method public final int lol.trq.alts.bulk.BulkEntryResult.hashCode()
-lol.trq.alts.bulk.BulkEntryResult method public final java.lang.String lol.trq.alts.bulk.BulkEntryResult.toString()
 lol.trq.alts.bulk.BulkEntryResult method public int lol.trq.alts.bulk.BulkEntryResult.attempts()
+lol.trq.alts.bulk.BulkEntryResult method public int lol.trq.alts.bulk.BulkEntryResult.hashCode()
 lol.trq.alts.bulk.BulkEntryResult method public int lol.trq.alts.bulk.BulkEntryResult.index()
 lol.trq.alts.bulk.BulkEntryResult method public java.lang.String lol.trq.alts.bulk.BulkEntryResult.label()
 lol.trq.alts.bulk.BulkEntryResult method public java.lang.String lol.trq.alts.bulk.BulkEntryResult.message()
+lol.trq.alts.bulk.BulkEntryResult method public java.lang.String lol.trq.alts.bulk.BulkEntryResult.toString()
 lol.trq.alts.bulk.BulkEntryResult method public java.util.Optional<lol.trq.alts.AltsFailure> lol.trq.alts.bulk.BulkEntryResult.failure()
 lol.trq.alts.bulk.BulkEntryResult method public lol.trq.alts.account.Entitlements lol.trq.alts.bulk.BulkEntryResult.entitlements()
 lol.trq.alts.bulk.BulkEntryResult method public lol.trq.alts.model.AltAccount lol.trq.alts.bulk.BulkEntryResult.account()
@@ -570,7 +539,7 @@ lol.trq.alts.bulk.BulkEntryResult method public static java.lang.String lol.trq.
 lol.trq.alts.bulk.BulkEntryResult method public static lol.trq.alts.bulk.BulkEntryResult lol.trq.alts.bulk.BulkEntryResult.failure(int,java.lang.String,lol.trq.alts.AltsFailure,int)
 lol.trq.alts.bulk.BulkEntryResult method public static lol.trq.alts.bulk.BulkEntryResult lol.trq.alts.bulk.BulkEntryResult.success(int,lol.trq.alts.model.AltAccount,java.lang.String,int)
 lol.trq.alts.bulk.BulkEntryResult method public static lol.trq.alts.bulk.BulkEntryResult lol.trq.alts.bulk.BulkEntryResult.success(int,lol.trq.alts.model.AltAccount,lol.trq.alts.account.Entitlements,java.lang.String,int)
-lol.trq.alts.bulk.BulkEntryResult type public final record BulkEntryResult
+lol.trq.alts.bulk.BulkEntryResult type public final class BulkEntryResult
 lol.trq.alts.bulk.BulkHandle method public abstract java.util.concurrent.CompletableFuture<lol.trq.alts.bulk.BulkReport> lol.trq.alts.bulk.BulkHandle.report()
 lol.trq.alts.bulk.BulkHandle method public abstract void lol.trq.alts.bulk.BulkHandle.cancel()
 lol.trq.alts.bulk.BulkHandle type public interface BulkHandle
@@ -579,20 +548,12 @@ lol.trq.alts.bulk.BulkOperations method public abstract lol.trq.alts.bulk.BulkHa
 lol.trq.alts.bulk.BulkOperations method public abstract lol.trq.alts.bulk.BulkHandle lol.trq.alts.bulk.BulkOperations.refreshAll(java.util.List<lol.trq.alts.model.AltAccount>,lol.trq.alts.bulk.BulkOptions,lol.trq.alts.bulk.BulkProgress)
 lol.trq.alts.bulk.BulkOperations method public default lol.trq.alts.bulk.BulkHandle lol.trq.alts.bulk.BulkOperations.entitlementsAll(java.util.List<lol.trq.alts.model.AltAccount>,lol.trq.alts.bulk.BulkOptions,lol.trq.alts.bulk.BulkProgress)
 lol.trq.alts.bulk.BulkOperations type public interface BulkOperations
-lol.trq.alts.bulk.BulkOptions component boolean stopOnRateLimit
-lol.trq.alts.bulk.BulkOptions component int concurrency
-lol.trq.alts.bulk.BulkOptions component int maxRetries
-lol.trq.alts.bulk.BulkOptions component java.time.Duration minSpacing
-lol.trq.alts.bulk.BulkOptions component java.time.Duration retryBaseDelay
-lol.trq.alts.bulk.BulkOptions component java.util.Optional<java.lang.String> routeTag
-lol.trq.alts.bulk.BulkOptions ctor public lol.trq.alts.bulk.BulkOptions(int,java.time.Duration,int,java.time.Duration,boolean)
-lol.trq.alts.bulk.BulkOptions ctor public lol.trq.alts.bulk.BulkOptions(int,java.time.Duration,int,java.time.Duration,boolean,java.util.Optional<java.lang.String>)
+lol.trq.alts.bulk.BulkOptions method public boolean lol.trq.alts.bulk.BulkOptions.equals(java.lang.Object)
 lol.trq.alts.bulk.BulkOptions method public boolean lol.trq.alts.bulk.BulkOptions.stopOnRateLimit()
-lol.trq.alts.bulk.BulkOptions method public final boolean lol.trq.alts.bulk.BulkOptions.equals(java.lang.Object)
-lol.trq.alts.bulk.BulkOptions method public final int lol.trq.alts.bulk.BulkOptions.hashCode()
-lol.trq.alts.bulk.BulkOptions method public final java.lang.String lol.trq.alts.bulk.BulkOptions.toString()
 lol.trq.alts.bulk.BulkOptions method public int lol.trq.alts.bulk.BulkOptions.concurrency()
+lol.trq.alts.bulk.BulkOptions method public int lol.trq.alts.bulk.BulkOptions.hashCode()
 lol.trq.alts.bulk.BulkOptions method public int lol.trq.alts.bulk.BulkOptions.maxRetries()
+lol.trq.alts.bulk.BulkOptions method public java.lang.String lol.trq.alts.bulk.BulkOptions.toString()
 lol.trq.alts.bulk.BulkOptions method public java.time.Duration lol.trq.alts.bulk.BulkOptions.minSpacing()
 lol.trq.alts.bulk.BulkOptions method public java.time.Duration lol.trq.alts.bulk.BulkOptions.retryBaseDelay()
 lol.trq.alts.bulk.BulkOptions method public java.util.Optional<java.lang.String> lol.trq.alts.bulk.BulkOptions.routeTag()
@@ -600,7 +561,8 @@ lol.trq.alts.bulk.BulkOptions method public lol.trq.alts.bulk.BulkOptions lol.tr
 lol.trq.alts.bulk.BulkOptions method public lol.trq.alts.bulk.BulkOptions lol.trq.alts.bulk.BulkOptions.withRouteTag(java.lang.String)
 lol.trq.alts.bulk.BulkOptions method public lol.trq.alts.bulk.BulkOptions lol.trq.alts.bulk.BulkOptions.withoutStoppingOnRateLimit()
 lol.trq.alts.bulk.BulkOptions method public static lol.trq.alts.bulk.BulkOptions lol.trq.alts.bulk.BulkOptions.defaults()
-lol.trq.alts.bulk.BulkOptions type public final record BulkOptions
+lol.trq.alts.bulk.BulkOptions method public static lol.trq.alts.bulk.BulkOptions lol.trq.alts.bulk.BulkOptions.of(int,java.time.Duration,int,java.time.Duration,boolean)
+lol.trq.alts.bulk.BulkOptions type public final class BulkOptions
 lol.trq.alts.bulk.BulkProgress field public static final lol.trq.alts.bulk.BulkProgress lol.trq.alts.bulk.BulkProgress.NONE
 lol.trq.alts.bulk.BulkProgress method public abstract void lol.trq.alts.bulk.BulkProgress.completed(int,int,lol.trq.alts.bulk.BulkEntryResult)
 lol.trq.alts.bulk.BulkProgress method public abstract void lol.trq.alts.bulk.BulkProgress.started(int,int,java.lang.String)
@@ -645,23 +607,11 @@ lol.trq.alts.model.AccountType constant SESSION
 lol.trq.alts.model.AccountType method public static lol.trq.alts.model.AccountType lol.trq.alts.model.AccountType.valueOf(java.lang.String)
 lol.trq.alts.model.AccountType method public static lol.trq.alts.model.AccountType[] lol.trq.alts.model.AccountType.values()
 lol.trq.alts.model.AccountType type public final enum AccountType
-lol.trq.alts.model.AltAccount component java.lang.String accessToken
-lol.trq.alts.model.AltAccount component java.lang.String lastUsedBy
-lol.trq.alts.model.AltAccount component java.lang.String refreshToken
-lol.trq.alts.model.AltAccount component java.lang.String sourceClient
-lol.trq.alts.model.AltAccount component java.lang.String sourceUser
-lol.trq.alts.model.AltAccount component java.lang.String username
-lol.trq.alts.model.AltAccount component java.lang.String uuid
-lol.trq.alts.model.AltAccount component java.util.Map<java.lang.String, lol.trq.alts.model.BanInfo> bans
-lol.trq.alts.model.AltAccount component lol.trq.alts.model.AccountType type
-lol.trq.alts.model.AltAccount component long expiresAt
-lol.trq.alts.model.AltAccount component long lastUsed
-lol.trq.alts.model.AltAccount ctor public lol.trq.alts.model.AltAccount(java.lang.String,java.lang.String,java.lang.String,lol.trq.alts.model.AccountType,long,java.lang.String,java.util.Map<java.lang.String, lol.trq.alts.model.BanInfo>,java.lang.String,java.lang.String,java.lang.String,long)
 lol.trq.alts.model.AltAccount method public boolean lol.trq.alts.model.AltAccount.banned()
 lol.trq.alts.model.AltAccount method public boolean lol.trq.alts.model.AltAccount.banned(java.lang.String)
+lol.trq.alts.model.AltAccount method public boolean lol.trq.alts.model.AltAccount.equals(java.lang.Object)
 lol.trq.alts.model.AltAccount method public boolean lol.trq.alts.model.AltAccount.hasRefreshToken()
-lol.trq.alts.model.AltAccount method public final boolean lol.trq.alts.model.AltAccount.equals(java.lang.Object)
-lol.trq.alts.model.AltAccount method public final int lol.trq.alts.model.AltAccount.hashCode()
+lol.trq.alts.model.AltAccount method public int lol.trq.alts.model.AltAccount.hashCode()
 lol.trq.alts.model.AltAccount method public java.lang.String lol.trq.alts.model.AltAccount.accessToken()
 lol.trq.alts.model.AltAccount method public java.lang.String lol.trq.alts.model.AltAccount.lastUsedBy()
 lol.trq.alts.model.AltAccount method public java.lang.String lol.trq.alts.model.AltAccount.refreshToken()
@@ -680,10 +630,24 @@ lol.trq.alts.model.AltAccount method public lol.trq.alts.model.AltAccount lol.tr
 lol.trq.alts.model.AltAccount method public lol.trq.alts.model.AltAccount lol.trq.alts.model.AltAccount.withSource(java.lang.String,java.lang.String)
 lol.trq.alts.model.AltAccount method public lol.trq.alts.model.AltAccount lol.trq.alts.model.AltAccount.withTokens(java.lang.String,java.lang.String,long)
 lol.trq.alts.model.AltAccount method public lol.trq.alts.model.AltAccount lol.trq.alts.model.AltAccount.withUsername(java.lang.String)
+lol.trq.alts.model.AltAccount method public lol.trq.alts.model.AltAccount$Builder lol.trq.alts.model.AltAccount.toBuilder()
 lol.trq.alts.model.AltAccount method public long lol.trq.alts.model.AltAccount.expiresAt()
 lol.trq.alts.model.AltAccount method public long lol.trq.alts.model.AltAccount.lastUsed()
 lol.trq.alts.model.AltAccount method public static lol.trq.alts.model.AltAccount lol.trq.alts.model.AltAccount.of(java.lang.String,java.lang.String,java.lang.String,lol.trq.alts.model.AccountType)
-lol.trq.alts.model.AltAccount type public final record AltAccount
+lol.trq.alts.model.AltAccount method public static lol.trq.alts.model.AltAccount$Builder lol.trq.alts.model.AltAccount.builder(java.lang.String,java.lang.String,java.lang.String,lol.trq.alts.model.AccountType)
+lol.trq.alts.model.AltAccount type public final class AltAccount
+lol.trq.alts.model.AltAccount$Builder method public lol.trq.alts.model.AltAccount lol.trq.alts.model.AltAccount$Builder.build()
+lol.trq.alts.model.AltAccount$Builder method public lol.trq.alts.model.AltAccount$Builder lol.trq.alts.model.AltAccount$Builder.accessToken(java.lang.String)
+lol.trq.alts.model.AltAccount$Builder method public lol.trq.alts.model.AltAccount$Builder lol.trq.alts.model.AltAccount$Builder.bans(java.util.Map<java.lang.String, lol.trq.alts.model.BanInfo>)
+lol.trq.alts.model.AltAccount$Builder method public lol.trq.alts.model.AltAccount$Builder lol.trq.alts.model.AltAccount$Builder.expiresAt(long)
+lol.trq.alts.model.AltAccount$Builder method public lol.trq.alts.model.AltAccount$Builder lol.trq.alts.model.AltAccount$Builder.lastUsed(long)
+lol.trq.alts.model.AltAccount$Builder method public lol.trq.alts.model.AltAccount$Builder lol.trq.alts.model.AltAccount$Builder.lastUsedBy(java.lang.String)
+lol.trq.alts.model.AltAccount$Builder method public lol.trq.alts.model.AltAccount$Builder lol.trq.alts.model.AltAccount$Builder.refreshToken(java.lang.String)
+lol.trq.alts.model.AltAccount$Builder method public lol.trq.alts.model.AltAccount$Builder lol.trq.alts.model.AltAccount$Builder.sourceClient(java.lang.String)
+lol.trq.alts.model.AltAccount$Builder method public lol.trq.alts.model.AltAccount$Builder lol.trq.alts.model.AltAccount$Builder.sourceUser(java.lang.String)
+lol.trq.alts.model.AltAccount$Builder method public lol.trq.alts.model.AltAccount$Builder lol.trq.alts.model.AltAccount$Builder.type(lol.trq.alts.model.AccountType)
+lol.trq.alts.model.AltAccount$Builder method public lol.trq.alts.model.AltAccount$Builder lol.trq.alts.model.AltAccount$Builder.username(java.lang.String)
+lol.trq.alts.model.AltAccount$Builder type public static final class Builder
 lol.trq.alts.model.BanInfo component boolean banned
 lol.trq.alts.model.BanInfo component java.lang.String detail
 lol.trq.alts.model.BanInfo component java.lang.String observedBy
@@ -741,23 +705,17 @@ lol.trq.alts.model.SessionData method public java.lang.String lol.trq.alts.model
 lol.trq.alts.model.SessionData method public java.lang.String lol.trq.alts.model.SessionData.uuid()
 lol.trq.alts.model.SessionData method public lol.trq.alts.model.AccountType lol.trq.alts.model.SessionData.type()
 lol.trq.alts.model.SessionData type public final record SessionData
-lol.trq.alts.net.NetworkScope component java.lang.String accountUsername
-lol.trq.alts.net.NetworkScope component java.lang.String accountUuid
-lol.trq.alts.net.NetworkScope component java.util.Optional<java.lang.String> routeTag
-lol.trq.alts.net.NetworkScope component lol.trq.alts.net.NetworkScope$Purpose purpose
-lol.trq.alts.net.NetworkScope ctor public lol.trq.alts.net.NetworkScope(lol.trq.alts.net.NetworkScope$Purpose,java.lang.String,java.lang.String)
-lol.trq.alts.net.NetworkScope ctor public lol.trq.alts.net.NetworkScope(lol.trq.alts.net.NetworkScope$Purpose,java.lang.String,java.lang.String,java.util.Optional<java.lang.String>)
-lol.trq.alts.net.NetworkScope method public final boolean lol.trq.alts.net.NetworkScope.equals(java.lang.Object)
-lol.trq.alts.net.NetworkScope method public final int lol.trq.alts.net.NetworkScope.hashCode()
-lol.trq.alts.net.NetworkScope method public final java.lang.String lol.trq.alts.net.NetworkScope.toString()
+lol.trq.alts.net.NetworkScope method public boolean lol.trq.alts.net.NetworkScope.equals(java.lang.Object)
+lol.trq.alts.net.NetworkScope method public int lol.trq.alts.net.NetworkScope.hashCode()
 lol.trq.alts.net.NetworkScope method public java.lang.String lol.trq.alts.net.NetworkScope.accountUsername()
 lol.trq.alts.net.NetworkScope method public java.lang.String lol.trq.alts.net.NetworkScope.accountUuid()
+lol.trq.alts.net.NetworkScope method public java.lang.String lol.trq.alts.net.NetworkScope.toString()
 lol.trq.alts.net.NetworkScope method public java.util.Optional<java.lang.String> lol.trq.alts.net.NetworkScope.routeTag()
 lol.trq.alts.net.NetworkScope method public lol.trq.alts.net.NetworkScope lol.trq.alts.net.NetworkScope.withRouteTag(java.lang.String)
 lol.trq.alts.net.NetworkScope method public lol.trq.alts.net.NetworkScope$Purpose lol.trq.alts.net.NetworkScope.purpose()
 lol.trq.alts.net.NetworkScope method public static lol.trq.alts.net.NetworkScope lol.trq.alts.net.NetworkScope.forAccount(lol.trq.alts.net.NetworkScope$Purpose,java.lang.String,java.lang.String)
 lol.trq.alts.net.NetworkScope method public static lol.trq.alts.net.NetworkScope lol.trq.alts.net.NetworkScope.of(lol.trq.alts.net.NetworkScope$Purpose)
-lol.trq.alts.net.NetworkScope type public final record NetworkScope
+lol.trq.alts.net.NetworkScope type public final class NetworkScope
 lol.trq.alts.net.NetworkScope$Purpose constant AUTH
 lol.trq.alts.net.NetworkScope$Purpose constant AVATAR
 lol.trq.alts.net.NetworkScope$Purpose constant PROFILE
@@ -946,8 +904,8 @@ lol.trq.alts.vault.SharedVault method public java.util.concurrent.CompletableFut
 lol.trq.alts.vault.SharedVault method public java.util.concurrent.CompletableFuture<java.lang.Void> lol.trq.alts.vault.SharedVault.markBanned(java.lang.String,java.lang.String,lol.trq.alts.model.BanInfo)
 lol.trq.alts.vault.SharedVault method public java.util.concurrent.CompletableFuture<java.lang.Void> lol.trq.alts.vault.SharedVault.put(lol.trq.alts.model.AltAccount)
 lol.trq.alts.vault.SharedVault method public java.util.concurrent.CompletableFuture<java.lang.Void> lol.trq.alts.vault.SharedVault.put(lol.trq.alts.model.AltAccount,lol.trq.alts.model.AltAccount)
-lol.trq.alts.vault.SharedVault method public java.util.concurrent.CompletableFuture<java.lang.Void> lol.trq.alts.vault.SharedVault.remove(java.lang.String)
-lol.trq.alts.vault.SharedVault method public java.util.concurrent.CompletableFuture<java.lang.Void> lol.trq.alts.vault.SharedVault.remove(lol.trq.alts.vault.VaultMember)
+lol.trq.alts.vault.SharedVault method public java.util.concurrent.CompletableFuture<java.lang.Void> lol.trq.alts.vault.SharedVault.removeAccount(java.lang.String)
+lol.trq.alts.vault.SharedVault method public java.util.concurrent.CompletableFuture<java.lang.Void> lol.trq.alts.vault.SharedVault.removeMember(lol.trq.alts.vault.VaultMember)
 lol.trq.alts.vault.SharedVault method public java.util.concurrent.CompletableFuture<java.lang.Void> lol.trq.alts.vault.SharedVault.setShareRefreshTokens(boolean)
 lol.trq.alts.vault.SharedVault method public java.util.concurrent.CompletableFuture<java.util.List<lol.trq.alts.vault.VaultMember>> lol.trq.alts.vault.SharedVault.processLeaves()
 lol.trq.alts.vault.SharedVault method public java.util.concurrent.CompletableFuture<lol.trq.alts.model.AltAccount> lol.trq.alts.vault.SharedVault.update(java.lang.String,java.util.function.UnaryOperator<lol.trq.alts.model.AltAccount>)
