@@ -7,6 +7,191 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Migrating from 0.12
+
+1.0.0 freezes the API, and it does so in one release: every form it replaces is removed outright, with
+no deprecated bridge and no transitional release in which both work. This section is the whole route
+from 0.12.0, name by name; the sections after it give the detail of each change.
+
+**The runtime owns its state.** Nothing is process-wide any more: each `AltsRuntime` builds its own
+stores, transport and executor.
+
+| 0.12 | 1.0 |
+| --- | --- |
+| `AltStore.accounts()`, `AltStore.addAccount(a)`, and every other `AltStore` call | the same call on `alts.store()` (an `AccountStore`) |
+| every `SecretStore` call | the same call on `alts.secrets()` (a `HostSecrets`) |
+| `AltStore.bind`, `configure`, `keyProvider`, `writeDelay`, and the same on `SecretStore` | none: the builder sets the directory, file names, key bindings and key provider, and a runtime always coalesces writes (100 ms) |
+| `AltStore.DEFAULT_WRITE_DELAY` | none |
+| `HttpUtil` (and `bind`), `IoExecutor` | none: set `proxyProvider` and `executor` on the builder |
+| `AltsToasts.success`, `failure`, `info`, `removed` | `alts.toasts().toast(level, title, description, durationMs)` (see Removed for each mapping) |
+| `AccountServices.of(...)` | `alts.accountServices(account)` or `alts.accountServices(token, uuid)` |
+| `ProfileLookupService.create(...)` | `alts.profileLookup()`; another base with `Builder#accountEndpoints` |
+| `new SkinAvatarCache<>(...)` | `alts.skinCache()` |
+| `new UrlTemplateAvatarSource(t)` passed to `avatarSource` | `Builder#avatarUrlTemplate(t)` |
+| `new MojangAvatarSource(...)` | nothing: it is the default |
+| `new AsyncCache<>(loader, ...)` | `new AsyncCache<>(executor, loader, ...)` |
+| `new NtpTimeSource(...)` | `new NtpTimeSource(executor, ...)` |
+| a runtime left open for the process | close it (`try (AltsRuntime<H> alts = ...)` or `alts.close()`); a shutdown hook still flushes if you do not |
+
+**One error model.** Every failure is an `AltsFailure`, thrown as an `AltsException` where it is not
+part of a result. The [Error kinds](#error-kinds) table below maps every former constant to its kind.
+
+| 0.12 | 1.0 |
+| --- | --- |
+| `AltLoginCallback.LoginResult` | `auth.LoginResult(account, failure)` |
+| `AltLoginCallback`, `AltLoginCallback.FailureReason` | none; `result.reason()` becomes `result.failure().map(AltsFailure::kind)` |
+| `LoginResult.retryAfter()`, `xstsError()` | `failure().flatMap(AltsFailure::retryAfter)`, `failure().flatMap(AltsFailure::xstsError)` |
+| `LoginResult.failure(String)`, `failure(String, FailureReason, ...)`, `rateLimited()` | `LoginResult.failure(AltsFailure)`, `LoginResult.failure(Kind, String)` |
+| `AccountStatus.reason()`, `rateLimited()`, `retryAfter()` | `AccountStatus.failure()`; `state()` is unchanged |
+| `catch (AccountException e)` and `e.status()`, `tokenRefused()`, `rateLimited()`, `notFound()`, `retryAfter()` | `catch (AltsException e)` and `e.kind()`, `e.failure().retryAfter()` |
+| `SkinValidationException` and its `Reason` | `SkinService.validate(bytes)` returning a `SkinProblem` (same constants); an upload throws `AltsException` of kind `INVALID_INPUT` |
+| `CryptoException`, `VaultException` | `AltsException` of kind `CRYPTO`, `INVALID_INPUT` or `PROTOCOL` |
+| `CookieFile.read`'s `IOException` | `AltsException` of kind `INVALID_INPUT` |
+| `NameChangeResult` and `ProfileCreationResult` outcomes `NOT_ENTITLED`, `UNAUTHORIZED`, `RATE_LIMITED` | `FAILED`, with the kind on `failure()` |
+| `ClaimResult.StopReason.RATE_LIMITED`, `UNKNOWN`; `ClaimResult.rateLimited()` | `TERMINAL_FAILURE`, with the kind on `failure()` |
+| `BulkEntryResult.reason()` | `BulkEntryResult.failure()` |
+| store `loadError()`, `saveError()`, `loadWarning()` strings | `Optional<AltsFailure>` of kind `STORAGE` |
+| `build()`'s `IllegalStateException` for a store in use | `AltsException` of kind `CONFLICT` (or `STORAGE` when it cannot be locked) |
+
+**The shared vault: 0.4 to AVP 0.5.** 1.0 writes AVP 0.5 only, which is not wire compatible with 0.4
+and specifies no upgrade. A repository moves in five steps:
+
+1. Get the repository's manifest and envelope JSON: export them while the host still runs 0.12, or
+   fetch them from the 0.4 server with your own HTTP client, authenticating with
+   `VaultIdentity.signChallenge`.
+2. Read them with `LegacyVaultReader.read(manifestJson, envelopeJson, identity)`, which returns the
+   accounts and writes nothing. Review them: 0.4 signed nothing, and the import has no rollback floor.
+3. The owner creates a new repository: `OwnerIdentity.generate()` (keep its entropy in
+   `HostSecrets`, or have the owner write the phrase down), `alts.vault().connectFirstContact(host)`
+   and then `SharedVault.create(host, owner)`, and `put`s the accounts they choose.
+4. Each member joins again: the joiner calls `SharedVault.prepareJoin` with the repo locator the
+   owner sent and returns the invite token, the owner calls `invite`, and the joiner calls `join`.
+5. Persist each copy's `VaultSnapshot` (`toJson()`, encrypted, for example in `HostSecrets`) and
+   resume with `SharedVault.resume` on the next run.
+
+| 0.12 | 1.0 |
+| --- | --- |
+| `SharedVault`'s 0.4 constructors and `createRepo`, `openRepo`, `addMember`, `encryptPayload`, `decryptPayload`, `rotateKey`, `removeMember` | `SharedVault.create`, `open`, `prepareJoin`, `join`, `resume`, then `accounts`, `update`, `put`, `remove`, `invite`, `sync` and the rest |
+| `KeyBindingVerifier`, `IssuerSignedKeyBindingVerifier` | none: the owner-signed chain and invite tokens replace key binding |
+| `RepoPin`, `RepoContext` | the pin lives in `VaultSnapshot` |
+| `VaultTransport` and the `vault.transport` DTOs | none: `alts.vault()` speaks AVP 0.5 over the runtime's transport |
+| `vault.federation.RepoAddress`, `InviteRequest`, `RepoLocator` | `vault.RepoLocator`, `vault.InviteToken` |
+| `VaultTransportResolver`, `Builder#vaultTransportResolver`, `AltsRuntime.vaultTransportResolver()` | `alts.vault()`, and `Builder#vaultHostAddress` to map a host locator to a URL |
+| `crypto.VaultIdentity`, `crypto.WrappedIdentity`, `crypto.RecoveryCode` | the same types in `lol.trq.alts.vault` (change the import; a stored identity still opens) |
+| `VaultIdentity.keyAgreementPrivateKey()`, `RecoveryCode.deriveKey` | none: the library unwraps inside itself |
+| `crypto.KeyWrapScheme`, `X25519HkdfAesGcmKeyWrap`, `RepoDataKey`, `WrappedKey`, `Hkdf` | none |
+
+**Moved or removed packages.** The `crypto` package is gone: its primitives are internal, and the
+identity types are in `vault` (above). The `format` package and `AltManagerFormatting` are removed (the
+code to copy is under Removed). The implementation (`HttpUtil`'s successor `HttpTransport`,
+`FailureText`, `MicrosoftAuthUtil`, `CookieAuthUtil`, `AccountNetworkUtil`, `TokenExpiry`,
+`MinecraftProfile`, the `*Impl` classes, `EncryptionUtil`, `MicrosoftCallbackServer`, ...) is under
+`lol.trq.alts.internal`, outside the API; the table under Removed says what a host uses instead of each.
+
+**The build and the module.**
+
+- Gson is an ordinary `api` dependency now and arrives transitively; a host no longer has to put it on
+  its runtime class path. One that ships its own Gson resolves the version as for any dependency.
+- The jar is the named module `lol.trq.alts`, with a `module-info.java` in place of the
+  `Automatic-Module-Name` (the name is unchanged). A consumer module says `requires lol.trq.alts;` and
+  reads Gson through it. Only the API packages are exported.
+- The jar is sealed: on the class path, a class of yours placed in a `lol.trq.alts` package no longer
+  loads beside the library's.
+
+**Behaviour a host should know about.**
+
+- **The store fails closed after any failed load.** A file that exists and did not open, for whatever
+  reason, refuses every write until a load succeeds or the host calls `discardUnreadable()`; before,
+  only a missing key held writes back. The copy aside is made when the load fails.
+- **A store file has one owner.** Each store holds a lock on `<file>.lock`, so two runtimes on one
+  directory, in one process or two, can no longer both build; the second fails with `CONFLICT`.
+- **Everything is per runtime.** A runtime built without a proxy provider connects directly, whatever
+  another runtime was given; its store key provider and executor reach its own stores and tasks only.
+- **Route tags.** `NetworkScope` gains a fourth component, `Optional<String> routeTag`, and
+  `BulkOptions` a sixth, so a deconstruction pattern over either needs one more binding.
+  `AltLoginService.routed(tag)` is new and abstract, so a host's own implementation of the interface
+  must add it.
+- **`close()` ends what waits.** A paced bulk run, a device-code poll, a scheduled claim and a browser
+  sign-in still waiting for its callback fail when the runtime closes; anything started afterwards
+  returns or throws `CANCELLED`.
+- **Messages are the library's own.** A service's error text and what the host's session injector threw
+  are no longer repeated in a failure message. Branch on the kind.
+- **Headers.** A caller-supplied `Proxy-Authorization` header is refused before anything is sent.
+- **`VaultIdentity.signChallenge`** refuses input that begins with `avp/` or is shorter than 16 or
+  longer than 1024 bytes.
+
+### Error kinds
+
+Every former reason, outcome and exception case, and the kind it becomes. *kept* means the constant is
+still there and carries no failure of its own (`FAILED` and `TERMINAL_FAILURE` carry the failure that
+says the kind); *none* means success, so `failure()` is empty.
+
+| Former | Kind | Notes |
+| --- | --- | --- |
+| `FailureReason.NONE` | none | |
+| `FailureReason.UNKNOWN` | `UNKNOWN` | |
+| `FailureReason.REAUTH_REQUIRED` | `REAUTH_REQUIRED` | The credential is spent and was discarded. |
+| `FailureReason.INVALID_TOKEN` | `UNAUTHORIZED` | Empty, malformed or refused; a refresh token may still renew. Where nothing was sent because the input is no credential at all (an offline name that is not a name, a bulk line of no known form), `INVALID_INPUT`. |
+| `FailureReason.NETWORK` | `NETWORK` | |
+| `FailureReason.NOT_CONFIGURED` | `NOT_CONFIGURED` | A missing `DeviceCodePrompt` argument is `INVALID_INPUT`. |
+| `FailureReason.NOT_ENTITLED` | `NOT_ENTITLED` | |
+| `FailureReason.RATE_LIMITED` | `RATE_LIMITED` | The wait is `failure().retryAfter()`. |
+| `FailureReason.XBOX_DENIED` | `XBOX_DENIED` | The reason is `failure().xstsError()`. |
+| `FailureReason.DECLINED` | `DECLINED` | |
+| `FailureReason.TIMED_OUT` | `TIMED_OUT` | |
+| `AccountException.tokenRefused()` | `UNAUTHORIZED` | Status 401 or 403. |
+| `AccountException.notFound()` | `NOT_FOUND` | Status 404 on any call but the profile read. |
+| `AccountException.notFound()` from `ProfileService.fetch` | `NOT_ENTITLED` | No Minecraft profile, as sign-in and check say; `fetchIfPresent()` is still empty. |
+| `AccountException.rateLimited()` | `RATE_LIMITED` | Status 429, with its wait. |
+| `AccountException` status 5xx or 408 | `NETWORK` | |
+| `AccountException` status 400 or 422 | `INVALID_INPUT` | |
+| `AccountException` status 409 | `CONFLICT` | |
+| `AccountException` another status | `UNKNOWN` | |
+| `AccountException` status 0, unreachable | `NETWORK` | `CANCELLED` once the runtime is closed. |
+| `AccountException` status 0, unreadable answer | `PROTOCOL` | |
+| `XstsAuthException` | `XBOX_DENIED` | |
+| `RefreshRejectedException.permanent()` | `REAUTH_REQUIRED` | A stated `invalid_grant` only. |
+| `RefreshRejectedException.rateLimited()` | `RATE_LIMITED` | |
+| `RefreshRejectedException`, an outage | `NETWORK` | Status 5xx or 408, or unreachable. |
+| `RefreshRejectedException`, another refusal | `UNAUTHORIZED` | Was `NETWORK`; the stored token is kept. |
+| `RefreshRejectedException`, `invalid_client` or `unauthorized_client` | `NOT_CONFIGURED` | The host's client registration was refused; the token is kept. |
+| `SkinValidationException.Reason.UNREADABLE` | `INVALID_INPUT` | `SkinProblem.UNREADABLE` |
+| `SkinValidationException.Reason.EMPTY` | `INVALID_INPUT` | `SkinProblem.EMPTY` |
+| `SkinValidationException.Reason.TOO_LARGE` | `INVALID_INPUT` | `SkinProblem.TOO_LARGE` |
+| `SkinValidationException.Reason.NOT_PNG` | `INVALID_INPUT` | `SkinProblem.NOT_PNG` |
+| `SkinValidationException.Reason.WRONG_DIMENSIONS` | `INVALID_INPUT` | `SkinProblem.WRONG_DIMENSIONS` |
+| `NameChangeResult.Outcome.CHANGED` | kept | |
+| `NameChangeResult.Outcome.INVALID_NAME` | kept | |
+| `NameChangeResult.Outcome.UNAVAILABLE` | kept | |
+| `NameChangeResult.Outcome.NOT_ENTITLED` | `NOT_ENTITLED` | Now `FAILED`. |
+| `NameChangeResult.Outcome.UNAUTHORIZED` | `UNAUTHORIZED` | Now `FAILED`. |
+| `NameChangeResult.Outcome.RATE_LIMITED` | `RATE_LIMITED` | Now `FAILED`, with its wait. |
+| `NameChangeResult.Outcome.FAILED` | kept | Its failure carries the kind. |
+| `ProfileCreationResult.Outcome.CREATED` | kept | |
+| `ProfileCreationResult.Outcome.INVALID_NAME` | kept | |
+| `ProfileCreationResult.Outcome.DUPLICATE` | kept | |
+| `ProfileCreationResult.Outcome.NOT_ALLOWED` | kept | |
+| `ProfileCreationResult.Outcome.NOT_ENTITLED` | `NOT_ENTITLED` | Now `FAILED`. |
+| `ProfileCreationResult.Outcome.UNAUTHORIZED` | `UNAUTHORIZED` | Now `FAILED`. |
+| `ProfileCreationResult.Outcome.RATE_LIMITED` | `RATE_LIMITED` | Now `FAILED`, with its wait. |
+| `ProfileCreationResult.Outcome.FAILED` | kept | Its failure carries the kind. |
+| `ClaimResult.StopReason.CLAIMED` | kept | |
+| `ClaimResult.StopReason.WINDOW_ELAPSED` | kept | |
+| `ClaimResult.StopReason.RATE_LIMITED` | `RATE_LIMITED` | Now `TERMINAL_FAILURE`, with its wait. |
+| `ClaimResult.StopReason.TERMINAL_FAILURE` | kept | Its failure carries the kind. |
+| `ClaimResult.StopReason.CANCELLED` | kept | |
+| `ClaimResult.StopReason.UNKNOWN` | `UNKNOWN` | Now `TERMINAL_FAILURE`. |
+| Store `loadError()`, `saveError()`, `loadWarning()` strings | `STORAGE` | |
+| `build()`'s `IllegalStateException`, store file in use | `CONFLICT` | |
+| `build()`'s `IllegalStateException`, store not lockable | `STORAGE` | |
+| `CookieFile.read`'s `IOException` | `INVALID_INPUT` | A sign-in from the file still reports `UNAUTHORIZED`. |
+| `CryptoException`, a wrong passphrase or recovery code | `CRYPTO` | From `VaultIdentity.unlock` and `unlockWithRecovery`; also a tampered sealing, or stored public keys that do not match the private material. |
+| `CryptoException`, a malformed stored identity | `INVALID_INPUT` | A missing or non-Base64 field, a key or sealing of the wrong length, an iteration count out of range, a missing passphrase, no recovery sealing. `WrappedIdentity`'s constructor reports a missing field the same way, where it threw `NullPointerException`. |
+| `CryptoException`, another failed key operation | `CRYPTO` | Key generation, sealing, signing. A 0.4 data key that does not unwrap or a payload that does not authenticate, now from `LegacyVaultReader`. |
+| `VaultException` | `PROTOCOL` | Only the 0.4 vault threw it; `LegacyVaultReader` makes the same checks and reports them as `PROTOCOL`. |
+
+An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in the rows above.
+
 ### Added
 
 - **One error model.** `lol.trq.alts.AltsFailure` is the one value that describes a failure anywhere in
@@ -67,14 +252,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     private key, a data key or a plaintext account field.
 - `VaultIdentity.fingerprint()`, the member fingerprint an owner compares with an invite token's.
 - `vault.LegacyVaultReader`, the one way to read a repository of the 0.4 vault, which 1.0 no longer
-  speaks: `read(manifestJson, envelopeJson, identity)` takes the manifest and envelope as JSON exactly
-  as the 0.4 host served them and the member's `VaultIdentity`, and returns the accounts. It never
-  writes, never talks to a host and keeps nothing; it accepts what a 0.12 member could read (the
-  `X25519-HKDF-SHA256-AESGCM-v1` wrap, the member listed at the manifest's key epoch, an envelope of the
-  same repository and epoch, no older than the manifest, authenticated under the 0.4 AAD) and strips
-  `refreshToken` and `expiresAt` while the manifest withholds them. Text that is not JSON is
-  `INVALID_INPUT`, a document that is not the 0.4 shape or a member not listed is `PROTOCOL`, a key
-  that does not unwrap or a payload that does not authenticate is `CRYPTO`. The owner then creates an
+  speaks: `read(manifestJson, envelopeJson, identity)` takes the manifest and envelope as the 0.4 host
+  wrote them (the JSON is parsed strictly) and the member's `VaultIdentity`, and returns the accounts.
+  It never writes, never talks to a host and keeps nothing; it accepts what a 0.12 member could read
+  (the `X25519-HKDF-SHA256-AESGCM-v1` wrap, the member listed at the manifest's key epoch, an envelope
+  of the same repository and epoch, no older than the manifest, authenticated under the 0.4 AAD) and
+  strips `refreshToken` and `expiresAt` while the manifest withholds them. It has no rollback floor:
+  an import is one read, with no earlier state to compare, so it proves nothing a 0.4 host could not
+  have forged. Text that is not strict JSON is `INVALID_INPUT`, a document that is not the 0.4 shape
+  or a member not listed is `PROTOCOL`, a key that does not unwrap or a payload that does not
+  authenticate is `CRYPTO`, and every message starts "Vault 0.4 import: ". The owner then creates an
   AVP 0.5 repository with the accounts they choose.
 - **A module descriptor.** The jar is the named module `lol.trq.alts`. It exports `lol.trq.alts` and its
   `account`, `auth`, `bulk`, `cache`, `model`, `net`, `skin`, `spi`, `store`, `time` and `vault`
@@ -118,8 +305,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unavailable is copied when it is discarded.
 - The `VaultDirectoryProvider` is asked once, in `build()`; the stores keep that directory for the
   runtime's lifetime. The store key provider applies to the runtime that was given it and nothing else.
-- `AltLoginServiceImpl`, `AltAccountServiceImpl` and `BulkOperationsImpl` take the `AccountStore` they
-  persist to as their first constructor argument.
 - **Breaking: the caches and the clock take the executor they run on.** `AsyncCache`'s public
   constructors take a `java.util.concurrent.Executor` first (`new AsyncCache<>(executor, loader)`,
   `(executor, loader, ttlMillis)`, `(executor, loader, ttlMillis, maxEntries)`), and so do
@@ -128,8 +313,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run a cache load or a clock measurement.
 - **Breaking: `SkinAvatarCache` has no public constructor.** `alts.skinCache()` is the only route; the
   runtime builds it over its own avatar source and executor.
-- `BulkOperationsImpl` loses the three-argument constructor that read entitlements from the public
-  Minecraft services; the runtime passes its own account services.
 - **Breaking: each runtime owns its transport and its executor.** The proxy provider, the proxy tunnel
   connections and the executor were process-wide statics that every runtime rebound; now each runtime
   builds its own transport and hands it to every service through its constructor. A runtime's requests
@@ -145,10 +328,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as before. Whatever was waiting on the runtime ends with it, as a failure: a bulk run paced between
   entries (its report completes), a device-code sign-in between polls, a scheduled name claim, and a
   browser sign-in still waiting for its callback, whose loopback port is released.
-- `AltLoginServiceImpl`, `AltAccountServiceImpl`, `BulkOperationsImpl`, `MicrosoftCallbackServer`,
-  `MicrosoftAuthUtil`, `CookieAuthUtil` and `AccountNetworkUtil` (all internal, moving under
-  `lol.trq.alts.internal` before the release) take the runtime's transport or executor through their
-  constructors; the auth chain's request methods are instance methods.
+- Internal, now under `lol.trq.alts.internal` and outside the API: `AltLoginServiceImpl`,
+  `AltAccountServiceImpl`, `BulkOperationsImpl`, `MicrosoftCallbackServer`, `MicrosoftAuthUtil`,
+  `CookieAuthUtil` and `AccountNetworkUtil` take the runtime's `AccountStore`, transport or executor
+  through their constructors, the auth chain's request methods are instance methods, and
+  `BulkOperationsImpl` loses the three-argument constructor that read entitlements from the public
+  Minecraft services (the runtime passes its own account services).
 - **Breaking: `NetworkScope` gains a fourth component, `Optional<String> routeTag`,** so a deconstruction
   pattern over it needs one more binding; the three-argument constructor, `of` and `forAccount` remain
   and give an empty tag. New `AltLoginService.routed(String tag)` returns a view of the login service
@@ -196,10 +381,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of an exception. A bulk run cut short (the runtime closed under a wait, or its executor refused a
   task) reports every entry it did not finish as a failure of kind `CANCELLED`, so its report holds
   every entry; a `BulkProgress.started` that throws fails that entry with kind `UNKNOWN`, unattempted,
-  and the run goes on. A `BulkProgress.completed` or `finished` that throws a `RuntimeException` is ignored:
-  the entry stays recorded and the run is not cut short. An `Error` from a callback does cut it short:
-  the entry being reported keeps its result and every remaining entry is reported as `CANCELLED`. An account-service call on a closed runtime throws `AltsException` of kind
-  `CANCELLED`.
+  and the run goes on. A `BulkProgress.completed` or `finished` that throws a `RuntimeException` is
+  ignored: the entry stays recorded and the run is not cut short. An `Error` from a callback does cut it
+  short: the entry being reported keeps its result and every remaining entry is reported as
+  `CANCELLED`. An account-service call on a closed runtime throws `AltsException` of kind `CANCELLED`.
 - **Breaking: `VaultIdentity.signChallenge` refuses an AVP structure.** It signs nothing and throws
   `AltsException` of kind `INVALID_INPUT` for an input that begins with the ASCII bytes `avp/`, or is
   shorter than `VaultIdentity.MIN_CHALLENGE_BYTES` (16) or longer than `MAX_CHALLENGE_BYTES` (1024), so a
@@ -278,8 +463,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   static `bind` methods. A host sets the provider and the executor on the builder, as before, and
   nothing else: there is no process-wide transport or executor left to reach.
 - `AccountNetworkUtil.lookupUsername`, which nothing used; `ProfileLookupService.byUuid` does the job.
-- Internal, moving under `lol.trq.alts.internal` before the release: `CookieAuthUtil.authenticate(String)`
-  (the overload against the default endpoints), the `MicrosoftCallbackServer(state, config)`
+- Internal, now under `lol.trq.alts.internal`: `CookieAuthUtil.authenticate(String)` (the overload
+  against the default endpoints), the `MicrosoftCallbackServer(state, config)`
   constructor that sent no PKCE challenge, and the static request methods of `MicrosoftAuthUtil`,
   `CookieAuthUtil` and `AccountNetworkUtil`, now instance methods over the runtime's transport.
 - The `lol.trq.alts.testSeams` system property and the test hooks it guarded (`HttpUtil.resetForTests`,
@@ -296,8 +481,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PushRequest`, `PushResponse`, `MemberAddRequest`, `MemberRemoveRequest`); every type in
   `vault.federation` (`RepoAddress`, `InviteRequest`, and the 0.4 `RepoLocator`, which the 0.5
   `vault.RepoLocator` replaces); `vault.RepoPin`, `vault.RepoContext` and `vault.MemberPublicKey`;
-  `spi.VaultTransportResolver`, `Builder#vaultTransportResolver` and `AltsRuntime.vaultTransportResolver()`
-  (a 0.5 host is reached by locator and matched by key over the runtime's transport, `alts.vault()`); and
+  `spi.VaultTransportResolver`, `Builder#vaultTransportResolver` and
+  `AltsRuntime.vaultTransportResolver()` (a 0.5 host is reached by locator and matched by key over the
+  runtime's transport, `alts.vault()`); and
   the 0.4 wrap types in `crypto`: `KeyWrapScheme`, `X25519HkdfAesGcmKeyWrap`, `RepoDataKey`, `WrappedKey`
   and `Hkdf`. The wrap scheme itself is unchanged in AVP 0.5, and the importer reads 0.4 wraps with it.
 - **Breaking: the implementation moved under `lol.trq.alts.internal`**, which the module does not export,
@@ -364,78 +550,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
               | ((int) (rgb[2] * 255) & 0xff);
   }
   ```
-
-### Error kinds
-
-Every former reason, outcome and exception case, and the kind it becomes. *kept* means the constant is
-still there and carries no failure of its own (`FAILED` and `TERMINAL_FAILURE` carry the failure that
-says the kind); *none* means success, so `failure()` is empty.
-
-| Former | Kind | Notes |
-| --- | --- | --- |
-| `FailureReason.NONE` | none | |
-| `FailureReason.UNKNOWN` | `UNKNOWN` | |
-| `FailureReason.REAUTH_REQUIRED` | `REAUTH_REQUIRED` | The credential is spent and was discarded. |
-| `FailureReason.INVALID_TOKEN` | `UNAUTHORIZED` | Empty, malformed or refused; a refresh token may still renew. Where nothing was sent because the input is no credential at all (an offline name that is not a name, a bulk line of no known form), `INVALID_INPUT`. |
-| `FailureReason.NETWORK` | `NETWORK` | |
-| `FailureReason.NOT_CONFIGURED` | `NOT_CONFIGURED` | A missing `DeviceCodePrompt` argument is `INVALID_INPUT`. |
-| `FailureReason.NOT_ENTITLED` | `NOT_ENTITLED` | |
-| `FailureReason.RATE_LIMITED` | `RATE_LIMITED` | The wait is `failure().retryAfter()`. |
-| `FailureReason.XBOX_DENIED` | `XBOX_DENIED` | The reason is `failure().xstsError()`. |
-| `FailureReason.DECLINED` | `DECLINED` | |
-| `FailureReason.TIMED_OUT` | `TIMED_OUT` | |
-| `AccountException.tokenRefused()` | `UNAUTHORIZED` | Status 401 or 403. |
-| `AccountException.notFound()` | `NOT_FOUND` | Status 404 on any call but the profile read. |
-| `AccountException.notFound()` from `ProfileService.fetch` | `NOT_ENTITLED` | No Minecraft profile, as sign-in and check say; `fetchIfPresent()` is still empty. |
-| `AccountException.rateLimited()` | `RATE_LIMITED` | Status 429, with its wait. |
-| `AccountException` status 5xx or 408 | `NETWORK` | |
-| `AccountException` status 400 or 422 | `INVALID_INPUT` | |
-| `AccountException` status 409 | `CONFLICT` | |
-| `AccountException` another status | `UNKNOWN` | |
-| `AccountException` status 0, unreachable | `NETWORK` | `CANCELLED` once the runtime is closed. |
-| `AccountException` status 0, unreadable answer | `PROTOCOL` | |
-| `XstsAuthException` | `XBOX_DENIED` | |
-| `RefreshRejectedException.permanent()` | `REAUTH_REQUIRED` | A stated `invalid_grant` only. |
-| `RefreshRejectedException.rateLimited()` | `RATE_LIMITED` | |
-| `RefreshRejectedException`, an outage | `NETWORK` | Status 5xx or 408, or unreachable. |
-| `RefreshRejectedException`, another refusal | `UNAUTHORIZED` | Was `NETWORK`; the stored token is kept. |
-| `RefreshRejectedException`, `invalid_client` or `unauthorized_client` | `NOT_CONFIGURED` | The host's client registration was refused; the token is kept. |
-| `SkinValidationException.Reason.UNREADABLE` | `INVALID_INPUT` | `SkinProblem.UNREADABLE` |
-| `SkinValidationException.Reason.EMPTY` | `INVALID_INPUT` | `SkinProblem.EMPTY` |
-| `SkinValidationException.Reason.TOO_LARGE` | `INVALID_INPUT` | `SkinProblem.TOO_LARGE` |
-| `SkinValidationException.Reason.NOT_PNG` | `INVALID_INPUT` | `SkinProblem.NOT_PNG` |
-| `SkinValidationException.Reason.WRONG_DIMENSIONS` | `INVALID_INPUT` | `SkinProblem.WRONG_DIMENSIONS` |
-| `NameChangeResult.Outcome.CHANGED` | kept | |
-| `NameChangeResult.Outcome.INVALID_NAME` | kept | |
-| `NameChangeResult.Outcome.UNAVAILABLE` | kept | |
-| `NameChangeResult.Outcome.NOT_ENTITLED` | `NOT_ENTITLED` | Now `FAILED`. |
-| `NameChangeResult.Outcome.UNAUTHORIZED` | `UNAUTHORIZED` | Now `FAILED`. |
-| `NameChangeResult.Outcome.RATE_LIMITED` | `RATE_LIMITED` | Now `FAILED`, with its wait. |
-| `NameChangeResult.Outcome.FAILED` | kept | Its failure carries the kind. |
-| `ProfileCreationResult.Outcome.CREATED` | kept | |
-| `ProfileCreationResult.Outcome.INVALID_NAME` | kept | |
-| `ProfileCreationResult.Outcome.DUPLICATE` | kept | |
-| `ProfileCreationResult.Outcome.NOT_ALLOWED` | kept | |
-| `ProfileCreationResult.Outcome.NOT_ENTITLED` | `NOT_ENTITLED` | Now `FAILED`. |
-| `ProfileCreationResult.Outcome.UNAUTHORIZED` | `UNAUTHORIZED` | Now `FAILED`. |
-| `ProfileCreationResult.Outcome.RATE_LIMITED` | `RATE_LIMITED` | Now `FAILED`, with its wait. |
-| `ProfileCreationResult.Outcome.FAILED` | kept | Its failure carries the kind. |
-| `ClaimResult.StopReason.CLAIMED` | kept | |
-| `ClaimResult.StopReason.WINDOW_ELAPSED` | kept | |
-| `ClaimResult.StopReason.RATE_LIMITED` | `RATE_LIMITED` | Now `TERMINAL_FAILURE`, with its wait. |
-| `ClaimResult.StopReason.TERMINAL_FAILURE` | kept | Its failure carries the kind. |
-| `ClaimResult.StopReason.CANCELLED` | kept | |
-| `ClaimResult.StopReason.UNKNOWN` | `UNKNOWN` | Now `TERMINAL_FAILURE`. |
-| Store `loadError()`, `saveError()`, `loadWarning()` strings | `STORAGE` | |
-| `build()`'s `IllegalStateException`, store file in use | `CONFLICT` | |
-| `build()`'s `IllegalStateException`, store not lockable | `STORAGE` | |
-| `CookieFile.read`'s `IOException` | `INVALID_INPUT` | A sign-in from the file still reports `UNAUTHORIZED`. |
-| `CryptoException`, a wrong passphrase or recovery code | `CRYPTO` | From `VaultIdentity.unlock` and `unlockWithRecovery`; also a tampered sealing, or stored public keys that do not match the private material. |
-| `CryptoException`, a malformed stored identity | `INVALID_INPUT` | A missing or non-Base64 field, a key or sealing of the wrong length, an iteration count out of range, a missing passphrase, no recovery sealing. `WrappedIdentity`'s constructor reports a missing field the same way, where it threw `NullPointerException`. |
-| `CryptoException`, another failed key operation | `CRYPTO` | Key generation, sealing, signing. A 0.4 data key that does not unwrap or a payload that does not authenticate, now from `LegacyVaultReader`. |
-| `VaultException` | `PROTOCOL` | Only the 0.4 vault threw it; `LegacyVaultReader` makes the same checks and reports them as `PROTOCOL`. |
-
-An `AuthFlowException` becomes the kind of the `FailureReason` it carried, as in the rows above.
 
 ### Fixed
 
