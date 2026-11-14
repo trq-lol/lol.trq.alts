@@ -187,8 +187,9 @@ final class AccountMapping {
      * whose mapped value differs from the copy's takes a fresh stamp (SPEC 5). The comparison is in the
      * {@link AltAccount} space, so a field the copy lacks, or holds with a value that reads as the default (an
      * absent {@code lastUsed}, an unknown {@code type}), is not re-stamped by an account that reads the same.
-     * An account the copy does not hold, or holds deleted, is written whole. Each ban the account carries is
-     * written the same way, per server id; a server it does not mention is left as it is.
+     * An account the copy does not hold, or holds deleted, is written whole: on a revival, a ban server the
+     * account held before its deletion and does not carry now is cleared. Each ban the account carries is
+     * written the same way, per server id; on a live account, a server it does not mention is left as it is.
      *
      * <p>A stale account (one read before a remote edit the copy has since merged) reverts that edit: it
      * differs from the copy in exactly that field. {@link #write(PayloadEditor, AltAccount, AltAccount,
@@ -209,7 +210,8 @@ final class AccountMapping {
      * Writes an edit of an account: only a field where {@code base} and {@code edited} differ takes a fresh
      * stamp, so a remote edit of any other field, merged into the copy after {@code base} was read, survives.
      * A ban server {@code base} had and {@code edited} does not is cleared. An account the copy does not hold,
-     * or holds deleted, is written whole from {@code edited}.
+     * or holds deleted, is written whole from {@code edited}, which clears every ban server it held before its
+     * deletion that {@code edited} does not carry.
      *
      * @param editor the edit
      * @param base the account as the caller read it
@@ -252,6 +254,16 @@ final class AccountMapping {
                     editor.setBan(a.uuid(), server, JsonNull.INSTANCE);
                 }
             }
+        }
+        if (current != null && current.isDeleted()) {
+            // A revival is written whole: a ban the account had before its deletion and does not carry now
+            // would otherwise come back with it.
+            current.bans().forEach((server, register) -> {
+                boolean carried = a.bans() != null && a.bans().containsKey(server);
+                if (!carried && !register.value().isJsonNull()) {
+                    editor.setBan(a.uuid(), server, JsonNull.INSTANCE);
+                }
+            });
         }
     }
 }

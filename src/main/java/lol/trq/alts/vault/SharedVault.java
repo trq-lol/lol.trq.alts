@@ -993,7 +993,8 @@ public final class SharedVault {
      * {@code base} and {@code edited} differ take a fresh stamp, so a remote edit of any other field, merged
      * into this copy since {@code base} was read, survives. A ban server {@code base} had and {@code edited}
      * drops is cleared. An account this copy does not hold, or holds deleted, is written whole from {@code
-     * edited}. An edit that changes nothing sends no commit. While the repository withholds refresh tokens,
+     * edited}, including clearing every ban server it held before its deletion that {@code edited} does not
+     * carry. An edit that changes nothing sends no commit. While the repository withholds refresh tokens,
      * {@code refreshToken} and {@code expiresAt} are not sent.
      *
      * @param base the account as read, from {@link #account(String)} or {@link #accounts()}
@@ -1020,8 +1021,10 @@ public final class SharedVault {
     /**
      * Writes an account into the repository as one commit (AVP SPEC 5), stamping the fields that differ from
      * the copy as it stands when the write runs; a stale object can revert remote edits; use {@link #update}.
-     * A new or deleted account is written whole. Each ban the account carries is written per server id; a
-     * server it does not mention is left as it is (clear one with {@link #markBanned} and a null ban). A put
+     * A new or deleted account is written whole, and a revived one loses every ban server it held before its
+     * deletion that it does not carry now. Each ban the account carries is written per server id; on a live
+     * account, a server it does not mention is left as it is (clear one with {@link #markBanned} and a null
+     * ban). A put
      * that changes nothing sends no commit. While the repository withholds refresh tokens, its {@code
      * refreshToken} and {@code expiresAt} are not sent.
      *
