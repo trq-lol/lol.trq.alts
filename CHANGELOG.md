@@ -90,6 +90,7 @@ and specifies no upgrade. A repository moves in five steps:
 | `SharedVault`'s 0.4 constructors and `createRepo`, `openRepo`, `addMember`, `encryptPayload`, `decryptPayload`, `rotateKey`, `removeMember` | `SharedVault.create`, `open`, `prepareJoin`, `join`, `resume`, then `accounts`, `update`, `put`, `removeAccount`, `invite`, `removeMember`, `sync` and the rest |
 | `KeyBindingVerifier`, `IssuerSignedKeyBindingVerifier` | none: the owner-signed chain and invite tokens replace key binding |
 | `RepoPin`, `RepoContext` | the pin lives in `VaultSnapshot` |
+| `MemberPublicKey` (a prospective member's two public keys, passed to `addMember`, `rotateKey`, `removeMember`) | none: a joiner's keys reach the owner inside the `InviteToken` it returns from `SharedVault.prepareJoin`, and the roster lists members as `VaultMember`s (`roster()`, `removeMember(member)`) |
 | `VaultTransport` and the `vault.transport` DTOs | none: `alts.vault()` speaks AVP 0.5 over the runtime's transport |
 | `vault.federation.RepoAddress`, `InviteRequest`, `RepoLocator` | `vault.RepoLocator`, `vault.InviteToken` |
 | `VaultTransportResolver`, `Builder#vaultTransportResolver`, `AltsRuntime.vaultTransportResolver()` | `alts.vault()`, and `Builder#vaultHostAddress` to map a host locator to a URL |
