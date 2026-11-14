@@ -33,14 +33,23 @@ public final class SharedVaultExample {
     private SharedVaultExample() {}
 
     /**
-     * The owner creates a repository on its home host, keeps the owner key and the snapshot in the host
-     * secrets, and returns the repo locator text to give a joiner.
+     * The owner creates a repository on its home host, once the user has confirmed the host's key out of
+     * band, keeps the owner key and the snapshot in the host secrets, and returns the repo locator text to
+     * give a joiner.
      *
      * @param alts the runtime
      * @param homeHost the owner's home host, {@code host} or {@code host:port}
-     * @return the repo locator text
+     * @return the repo locator text, or {@code null} when the user did not confirm the host key
      */
     public static String createRepository(AltsRuntime<?> alts, String homeHost) {
+        // A first contact: nobody vouched for this host's key yet, and from here on the snapshot and every
+        // token carry it and each later connection pins it. So the user compares it out of band, with the
+        // key the host's operator published, before anything is created or stored.
+        VaultHost home = alts.vault().connectFirstContact(homeHost).join();
+        if (!confirmedOutOfBand("Vault host key: " + home.hostKey())) {
+            return null; // not the host the user meant, or not checked: nothing was created or stored
+        }
+
         HostSecrets secrets = alts.secrets();
         OwnerIdentity owner = OwnerIdentity.generate();
         showOnce(owner.phrase()); // the owner writes it down: it is the only way back to the owner key
@@ -50,11 +59,6 @@ public final class SharedVaultExample {
         } finally {
             Arrays.fill(entropy, (byte) 0);
         }
-
-        // A first contact: nobody vouched for this host's key yet, so show it to compare out of band. From
-        // here on the snapshot and every token carry it, and each later connection pins it.
-        VaultHost home = alts.vault().connectFirstContact(homeHost).join();
-        showOnce("Vault host key: " + home.hostKey());
         SharedVault vault = SharedVault.create(home, owner).join();
         secrets.put(SNAPSHOT, vault.snapshot().toJson());
         return vault.locator().text();
@@ -160,4 +164,12 @@ public final class SharedVaultExample {
 
     /** Stand-in for the host's own UI. */
     private static void showOnce(String text) {}
+
+    /**
+     * Stand-in for the host's own UI: shows {@code text} and asks the user whether it matches what they
+     * obtained out of band. Declined until they say it does.
+     */
+    private static boolean confirmedOutOfBand(String text) {
+        return false;
+    }
 }

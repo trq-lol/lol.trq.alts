@@ -583,9 +583,17 @@ The whole flow is compiled in [`SharedVaultExample`](../examples/SharedVaultExam
 
 ### Creating a repository
 
-The owner generates its identity, keeps it, connects to its home host and creates the repository:
+The owner connects to its home host, has the user confirm the host's key out of band, then generates its identity, keeps it, and creates the repository:
 
 ```java
+// A first contact: nobody vouched for this host's key yet, and from here on the snapshot and every
+// token carry it and each later connection pins it. So the user compares it out of band, with the
+// key the host's operator published, before anything is created or stored.
+VaultHost home = alts.vault().connectFirstContact(homeHost).join();
+if (!confirmedOutOfBand("Vault host key: " + home.hostKey())) {
+    return null; // not the host the user meant, or not checked: nothing was created or stored
+}
+
 HostSecrets secrets = alts.secrets();
 OwnerIdentity owner = OwnerIdentity.generate();
 showOnce(owner.phrase()); // the owner writes it down: it is the only way back to the owner key
@@ -595,11 +603,6 @@ try {
 } finally {
     Arrays.fill(entropy, (byte) 0);
 }
-
-// A first contact: nobody vouched for this host's key yet, so show it to compare out of band. From
-// here on the snapshot and every token carry it, and each later connection pins it.
-VaultHost home = alts.vault().connectFirstContact(homeHost).join();
-showOnce("Vault host key: " + home.hostKey());
 SharedVault vault = SharedVault.create(home, owner).join();
 secrets.put(SNAPSHOT, vault.snapshot().toJson());
 return vault.locator().text();
@@ -609,7 +612,7 @@ Compiled as `SharedVaultExample.createRepository`. Things to know:
 
 - **The phrase is the owner.** Whoever holds the phrase or its entropy controls the repository. Show the phrase once and keep only the entropy, encrypted (`HostSecrets` is), or keep nothing and ask for the phrase (`OwnerIdentity.fromPhrase`) when the owner acts. A second owner device is linked with `LinkSession`, after the owner compares a 6-digit code on both devices, without typing the phrase.
 - **`alts.vault()` reaches hosts on the runtime's transport**: your proxy provider (purpose `VAULT`), timeouts and executor. A host locator `host[:port]` is reached at `https://<locator>` unless `Builder#vaultHostAddress` maps it elsewhere; the mapping never changes which host is accepted, because a host is matched by its key.
-- **`connectFirstContact` is for a first contact only.** It takes whatever key the host names, which is then unverified. Compare it out of band, then use `connect(HostRef)` (persist `home.ref()`), `connect(locator, key)`, `connect(RepoLocator)` or `connect(VaultSnapshot)`, each of which refuses a host that serves another key with `PROTOCOL`. [SECURITY.md](../SECURITY.md) says what a first contact cannot rule out.
+- **`connectFirstContact` is for a first contact only.** It takes whatever key the host names, which is then unverified, so the example creates nothing until the user has compared it out of band with the key the host's operator published; `create` would otherwise pin a key nobody checked into the snapshot and every token. After that, use `connect(HostRef)` (persist `home.ref()`), `connect(locator, key)`, `connect(RepoLocator)` or `connect(VaultSnapshot)`, each of which refuses a host that serves another key with `PROTOCOL`. [SECURITY.md](../SECURITY.md) says what a first contact cannot rule out.
 - **The snapshot is a secret.** `VaultSnapshot` holds the pin a rollback must not go below, the retained data keys, the clock and the merged accounts; it names the member but does not hold its identity. Persist `toJson()` encrypted, in `HostSecrets` for example, after every operation.
 
 ### Inviting and joining
