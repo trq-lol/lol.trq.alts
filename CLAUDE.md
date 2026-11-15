@@ -25,7 +25,8 @@ try (AltsRuntime<H> alts = new AltsRuntime.Builder<H>()
         .gameStatsSource(...)              // optional: one per server
         .microsoftAuth(MicrosoftAuthConfig.of(yourAzureClientId))  // optional
         .accountEndpoints(...)             // optional: another base for the account services
-        .vaultHostAddress(...)             // optional: vault host locator -> base URL
+        .vaultHostAddress(...)             // optional: vault host locator -> base URL (https/http or grpcs/grpc)
+        .vaultRpcChannel(uri -> channel)   // optional: the host's gRPC channel for a grpcs/grpc vault address
         .proxyProvider(scope -> ...)       // optional: route each request; absent means direct
         .executor(hostExecutor)            // optional: where blocking work runs; default virtual threads
         .storeKeyProvider(() -> keyBytes)  // optional: real key material for the stores
@@ -59,7 +60,7 @@ Package map (the exported packages are exactly what `module-info.java` exports a
 | Package | What lives there |
 |---|---|
 | `lol.trq.alts` | `AltsRuntime` and its `Builder`; the error model, `AltsFailure` (with `Kind`) and `AltsException` |
-| `spi/` | the host seams, which are the entire boundary: `SessionInjector`, `VaultDirectoryProvider`, `MainThreadExecutor`, `ToastSink`, `TextureUploader`, `AvatarSource`, `GameStatsSource` (+ `StaticGameStatsSource`), `ProxyProvider`, `StoreKeyProvider`, `DeviceCodePrompt` |
+| `spi/` | the host seams, which are the entire boundary: `SessionInjector`, `VaultDirectoryProvider`, `MainThreadExecutor`, `ToastSink`, `TextureUploader`, `AvatarSource`, `GameStatsSource` (+ `StaticGameStatsSource`), `ProxyProvider`, `StoreKeyProvider`, `DeviceCodePrompt`, `VaultRpcChannel` |
 | `auth/` | `AltLoginService`, `AltAccountService`, `LoginResult`, `AccountStatus`, `MicrosoftAuthConfig`, `CookieFile`, `XstsError` |
 | `account/` | the surface over a token: profile (read, create), entitlements, name (+claim), skin (+`SkinProblem`), cape, attributes, certificates, blocklist, `AccountEndpoints`; plus the anonymous `ProfileLookupService` |
 | `bulk/` | one operation over many accounts: `BulkOperations`, `BulkHandle`, `BulkOptions`, `BulkProgress`, `BulkReport`, `BulkEntryResult`, `CredentialKind` |
@@ -200,7 +201,14 @@ new runtime-built type.
 timeouts, the redirect rules, the 1 MiB body cap (16 MiB for vault exchanges), the header checks (no
 control character, no caller-set `Proxy-Authorization`), and the host's proxy live. A new call site that
 opens its own connection opts out of all of them. Pass a `NetworkScope` naming the purpose and, when
-there is one, the account, on every hop; a routed view adds its tag.
+there is one, the account, on every hop; a routed view adds its tag. The one exception is a vault host
+mapped to `grpcs://` or `grpc://`: its calls go through the host's `spi.VaultRpcChannel`
+(`internal.vault.GrpcWire`), since the JDK client can speak neither HTTP/2 trailers nor h2c and the library
+ships no gRPC client. The host's channel then owns routing, TLS and the inbound limit; the library still
+frames and verifies every call, caps a reply at 16 MiB, and cancels the call on its deadline, an interrupt
+or `close()`. `HostClient` holds every AVP client rule over a `HostWire` (`HttpWire` or `GrpcWire`), so a
+rule changes in one place for both profiles; `internal.vault.rpc.ProtoJson` is the hand-written proto codec,
+pinned by the vendored `grpc.json`.
 
 **Every blocking task runs on the runtime's executor**, `transport.executor()`. Pass it as the executor
 argument of `supplyAsync`, `runAsync` and `delayedExecutor`; the one-argument forms run on the common

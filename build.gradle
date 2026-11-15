@@ -287,6 +287,39 @@ tasks.named('compileExamplesJava') {
     options.compilerArgs += ['-Xlint:deprecation', '-Werror']
 }
 
+// The gRPC interop run: the library against a running AVP reference host over the gRPC profile, through a
+// grpc-java channel the way a host would adapt its own. grpc-java is a dependency of this source set alone,
+// never of main, test or moduleTest, so the published POM and Gradle metadata still name Gson only. Not part
+// of check: it needs a host, and skips itself unless AVP_GRPC_URL is set (the AVP harness's run-hosts.sh
+// exports it).
+sourceSets {
+    grpcInteropTest {
+        java.srcDirs = ['src/grpcInteropTest/java']
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+dependencies {
+    grpcInteropTestImplementation 'com.google.code.gson:gson:2.14.0'
+    grpcInteropTestImplementation 'io.grpc:grpc-api:1.85.1'
+    grpcInteropTestImplementation 'io.grpc:grpc-stub:1.85.1'
+    grpcInteropTestRuntimeOnly 'io.grpc:grpc-netty-shaded:1.85.1'
+    grpcInteropTestImplementation platform('org.junit:junit-bom:6.1.2')
+    grpcInteropTestImplementation 'org.junit.jupiter:junit-jupiter'
+    grpcInteropTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.register('grpcInteropTest', Test) {
+    group = 'verification'
+    description = 'Runs the library against an AVP reference host over gRPC (needs AVP_GRPC_URL).'
+    testClassesDirs = sourceSets.grpcInteropTest.output.classesDirs
+    classpath = sourceSets.grpcInteropTest.runtimeClasspath
+    useJUnitPlatform()
+    // The host is outside the build: never reuse a result.
+    outputs.upToDateWhen { false }
+}
+
 spotless {
     java {
         // Palantir 4-space / 120-column house style.

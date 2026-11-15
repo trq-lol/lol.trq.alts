@@ -4,6 +4,7 @@ import java.net.URI;
 import java.util.function.Function;
 import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.internal.vault.VaultAccess;
+import lol.trq.alts.spi.VaultRpcChannel;
 
 /**
  * The vault package's side of {@link VaultAccess}: the runtime builds and closes its {@link VaultHosts}
@@ -27,8 +28,9 @@ final class VaultBridge implements VaultAccess.Bridge {
     }
 
     @Override
-    public VaultHosts hosts(HttpTransport transport, Function<String, URI> addresses) {
-        return new VaultHosts(transport, addresses, System::currentTimeMillis);
+    public VaultHosts hosts(
+            HttpTransport transport, Function<String, URI> addresses, Function<URI, VaultRpcChannel> channels) {
+        return new VaultHosts(transport, addresses, channels, System::currentTimeMillis);
     }
 
     @Override

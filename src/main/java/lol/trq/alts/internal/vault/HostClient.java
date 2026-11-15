@@ -169,7 +169,7 @@ public final class HostClient {
      */
     static String origin(URI base) {
         String scheme = base.getScheme().toLowerCase(java.util.Locale.ROOT);
-        int port = base.getPort() != -1 ? base.getPort() : scheme.equals("https") ? 443 : 80;
+        int port = base.getPort() != -1 ? base.getPort() : scheme.equals("https") || scheme.equals("grpcs") ? 443 : 80;
         return scheme + "://" + base.getHost().toLowerCase(java.util.Locale.ROOT) + ":" + port;
     }
 

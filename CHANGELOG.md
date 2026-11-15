@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The vault reaches AVP hosts over the gRPC profile (AVP SPEC 10.3) as well as HTTP/JSON, through a
+  host-supplied channel: implement `spi.VaultRpcChannel` over your own gRPC runtime (a byte-array marshaller
+  on `avp.Vault/<Rpc>`) and set `AltsRuntime.Builder#vaultRpcChannel(uri -> channel)`. The library ships no
+  gRPC client and still depends on the JDK and Gson only. Every operation, check and failure kind is the
+  same over both profiles.
+- `Builder#vaultHostAddress` mappings to `grpcs://host[:port]` or `grpc://host[:port]` select the gRPC
+  profile; `https` and `http` stay HTTP/JSON, the default is unchanged. A gRPC address without a channel
+  factory fails its connection with `NOT_CONFIGURED`; a factory that throws or returns null, with
+  `INVALID_INPUT`. The factory runs once per mapped address per runtime, and the runtime never closes a
+  channel. Bearer tokens stay apart per address and profile.
+- `VaultRpcChannel.Reply`, the outcome of one call: `ok(message)` or `status(code, message, trailers)`, the
+  status message carrying the SPEC 10.4 code and the trailers `avp-error-detail` and `retry-after`.
+
 ## [1.0.0] - 2026-11-14
 
 ### Migrating from 0.12
