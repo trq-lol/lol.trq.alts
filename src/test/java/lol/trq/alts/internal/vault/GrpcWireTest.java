@@ -231,7 +231,16 @@ class GrpcWireTest {
 
     @Test
     void aReplyOverTheBodyCapIsProtocol() {
-        Scripted ch = new Scripted(replying(Reply.ok(new byte[HostClient.MAX_BODY_BYTES + 1])));
+        // A well-formed PushResponse carrying an unknown length-delimited field 15 that takes it past the cap:
+        // it decodes, so only the cap can refuse it.
+        byte[] valid = ProtoJson.encode("avp.PushResponse", pushResponse());
+        int filler = HostClient.MAX_BODY_BYTES;
+        byte[] tag = {0x7a, (byte) 0x80, (byte) 0x80, (byte) 0x80, 0x08}; // field 15, LEN, varint 16 MiB
+        byte[] big = new byte[valid.length + tag.length + filler];
+        System.arraycopy(valid, 0, big, 0, valid.length);
+        System.arraycopy(tag, 0, big, valid.length, tag.length);
+        assertEquals(pushResponse(), ProtoJson.decode("avp.PushResponse", big), "the oversized reply is valid");
+        Scripted ch = new Scripted(replying(Reply.ok(big)));
         AltsException e = assertThrows(AltsException.class, () -> wire(ch).call(Op.PUSH, REPO, pushBody(), "t"));
         assertEquals(Kind.PROTOCOL, e.kind());
     }
