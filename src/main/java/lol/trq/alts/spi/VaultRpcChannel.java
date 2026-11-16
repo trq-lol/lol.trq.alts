@@ -31,15 +31,20 @@ import java.util.concurrent.CompletableFuture;
  *   <li>{@link Reply#trailers()} are the response headers and trailers merged: keys lowercase ASCII, one value
  *       per key, the last one winning, no {@code -bin} keys. {@link Reply#status} normalizes the map it is
  *       given that way.
- *   <li>The channel enforces its own inbound message limit. The library also refuses a reply message over 16
- *       MiB as a protocol failure, but only once the bytes are in memory.
+ *   <li>The channel enforces its own inbound message limit, and that limit MUST be at least 16 MiB, the
+ *       largest answer a vault host may send (a pull of a large repository reaches it). gRPC runtimes default
+ *       lower (grpc-java's {@code maxInboundMessageSize} is 4 MiB): a reply over the channel's limit fails
+ *       locally with {@code RESOURCE_EXHAUSTED}, which the library reports as {@code too_large}, so the call
+ *       can never succeed. The library also refuses a reply message over 16 MiB as a protocol failure, but
+ *       only once the bytes are in memory.
  *   <li>The runtime never closes a channel: the host owns its lifecycle. The factory set with {@code
  *       AltsRuntime.Builder#vaultRpcChannel} runs at most once per mapped address per runtime, and the runtime
  *       keeps that channel until it closes, when it forgets it without closing it.
  * </ul>
  *
  * <p>A future that completes exceptionally, a channel that throws, and the statuses {@code CANCELLED}, {@code
- * DEADLINE_EXCEEDED} and {@code UNAVAILABLE} are {@code NETWORK}; a status outside the profile's table
+ * DEADLINE_EXCEEDED} and {@code UNAVAILABLE} are {@code NETWORK}; a {@code RESOURCE_EXHAUSTED} whose message
+ * is not {@code quota_exceeded} is {@code too_large} ({@code INVALID_INPUT}), never a rate limit; a status outside the profile's table
  * ({@code UNKNOWN}, {@code UNIMPLEMENTED}, {@code INTERNAL}, {@code DATA_LOSS} and the like) is {@code
  * PROTOCOL}, since the host does not speak the profile; a {@code null} future or reply is {@code PROTOCOL}.
  *

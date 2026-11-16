@@ -169,13 +169,36 @@ class GrpcWireTest {
 
     @Test
     void aStatusWithoutAnAvpCodeFallsBackToItsCanonicalStatus() {
-        int[][] table = {{16, 401}, {7, 403}, {5, 404}, {6, 409}, {9, 409}, {8, 429}, {3, 400}};
+        int[][] table = {{16, 401}, {7, 403}, {5, 404}, {6, 409}, {9, 409}, {8, 413}, {3, 400}};
         for (int[] row : table) {
             Scripted ch = new Scripted(replying(Reply.status(row[0], "nope", Map.of())));
             Answer a = wire(ch).call(Op.PUSH, REPO, pushBody(), "tok");
             assertEquals(row[1], a.status(), "grpc status " + row[0]);
             assertEquals(Optional.empty(), a.code());
         }
+    }
+
+    @Test
+    void aLocalResourceExhaustedIsTooLargeAndOnlyQuotaExceededIsARateLimit() {
+        // A channel's own inbound limit (grpc-java's default is 4 MiB) refuses with RESOURCE_EXHAUSTED and no
+        // SPEC 10.4 code: that is too_large, terminal, never a rate limit to retry.
+        Scripted local = new Scripted(
+                replying(Reply.status(8, "Received message larger than max (5242880 vs. 4194304)", Map.of())));
+        Answer tooLarge = wire(local).call(Op.PULL, REPO, new JsonObject(), "t");
+        assertEquals(413, tooLarge.status());
+        AltsException e = VaultFailures.refused(
+                tooLarge.status(), tooLarge.code().orElse(null), tooLarge.retryAfter(), "the pull");
+        assertEquals(Kind.INVALID_INPUT, e.kind());
+        assertTrue(VaultFailures.hasCode(e, "too_large"));
+        assertTrue(!e.failure().retryable(), "not retried");
+
+        Scripted quota = new Scripted(replying(Reply.status(8, "quota_exceeded", Map.of("retry-after", "7"))));
+        Answer limited = wire(quota).call(Op.PULL, REPO, new JsonObject(), "t");
+        assertEquals(429, limited.status());
+        AltsException r =
+                VaultFailures.refused(limited.status(), limited.code().orElse(null), limited.retryAfter(), "the pull");
+        assertEquals(Kind.RATE_LIMITED, r.kind());
+        assertEquals(Optional.of(Duration.ofSeconds(7)), r.failure().retryAfter());
     }
 
     @Test

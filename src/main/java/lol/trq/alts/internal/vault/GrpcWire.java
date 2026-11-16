@@ -25,7 +25,8 @@ import lol.trq.alts.spi.VaultRpcChannel.Reply;
  * JSON, so the client verifies it exactly as over HTTP.
  *
  * <p>A refusal's status message is its SPEC 10.4 code when it is one, and the answer carries the HTTP status
- * the table pairs with that code; otherwise the gRPC status falls back to its canonical HTTP status. {@code
+ * the table pairs with that code; otherwise the gRPC status falls back to its canonical HTTP status, except
+ * that a {@code RESOURCE_EXHAUSTED} without a code is {@code 413} ({@code too_large}), not a rate limit. {@code
  * CANCELLED}, {@code DEADLINE_EXCEEDED} and {@code UNAVAILABLE} and a failed future are {@code NETWORK}; any
  * other status is {@code PROTOCOL}. A closed runtime is {@code CANCELLED}.
  *
@@ -186,7 +187,10 @@ public final class GrpcWire implements HostWire {
                     case 7 -> 403;
                     case 5 -> 404;
                     case 6, 9 -> 409;
-                    case 8 -> 429;
+                    // Every rate limit names quota_exceeded. A RESOURCE_EXHAUSTED without a SPEC 10.4 code is
+                    // a message limit, most often the channel's own inbound limit, so it is too_large: terminal,
+                    // never a wait to retry.
+                    case 8 -> 413;
                     case 3 -> 400;
                     case 1, 4, 14 ->
                         throw VaultFailures.network(
