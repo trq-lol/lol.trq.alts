@@ -609,6 +609,12 @@ public final class AltsRuntime<H> implements AutoCloseable {
          * bearer tokens the vault mints, and its routing and TLS are the host's to get right. Tokens stay apart
          * per address and profile: one minted over HTTP is never sent over gRPC, even to the same host.
          *
+         * <p>The factory runs synchronously inside {@code connect}, under the compute of a concurrent map, so
+         * it must be quick (build or look up a channel, never dial and wait) and must not call back into this
+         * runtime. A channel's inbound message limit must be at least 16 MiB, and it must complete its futures
+         * from its own threads, never from a task on the runtime's {@link #executor}: a bounded executor shared
+         * with the channel's or its tunnel's callbacks stalls calls (see {@link VaultRpcChannel}).
+         *
          * @param value the channel factory, called with the mapped address, or null for none
          * @return this builder
          * @since 1.1.0
@@ -693,7 +699,10 @@ public final class AltsRuntime<H> implements AutoCloseable {
          * parked on a slow endpoint holds no platform thread). Install one to bound concurrency or to
          * propagate the host's own context. Every request, cache load, avatar download and bulk entry of
          * this runtime runs on it, and nothing of another runtime's does. The runtime never shuts a host's
-         * executor down; one it created itself is shut down by {@link AltsRuntime#close()}.
+         * executor down; one it created itself is shut down by {@link AltsRuntime#close()}. A vault call over
+         * a {@link #vaultRpcChannel} waits on one of this executor's threads, so the channel must complete its
+         * futures from its own threads, never from a task on this executor: a bounded executor that also runs
+         * the channel's or its tunnel's callbacks stalls those calls until their deadline.
          *
          * @param value the host executor, or null for one the runtime creates and owns
          * @return this builder
