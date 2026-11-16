@@ -1,16 +1,24 @@
 package lol.trq.alts.vault;
 
 import java.net.URI;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.regex.Pattern;
 import lol.trq.alts.AltsException;
+import lol.trq.alts.AltsFailure;
 import lol.trq.alts.internal.avp.AvpBytes;
 import lol.trq.alts.internal.net.HttpTransport;
+import lol.trq.alts.internal.vault.GrpcWire;
 import lol.trq.alts.internal.vault.HostClient;
+import lol.trq.alts.internal.vault.HostWire;
+import lol.trq.alts.internal.vault.HttpWire;
 import lol.trq.alts.internal.vault.TokenCache;
+import lol.trq.alts.spi.VaultRpcChannel;
 
 /**
  * The runtime's way to AVP hosts: {@code alts.vault()}. Each {@code connect} reaches a host by its locator,
@@ -23,13 +31,19 @@ import lol.trq.alts.internal.vault.TokenCache;
  * manifest state to list that host's key, and the member's home host to be that key.
  *
  * <p>A locator ({@code host} or {@code host:port}) is reached at {@code https://<locator>} unless the host
- * set another mapping with {@code AltsRuntime.Builder#vaultHostAddress}. Every connection shares the
- * runtime's transport and its token cache, which {@code AltsRuntime#close()} clears.
+ * set another mapping with {@code AltsRuntime.Builder#vaultHostAddress}. The mapped address's scheme picks the
+ * transport profile: {@code https} or {@code http} is HTTP/JSON over the runtime's transport, {@code grpcs} or
+ * {@code grpc} the gRPC profile over the {@link VaultRpcChannel} that {@code
+ * AltsRuntime.Builder#vaultRpcChannel} supplies for that address. Both profiles carry the same operations and
+ * are verified the same way. Every connection shares the runtime's transport and its token cache, which
+ * {@code AltsRuntime#close()} clears; a token is kept per host key, address and profile.
  *
  * <p>Every future fails only with an {@link AltsException}: {@code PROTOCOL} for a host that serves no key
  * or another key than expected, {@code INVALID_INPUT} for a locator that is not {@code host} or {@code
- * host:port} or a mapping that gives no {@code http} or {@code https} URL, {@code NETWORK} for a host that
- * cannot be reached, and {@code CANCELLED} once the runtime is closed.
+ * host:port}, a mapping that gives no {@code http}, {@code https}, {@code grpc} or {@code grpcs} URL, or a
+ * channel factory that throws or returns null, {@code NOT_CONFIGURED} for a gRPC address without a channel
+ * factory, {@code NETWORK} for a host that cannot be reached, and {@code CANCELLED} once the runtime is
+ * closed.
  *
  * @author trq
  * @since 1.0.0
@@ -46,12 +60,21 @@ public final class VaultHosts {
 
     private final HttpTransport transport;
     private final Function<String, URI> addresses;
+    private final Function<URI, VaultRpcChannel> channelFactory;
     private final LongSupplier clock;
     private final TokenCache tokens = new TokenCache();
 
-    VaultHosts(HttpTransport transport, Function<String, URI> addresses, LongSupplier clock) {
+    /** The host's channel per mapped gRPC address, made once each; never closed here. */
+    private final Map<URI, VaultRpcChannel> channels = new ConcurrentHashMap<>();
+
+    VaultHosts(
+            HttpTransport transport,
+            Function<String, URI> addresses,
+            Function<URI, VaultRpcChannel> channels,
+            LongSupplier clock) {
         this.transport = Objects.requireNonNull(transport, "transport");
         this.addresses = addresses != null ? addresses : VaultHosts::https;
+        this.channelFactory = channels;
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -153,14 +176,52 @@ public final class VaultHosts {
         if (base == null) {
             return VaultFutures.failed(VaultFutures.invalid("the host locator has no address"));
         }
+        HostWire wire;
+        try {
+            wire = wire(base);
+        } catch (AltsException unusable) {
+            return VaultFutures.failed(unusable);
+        }
         return VaultFutures.async(
                 transport.executor(),
-                () -> new VaultHost(HostClient.connect(transport, base, where, expectedKey, tokens, clock), clock));
+                () -> new VaultHost(HostClient.connect(transport, wire, where, expectedKey, tokens, clock), clock));
     }
 
-    /** Drops every cached token; the runtime calls it as it closes. */
+    /** The wire a mapped address's scheme selects. */
+    private HostWire wire(URI base) {
+        String scheme = base.getScheme() == null ? "" : base.getScheme().toLowerCase(Locale.ROOT);
+        if (base.getHost() == null) {
+            throw VaultFutures.invalid("a vault host address is an http, https, grpc or grpcs URL with a host");
+        }
+        return switch (scheme) {
+            case "https", "http" -> new HttpWire(transport, base);
+            case "grpcs", "grpc" -> new GrpcWire(transport, base, channel(base));
+            default ->
+                throw VaultFutures.invalid("a vault host address is an http, https, grpc or grpcs URL with a host");
+        };
+    }
+
+    private VaultRpcChannel channel(URI base) {
+        if (channelFactory == null) {
+            throw new AltsException(
+                    AltsFailure.Kind.NOT_CONFIGURED, "Vault: a gRPC vault host address needs a host-supplied channel");
+        }
+        VaultRpcChannel made;
+        try {
+            made = channels.computeIfAbsent(base, channelFactory);
+        } catch (RuntimeException unbuildable) {
+            throw VaultFutures.invalid("the host's gRPC channel factory gave no channel for the address");
+        }
+        if (made == null) {
+            throw VaultFutures.invalid("the host's gRPC channel factory gave no channel for the address");
+        }
+        return made;
+    }
+
+    /** Drops every cached token and forgets every channel without closing it; the runtime calls it as it closes. */
     void close() {
         tokens.clear();
+        channels.clear();
     }
 
     /**

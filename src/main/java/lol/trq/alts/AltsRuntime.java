@@ -39,6 +39,7 @@ import lol.trq.alts.spi.StoreKeyProvider;
 import lol.trq.alts.spi.TextureUploader;
 import lol.trq.alts.spi.ToastSink;
 import lol.trq.alts.spi.VaultDirectoryProvider;
+import lol.trq.alts.spi.VaultRpcChannel;
 import lol.trq.alts.store.AccountStore;
 import lol.trq.alts.store.HostSecrets;
 import lol.trq.alts.vault.VaultHosts;
@@ -137,7 +138,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
 
             this.toasts = builder.toastSink;
             this.vaultAccess = VaultAccess.bridge();
-            this.vault = vaultAccess.hosts(transport, builder.vaultHostAddress);
+            this.vault = vaultAccess.hosts(transport, builder.vaultHostAddress, builder.vaultRpcChannel);
             this.loginService =
                     new AltLoginServiceImpl(store, builder.sessionInjector, builder.microsoftAuth, transport);
 
@@ -447,6 +448,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
         private final Map<String, GameStatsSource> gameStatsSources = new LinkedHashMap<>();
         private MicrosoftAuthConfig microsoftAuth;
         private Function<String, URI> vaultHostAddress;
+        private Function<URI, VaultRpcChannel> vaultRpcChannel;
         private ProxyProvider proxyProvider;
         private AvatarSource avatarSource;
         private String avatarUrlTemplate;
@@ -594,6 +596,35 @@ public final class AltsRuntime<H> implements AutoCloseable {
         }
 
         /**
+         * Supplies the gRPC channel for a vault host mapped to a {@code grpc://} or {@code grpcs://} address
+         * (optional). The scheme {@link #vaultHostAddress} maps a locator to chooses the transport profile: an
+         * {@code https} or {@code http} address is reached over HTTP/JSON through the runtime's own transport, a
+         * {@code grpcs} or {@code grpc} address over the gRPC profile through the {@link VaultRpcChannel} this
+         * factory returns for it. The library ships no gRPC client: without a factory, a gRPC address fails its
+         * connection with {@link AltsFailure.Kind#NOT_CONFIGURED}, and a factory that throws or returns null
+         * fails it with {@link AltsFailure.Kind#INVALID_INPUT}.
+         *
+         * <p>The factory runs at most once per mapped address per runtime, and the runtime keeps the channel it
+         * returns until it closes; it never closes a channel, whose lifecycle is the host's. A channel carries the
+         * bearer tokens the vault mints, and its routing and TLS are the host's to get right. Tokens stay apart
+         * per address and profile: one minted over HTTP is never sent over gRPC, even to the same host.
+         *
+         * <p>The factory runs synchronously inside {@code connect}, under the compute of a concurrent map, so
+         * it must be quick (build or look up a channel, never dial and wait) and must not call back into this
+         * runtime. A channel's inbound message limit must be at least 16 MiB, and it must complete its futures
+         * from its own threads, never from a task on the runtime's {@link #executor}: a bounded executor shared
+         * with the channel's or its tunnel's callbacks stalls calls (see {@link VaultRpcChannel}).
+         *
+         * @param value the channel factory, called with the mapped address, or null for none
+         * @return this builder
+         * @since 1.1.0
+         */
+        public Builder<H> vaultRpcChannel(Function<URI, VaultRpcChannel> value) {
+            this.vaultRpcChannel = value;
+            return this;
+        }
+
+        /**
          * Sets the avatar source (optional; defaults to one that resolves the face from Mojang's session
          * server and crops it locally). A host that wants a head-render service instead can set
          * {@link #avatarUrlTemplate(String)} rather than implement this. Setting both fails
@@ -668,7 +699,10 @@ public final class AltsRuntime<H> implements AutoCloseable {
          * parked on a slow endpoint holds no platform thread). Install one to bound concurrency or to
          * propagate the host's own context. Every request, cache load, avatar download and bulk entry of
          * this runtime runs on it, and nothing of another runtime's does. The runtime never shuts a host's
-         * executor down; one it created itself is shut down by {@link AltsRuntime#close()}.
+         * executor down; one it created itself is shut down by {@link AltsRuntime#close()}. A vault call over
+         * a {@link #vaultRpcChannel} waits on one of this executor's threads, so the channel must complete its
+         * futures from its own threads, never from a task on this executor: a bounded executor that also runs
+         * the channel's or its tunnel's callbacks stalls those calls until their deadline.
          *
          * @param value the host executor, or null for one the runtime creates and owns
          * @return this builder

@@ -1,7 +1,7 @@
 # The exported API of lol.trq.alts: every public or protected type, member and signature in a
 # package the module exports. Generated from the built jar by ./gradlew apiDump and checked by
 # ./gradlew apiCheck (part of check); do not edit by hand. Packages under internal are not listed.
-# version 1.0.0
+# version 1.1.0
 # breaking: 1.0.0 unreleased: B2 PlayerCertificate.privateKey/publicKey throw AltsException instead of GeneralSecurityException; B3 AltAccount, MicrosoftAuthConfig, NetworkScope, BulkOptions, ClaimOptions, BulkEntryResult and AltsFailure are final classes (record components and public constructors removed, factories and builders added); B4 SharedVault.remove(String) and remove(VaultMember) renamed removeAccount and removeMember; B1 MicrosoftAuthConfig.DEFAULT_REDIRECT_PATH constant changed to a neutral path
 lol.trq.alts.AltsException ctor public lol.trq.alts.AltsException(lol.trq.alts.AltsFailure$Kind,java.lang.String)
 lol.trq.alts.AltsException ctor public lol.trq.alts.AltsException(lol.trq.alts.AltsFailure)
@@ -78,6 +78,7 @@ lol.trq.alts.AltsRuntime$Builder method public lol.trq.alts.AltsRuntime$Builder<
 lol.trq.alts.AltsRuntime$Builder method public lol.trq.alts.AltsRuntime$Builder<H> lol.trq.alts.AltsRuntime$Builder.toastSink(lol.trq.alts.spi.ToastSink)
 lol.trq.alts.AltsRuntime$Builder method public lol.trq.alts.AltsRuntime$Builder<H> lol.trq.alts.AltsRuntime$Builder.vaultDirectory(lol.trq.alts.spi.VaultDirectoryProvider)
 lol.trq.alts.AltsRuntime$Builder method public lol.trq.alts.AltsRuntime$Builder<H> lol.trq.alts.AltsRuntime$Builder.vaultHostAddress(java.util.function.Function<java.lang.String, java.net.URI>)
+lol.trq.alts.AltsRuntime$Builder method public lol.trq.alts.AltsRuntime$Builder<H> lol.trq.alts.AltsRuntime$Builder.vaultRpcChannel(java.util.function.Function<java.net.URI, lol.trq.alts.spi.VaultRpcChannel>)
 lol.trq.alts.AltsRuntime$Builder method public lol.trq.alts.AltsRuntime<H> lol.trq.alts.AltsRuntime$Builder.build()
 lol.trq.alts.AltsRuntime$Builder type public static final class Builder<H>
 lol.trq.alts.account.AccountEndpoints component java.lang.String base
@@ -787,6 +788,19 @@ lol.trq.alts.spi.ToastSink$Level method public static lol.trq.alts.spi.ToastSink
 lol.trq.alts.spi.ToastSink$Level type public static final enum Level
 lol.trq.alts.spi.VaultDirectoryProvider method public abstract java.nio.file.Path lol.trq.alts.spi.VaultDirectoryProvider.vaultDirectory()
 lol.trq.alts.spi.VaultDirectoryProvider type public interface VaultDirectoryProvider
+lol.trq.alts.spi.VaultRpcChannel method public abstract java.util.concurrent.CompletableFuture<lol.trq.alts.spi.VaultRpcChannel$Reply> lol.trq.alts.spi.VaultRpcChannel.unary(java.lang.String,byte[],java.util.Map<java.lang.String, java.lang.String>,java.time.Duration)
+lol.trq.alts.spi.VaultRpcChannel type public interface VaultRpcChannel
+lol.trq.alts.spi.VaultRpcChannel$Reply method public boolean lol.trq.alts.spi.VaultRpcChannel$Reply.equals(java.lang.Object)
+lol.trq.alts.spi.VaultRpcChannel$Reply method public boolean lol.trq.alts.spi.VaultRpcChannel$Reply.isOk()
+lol.trq.alts.spi.VaultRpcChannel$Reply method public byte[] lol.trq.alts.spi.VaultRpcChannel$Reply.message()
+lol.trq.alts.spi.VaultRpcChannel$Reply method public int lol.trq.alts.spi.VaultRpcChannel$Reply.code()
+lol.trq.alts.spi.VaultRpcChannel$Reply method public int lol.trq.alts.spi.VaultRpcChannel$Reply.hashCode()
+lol.trq.alts.spi.VaultRpcChannel$Reply method public java.lang.String lol.trq.alts.spi.VaultRpcChannel$Reply.statusMessage()
+lol.trq.alts.spi.VaultRpcChannel$Reply method public java.lang.String lol.trq.alts.spi.VaultRpcChannel$Reply.toString()
+lol.trq.alts.spi.VaultRpcChannel$Reply method public java.util.Map<java.lang.String, java.lang.String> lol.trq.alts.spi.VaultRpcChannel$Reply.trailers()
+lol.trq.alts.spi.VaultRpcChannel$Reply method public static lol.trq.alts.spi.VaultRpcChannel$Reply lol.trq.alts.spi.VaultRpcChannel$Reply.ok(byte[])
+lol.trq.alts.spi.VaultRpcChannel$Reply method public static lol.trq.alts.spi.VaultRpcChannel$Reply lol.trq.alts.spi.VaultRpcChannel$Reply.status(int,java.lang.String,java.util.Map<java.lang.String, java.lang.String>)
+lol.trq.alts.spi.VaultRpcChannel$Reply type public static final class Reply
 lol.trq.alts.store.AccountStore method public boolean lol.trq.alts.store.AccountStore.discardUnreadable()
 lol.trq.alts.store.AccountStore method public java.util.List<lol.trq.alts.model.AltAccount> lol.trq.alts.store.AccountStore.accounts()
 lol.trq.alts.store.AccountStore method public java.util.Optional<lol.trq.alts.AltsFailure> lol.trq.alts.store.AccountStore.loadError()

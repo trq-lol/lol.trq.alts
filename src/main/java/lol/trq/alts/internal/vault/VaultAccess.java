@@ -4,6 +4,7 @@ import java.net.URI;
 import java.util.Objects;
 import java.util.function.Function;
 import lol.trq.alts.internal.net.HttpTransport;
+import lol.trq.alts.spi.VaultRpcChannel;
 import lol.trq.alts.vault.VaultHosts;
 
 /**
@@ -77,12 +78,15 @@ public final class VaultAccess {
          * @param transport the runtime's transport
          * @param addresses maps a host locator to the base URL it is reached at, or {@code null} for {@code
          *     https://<locator>}
+         * @param channels the host's gRPC channel for a mapped {@code grpc://} or {@code grpcs://} address, or
+         *     {@code null} when the host supplies none
          * @return the vault entry
          */
-        VaultHosts hosts(HttpTransport transport, Function<String, URI> addresses);
+        VaultHosts hosts(
+                HttpTransport transport, Function<String, URI> addresses, Function<URI, VaultRpcChannel> channels);
 
         /**
-         * Closes the vault entry: drops every cached token.
+         * Closes the vault entry: drops every cached token and forgets every channel, closing none.
          *
          * @param hosts the vault entry
          */
