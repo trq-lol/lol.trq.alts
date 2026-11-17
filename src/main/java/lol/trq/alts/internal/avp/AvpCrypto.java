@@ -17,6 +17,7 @@ import javax.crypto.KeyAgreement;
 import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
+import lol.trq.alts.internal.crypto.BcCurves;
 
 /**
  * The primitives of AVP over the JDK providers, on raw byte encodings (AVP SPEC 2, 4.4): SHA-256,
@@ -199,6 +200,13 @@ public final class AvpCrypto {
     public static byte[] x25519(byte[] scalar, byte[] u) {
         if (scalar.length != 32 || u.length != 32) {
             throw AvpFailures.crypto("X25519 needs 32-byte inputs", null);
+        }
+        if (BcCurves.active()) {
+            byte[] shared = BcCurves.xAgree(scalar, u);
+            if (shared == null) {
+                throw AvpFailures.crypto("the X25519 agreement failed", null);
+            }
+            return shared;
         }
         byte[] pkcs8 = AvpBytes.concat(X25519_PKCS8_PREFIX, scalar);
         try {

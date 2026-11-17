@@ -37,6 +37,12 @@ public final class X25519 {
      * @throws AltsException of kind {@code CRYPTO} if key generation fails
      */
     public static KeyPair newKeyPair() {
+        if (Curves.raw()) {
+            byte[] scalar = BcCurves.xNewScalar();
+            return new KeyPair(
+                    RawKeys.publicKey(RawKeys.X25519, BcCurves.xPublic(scalar)),
+                    RawKeys.privateKey(RawKeys.X25519, scalar));
+        }
         try {
             return KeyPairGenerator.getInstance("X25519").generateKeyPair();
         } catch (Exception e) {
@@ -53,6 +59,13 @@ public final class X25519 {
      * @throws AltsException of kind {@code CRYPTO} if agreement fails
      */
     public static byte[] agree(PrivateKey ownPrivate, PublicKey peerPublic) {
+        if (ownPrivate instanceof RawKeys.Private) {
+            byte[] shared = BcCurves.xAgree(((RawKeys.Private) ownPrivate).raw(), encodePublicKey(peerPublic));
+            if (shared == null) {
+                throw failure("X25519 agreement produced the zero point", null);
+            }
+            return shared;
+        }
         try {
             KeyAgreement ka = KeyAgreement.getInstance("XDH");
             ka.init(ownPrivate);
@@ -71,6 +84,9 @@ public final class X25519 {
      * @throws AltsException of kind {@code CRYPTO} if the key is not an X25519 key
      */
     public static byte[] encodePublicKey(PublicKey publicKey) {
+        if (publicKey instanceof RawKeys.Public) {
+            return ((RawKeys.Public) publicKey).raw();
+        }
         if (!(publicKey instanceof XECPublicKey xec)) {
             throw failure("not an X25519 public key", null);
         }
@@ -86,6 +102,9 @@ public final class X25519 {
      */
     public static PublicKey decodePublicKey(byte[] raw) {
         requireLen(raw, "public key");
+        if (Curves.raw()) {
+            return RawKeys.publicKey(RawKeys.X25519, raw);
+        }
         try {
             BigInteger u = leToBigInt(raw);
             KeyFactory kf = KeyFactory.getInstance("XDH");
@@ -103,6 +122,9 @@ public final class X25519 {
      * @throws AltsException of kind {@code CRYPTO} if the scalar is unavailable
      */
     public static byte[] encodePrivateKey(PrivateKey privateKey) {
+        if (privateKey instanceof RawKeys.Private) {
+            return ((RawKeys.Private) privateKey).raw();
+        }
         if (!(privateKey instanceof XECPrivateKey xec)) {
             throw failure("not an X25519 private key", null);
         }
@@ -118,6 +140,9 @@ public final class X25519 {
      */
     public static PrivateKey decodePrivateKey(byte[] raw) {
         requireLen(raw, "private key");
+        if (Curves.raw()) {
+            return RawKeys.privateKey(RawKeys.X25519, raw);
+        }
         try {
             KeyFactory kf = KeyFactory.getInstance("XDH");
             return kf.generatePrivate(new XECPrivateKeySpec(NamedParameterSpec.X25519, raw.clone()));

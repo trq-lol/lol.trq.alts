@@ -40,6 +40,12 @@ public final class Ed25519 {
      * @throws AltsException of kind {@code CRYPTO} if key generation fails
      */
     public static KeyPair newKeyPair() {
+        if (Curves.raw()) {
+            byte[] seed = BcCurves.edNewSeed();
+            return new KeyPair(
+                    RawKeys.publicKey(RawKeys.ED25519, BcCurves.edPublic(seed)),
+                    RawKeys.privateKey(RawKeys.ED25519, seed));
+        }
         try {
             return KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
         } catch (Exception e) {
@@ -56,6 +62,9 @@ public final class Ed25519 {
      * @throws AltsException of kind {@code CRYPTO} if signing fails
      */
     public static byte[] sign(PrivateKey privateKey, byte[] message) {
+        if (privateKey instanceof RawKeys.Private) {
+            return BcCurves.edSign(((RawKeys.Private) privateKey).raw(), message);
+        }
         try {
             Signature sig = Signature.getInstance("Ed25519");
             sig.initSign(privateKey);
@@ -75,6 +84,9 @@ public final class Ed25519 {
      * @return true if the signature is valid for the message and key
      */
     public static boolean verify(PublicKey publicKey, byte[] message, byte[] signature) {
+        if (publicKey instanceof RawKeys.Public) {
+            return BcCurves.edVerify(((RawKeys.Public) publicKey).raw(), message, signature);
+        }
         try {
             Signature sig = Signature.getInstance("Ed25519");
             sig.initVerify(publicKey);
@@ -94,6 +106,9 @@ public final class Ed25519 {
      * @throws AltsException of kind {@code CRYPTO} if the key is not an Ed25519 key
      */
     public static byte[] encodePublicKey(PublicKey publicKey) {
+        if (publicKey instanceof RawKeys.Public) {
+            return ((RawKeys.Public) publicKey).raw();
+        }
         if (!(publicKey instanceof EdECPublicKey ed)) {
             throw failure("not an Ed25519 public key", null);
         }
@@ -114,6 +129,9 @@ public final class Ed25519 {
      */
     public static PublicKey decodePublicKey(byte[] raw) {
         requireLen(raw, "public key");
+        if (Curves.raw()) {
+            return RawKeys.publicKey(RawKeys.ED25519, raw);
+        }
         try {
             byte[] copy = raw.clone();
             boolean xOdd = (copy[KEY_BYTES - 1] & 0x80) != 0;
@@ -134,6 +152,9 @@ public final class Ed25519 {
      * @throws AltsException of kind {@code CRYPTO} if the seed is unavailable
      */
     public static byte[] encodePrivateKey(PrivateKey privateKey) {
+        if (privateKey instanceof RawKeys.Private) {
+            return ((RawKeys.Private) privateKey).raw();
+        }
         if (!(privateKey instanceof EdECPrivateKey ed)) {
             throw failure("not an Ed25519 private key", null);
         }
@@ -149,6 +170,9 @@ public final class Ed25519 {
      */
     public static PrivateKey decodePrivateKey(byte[] raw) {
         requireLen(raw, "private key");
+        if (Curves.raw()) {
+            return RawKeys.privateKey(RawKeys.ED25519, raw);
+        }
         try {
             KeyFactory kf = KeyFactory.getInstance("Ed25519");
             return kf.generatePrivate(new EdECPrivateKeySpec(NamedParameterSpec.ED25519, raw.clone()));
