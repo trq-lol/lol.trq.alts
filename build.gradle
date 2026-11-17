@@ -1,7 +1,7 @@
 plugins {
     id 'java-library'
     id 'maven-publish'
-    id 'com.diffplug.spotless' version '8.9.0'
+    id 'com.diffplug.spotless' version '8.11.0'
     id 'xyz.wagyourtail.jvmdowngrader' version '2.0.1'
 }
 
@@ -15,10 +15,10 @@ dependencies {
     // Gson is part of the API: @SerializedName sits on the public records, and the module descriptor
     // requires it transitively. An ordinary api dependency, so the POM and the Gradle metadata both carry
     // it at compile scope and a host resolves it without declaring it.
-    api 'com.google.code.gson:gson:2.14.0'
+    api 'com.google.code.gson:gson:2.15.0'
 
-    testImplementation 'com.google.code.gson:gson:2.14.0'
-    testImplementation platform('org.junit:junit-bom:6.1.2')
+    testImplementation 'com.google.code.gson:gson:2.15.0'
+    testImplementation platform('org.junit:junit-bom:6.1.3')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
@@ -34,9 +34,9 @@ sourceSets {
 }
 
 dependencies {
-    bcImplementation 'org.bouncycastle:bcprov-jdk18on:1.85.2'
+    bcImplementation 'org.bouncycastle:bcprov-jdk18on:1.87'
     testRuntimeOnly sourceSets.bc.output
-    testRuntimeOnly 'org.bouncycastle:bcprov-jdk18on:1.85.2'
+    testRuntimeOnly 'org.bouncycastle:bcprov-jdk18on:1.87'
 }
 
 tasks.named('compileBcJava', JavaCompile) {
@@ -54,7 +54,7 @@ sourceSets {
 
 dependencies {
     examplesImplementation sourceSets.main.output
-    examplesCompileOnly 'com.google.code.gson:gson:2.14.0'
+    examplesCompileOnly 'com.google.code.gson:gson:2.15.0'
 }
 
 tasks.named('check') {
@@ -169,7 +169,7 @@ sourceSets {
 }
 
 dependencies {
-    apiToolTestImplementation platform('org.junit:junit-bom:6.1.2')
+    apiToolTestImplementation platform('org.junit:junit-bom:6.1.3')
     apiToolTestImplementation 'org.junit.jupiter:junit-jupiter'
     apiToolTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
@@ -328,11 +328,11 @@ sourceSets {
 }
 
 dependencies {
-    grpcInteropTestImplementation 'com.google.code.gson:gson:2.14.0'
+    grpcInteropTestImplementation 'com.google.code.gson:gson:2.15.0'
     grpcInteropTestImplementation 'io.grpc:grpc-api:1.85.1'
     grpcInteropTestImplementation 'io.grpc:grpc-stub:1.85.1'
     grpcInteropTestRuntimeOnly 'io.grpc:grpc-netty-shaded:1.85.1'
-    grpcInteropTestImplementation platform('org.junit:junit-bom:6.1.2')
+    grpcInteropTestImplementation platform('org.junit:junit-bom:6.1.3')
     grpcInteropTestImplementation 'org.junit.jupiter:junit-jupiter'
     grpcInteropTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
