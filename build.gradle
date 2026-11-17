@@ -298,10 +298,14 @@ spotless {
     }
 }
 
+apply from: 'gradle/variants.gradle'
+
 publishing {
     publications {
         register('mavenJava', MavenPublication) {
             from components.java
+            // The older-JDK variants (gradle/variants.gradle), published as classifiers of the same version.
+            artifact tasks.named('jdk21Jar')
             pom {
                 name = 'lol.trq.alts'
                 description = 'Consumer-agnostic Minecraft account-manager core: Microsoft (browser, device-code, ' +
@@ -337,3 +341,4 @@ publishing {
         }
     }
 }
+

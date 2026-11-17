@@ -1,0 +1,75 @@
+// Older-JDK variants of the library, built from the same sources as the main (Java 25) jar.
+//
+// jdk21: the main sources compiled with --release 21. Nothing in the library needs Java 22+, so this is a
+// second compile, not a fork. The whole test suite is compiled against the jdk21 classes and run on a Java 21
+// runtime, and the jar is published as the `jdk21` classifier.
+
+def jdk21 = 21
+
+def jdk21Compiler = javaToolchains.compilerFor { languageVersion = JavaLanguageVersion.of(jdk21) }
+def jdk21Launcher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(jdk21) }
+
+def compileJdk21 = tasks.register('compileJdk21Java', JavaCompile) {
+    group = 'build'
+    description = 'Compiles the main sources for Java 21.'
+    javaCompiler = jdk21Compiler
+    source = sourceSets.main.java
+    classpath = sourceSets.main.compileClasspath
+    destinationDirectory = layout.buildDirectory.dir('classes/java/jdk21')
+    options.release = jdk21
+    options.encoding = 'UTF-8'
+    options.javaModuleVersion = provider { project.version.toString() }
+}
+
+def jdk21Jar = tasks.register('jdk21Jar', Jar) {
+    group = 'build'
+    description = 'Assembles the Java 21 jar.'
+    archiveClassifier = 'jdk21'
+    // Same manifest contract as the main jar: sealed, and the module descriptor names the module.
+    manifest { attributes('Sealed': 'true') }
+    from compileJdk21
+    from sourceSets.main.output.resourcesDir
+    dependsOn tasks.named('processResources')
+}
+
+def compileJdk21Tests = tasks.register('compileJdk21TestJava', JavaCompile) {
+    group = 'verification'
+    description = 'Compiles the test sources for Java 21 against the jdk21 classes.'
+    javaCompiler = jdk21Compiler
+    source = sourceSets.test.java
+    classpath = files(compileJdk21) + sourceSets.test.compileClasspath.filter { !it.path.contains("${File.separator}classes${File.separator}java${File.separator}main") }
+    destinationDirectory = layout.buildDirectory.dir('classes/java/jdk21Test')
+    options.release = jdk21
+    options.encoding = 'UTF-8'
+}
+
+def testJdk21 = tasks.register('testJdk21', Test) {
+    group = 'verification'
+    description = 'Runs the test suite against the jdk21 classes on a Java 21 runtime.'
+    javaLauncher = jdk21Launcher
+    useJUnitPlatform()
+    testClassesDirs = files(compileJdk21Tests)
+    classpath = files(compileJdk21Tests, compileJdk21, sourceSets.main.output.resourcesDir, sourceSets.test.output.resourcesDir) +
+            sourceSets.test.runtimeClasspath.filter { !it.path.contains("${File.separator}build${File.separator}") }
+    dependsOn tasks.named('processResources'), tasks.named('processTestResources')
+    inputs.file('CHANGELOG.md').withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir('src/main/java').withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName('mainSources')
+    inputs.file('api/lol.trq.alts.api').withPathSensitivity(PathSensitivity.RELATIVE)
+    def libraryJar = jdk21Jar.flatMap { it.archiveFile }
+    def runtimeJars = configurations.runtimeClasspath
+    def releaseVersion = project.version.toString()
+    inputs.file(libraryJar).withPropertyName('moduleJar').withNormalizer(ClasspathNormalizer)
+    jvmArgumentProviders.add({
+        def gson = runtimeJars.files.find { it.name.startsWith('gson-') && it.name.endsWith('.jar') }
+        ["-Dlol.trq.alts.moduleJar=${libraryJar.get().asFile}", "-Dlol.trq.alts.gsonJar=${gson}",
+         "-Dlol.trq.alts.version=${releaseVersion}"]
+    } as CommandLineArgumentProvider)
+}
+
+tasks.named('check') {
+    dependsOn testJdk21
+}
+
+tasks.named('assemble') {
+    dependsOn jdk21Jar
+}
