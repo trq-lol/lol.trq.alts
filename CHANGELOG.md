@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On the raw-byte curve path, Ed25519 verification is cofactorless and rejects `S >= L`, as on the JCA path:
+  Bouncy Castle's cofactored verifier would accept signatures over mixed-order keys that SPEC 2 rejects.
 - Scheduled waits and the browser sign-in timeout run on one library timer thread instead of
   `CompletableFuture.delayedExecutor`/`orTimeout`, whose back-ported forms block the calling thread.
 
