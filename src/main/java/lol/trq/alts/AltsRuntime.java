@@ -9,6 +9,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import lol.trq.alts.account.AccountEndpoints;
 import lol.trq.alts.account.AccountServices;
@@ -119,10 +120,7 @@ public final class AltsRuntime<H> implements AutoCloseable {
 
         // The executor and the transport are this runtime's own. A host's executor is used and left alone;
         // one the library creates here is the runtime's to shut down.
-        this.ownedExecutor = builder.executor == null
-                ? Executors.newThreadPerTaskExecutor(
-                        Thread.ofVirtual().name("alts-io-", 0).factory())
-                : null;
+        this.ownedExecutor = builder.executor == null ? ownedIoExecutor() : null;
         Executor executor = builder.executor != null ? builder.executor : ownedExecutor;
         this.transport = new HttpTransport(builder.proxyProvider, executor);
 
@@ -801,6 +799,24 @@ public final class AltsRuntime<H> implements AutoCloseable {
          */
         public AltsRuntime<H> build() {
             return new AltsRuntime<>(this);
+        }
+    }
+
+    /**
+     * The executor a runtime creates when the host gives none: a virtual thread per task, or, on a runtime
+     * without virtual threads (the Java 8 build), a cached pool of named daemon threads.
+     */
+    private static ExecutorService ownedIoExecutor() {
+        try {
+            return Executors.newThreadPerTaskExecutor(
+                    Thread.ofVirtual().name("alts-io-", 0).factory());
+        } catch (LinkageError | UnsupportedOperationException noVirtualThreads) {
+            AtomicInteger next = new AtomicInteger();
+            return Executors.newCachedThreadPool(task -> {
+                Thread thread = new Thread(task, "alts-io-" + next.getAndIncrement());
+                thread.setDaemon(true);
+                return thread;
+            });
         }
     }
 }

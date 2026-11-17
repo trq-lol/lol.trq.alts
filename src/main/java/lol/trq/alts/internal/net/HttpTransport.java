@@ -28,7 +28,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -287,8 +286,7 @@ public final class HttpTransport implements AutoCloseable {
             fire.run();
         } else {
             // The delayer thread only hands the task over; the task itself runs on the executor.
-            CompletableFuture.delayedExecutor(delayMillis, TimeUnit.MILLISECONDS, Runnable::run)
-                    .execute(fire);
+            Delayer.after(delayMillis, fire);
         }
     }
 
