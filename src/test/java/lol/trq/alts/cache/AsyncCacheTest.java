@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -13,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class AsyncCacheTest {
 
     private static final Executor IO =
-            Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory());
+            lol.trq.alts.TestExecutors.perTask(Thread.ofVirtual().factory());
 
     @Test
     void missReturnsNullThenFills() throws Exception {

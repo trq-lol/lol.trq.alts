@@ -114,7 +114,7 @@ class StrictEd25519Test {
                 le(p),
                 le(p.add(BigInteger.ONE)));
         List<byte[]> nonCanonical = List.of(
-                le(p.add(BigInteger.TWO)),
+                le(p.add(BigInteger.valueOf(2))),
                 le(p.add(BigInteger.valueOf(18))),
                 le(BigInteger.ONE.shiftLeft(255).subtract(BigInteger.ONE)));
         byte[] honestKey = Vectors.hex("3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c");

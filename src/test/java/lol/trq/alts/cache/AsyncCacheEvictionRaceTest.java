@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -20,7 +19,7 @@ import org.junit.jupiter.api.Test;
 class AsyncCacheEvictionRaceTest {
 
     private static final Executor IO =
-            Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory());
+            lol.trq.alts.TestExecutors.perTask(Thread.ofVirtual().factory());
 
     private static final int BOUND = 512;
     private static final int NEW_KEYS = 400;

@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
@@ -29,7 +28,8 @@ final class VaultFixture implements AutoCloseable {
 
     static final String ACCOUNT = "0b5e7f2a-5d1c-4a6e-9c1e-1f0d4a7b3c21";
 
-    final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+    final ExecutorService executor =
+            lol.trq.alts.TestExecutors.perTask(Thread.ofVirtual().factory());
     final List<NetworkScope> scopes = Collections.synchronizedList(new ArrayList<>());
     final HttpTransport transport = new HttpTransport(
             scope -> {

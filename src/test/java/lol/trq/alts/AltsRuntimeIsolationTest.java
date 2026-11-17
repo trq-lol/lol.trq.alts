@@ -86,11 +86,11 @@ class AltsRuntimeIsolationTest {
             exchange.close();
         });
         services.setExecutor(
-                Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory()));
+                lol.trq.alts.TestExecutors.perTask(Thread.ofVirtual().factory()));
         services.start();
-        hostA = Executors.newThreadPerTaskExecutor(
+        hostA = lol.trq.alts.TestExecutors.perTask(
                 Thread.ofPlatform().daemon().name("host-a-", 0).factory());
-        hostB = Executors.newThreadPerTaskExecutor(
+        hostB = lol.trq.alts.TestExecutors.perTask(
                 Thread.ofPlatform().daemon().name("host-b-", 0).factory());
     }
 

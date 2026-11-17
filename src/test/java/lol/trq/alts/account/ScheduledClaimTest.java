@@ -13,7 +13,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -79,7 +78,7 @@ class ScheduledClaimTest {
     @Test
     void aClaimWaitingWhenTheRuntimeClosesResolves() throws Exception {
         ExecutorService owned =
-                Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory());
+                lol.trq.alts.TestExecutors.perTask(Thread.ofVirtual().factory());
         HttpTransport transport = TestTransports.on(null, owned);
         NameService name = AccountServices.create(transport, "token", "uuid", new AccountEndpoints(base))
                 .name();
