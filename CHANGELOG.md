@@ -21,6 +21,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   channel. Bearer tokens stay apart per address and profile.
 - `VaultRpcChannel.Reply`, the outcome of one call: `ok(message)` or `status(code, message, trailers)`, the
   status message carrying the SPEC 10.4 code and the trailers `avp-error-detail` and `retry-after`.
+- **Java 21 and Java 8 builds**, published as the `jdk21` and `jdk8` classifiers of the same version, with the same
+  API.
+  - `jdk21` is the main sources compiled with `--release 21`.
+  - `jdk8` is the main classes downgraded to Java 8 bytecode with JvmDowngrader, with the Java 9+ API stubs it uses
+    shaded under `lol.trq.alts.internal.jvmdg` and the Bouncy Castle packages its curve fallback needs bundled.
+  - `check` runs the whole suite against each build on its own runtime.
+  - Java 8 consumers need 8u261 or newer (TLS 1.3 for the Microsoft endpoints), and must use Gson 2.11 or newer
+    (`Strictness`).
+- Ed25519 and X25519 fall back to raw-byte keys when the JCA lacks the curves (Java 8, or
+  `-Dlol.trq.alts.curves=bc`). Keys are still `PublicKey`/`PrivateKey`, with standard X.509 and PKCS #8 encodings. The
+  fallback implementation lives in its own source set (`src/bc/java`), so hosts that vendor `src/main/java` need no
+  extra library.
+
+### Fixed
+
+- On the raw-byte curve path, Ed25519 verification is cofactorless and rejects `S >= L`, as on the JCA path:
+  Bouncy Castle's cofactored verifier would accept signatures over mixed-order keys that SPEC 2 rejects.
+- Scheduled waits and the browser sign-in timeout run on one library timer thread instead of
+  `CompletableFuture.delayedExecutor`/`orTimeout`, whose back-ported forms block the calling thread.
 
 ## [1.0.0] - 2026-11-14
 

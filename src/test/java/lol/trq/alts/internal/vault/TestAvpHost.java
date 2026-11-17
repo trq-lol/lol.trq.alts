@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.Executors;
 import java.util.function.Function;
 import lol.trq.alts.AltsException;
 import lol.trq.alts.internal.avp.AvpBytes;
@@ -118,7 +117,7 @@ public final class TestAvpHost implements AutoCloseable {
     public TestAvpHost() throws IOException {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/", this::serve);
-        server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
+        server.setExecutor(lol.trq.alts.TestExecutors.perTask(Thread.ofVirtual().factory()));
         server.start();
     }
 

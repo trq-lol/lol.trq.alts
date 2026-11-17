@@ -2,7 +2,6 @@ package lol.trq.alts.internal.net;
 
 import java.io.IOException;
 import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 import javax.net.ssl.SSLSocketFactory;
 import lol.trq.alts.net.NetworkScope;
 import lol.trq.alts.net.ProxyRoute;
@@ -15,7 +14,7 @@ import lol.trq.alts.spi.ProxyProvider;
 public final class TestTransports {
 
     /** A virtual-thread executor tests share; its threads are named so a stray task is attributable. */
-    public static final Executor EXECUTOR = Executors.newThreadPerTaskExecutor(
+    public static final Executor EXECUTOR = lol.trq.alts.TestExecutors.perTask(
             Thread.ofVirtual().name("test-io-", 0).factory());
 
     private TestTransports() {}

@@ -22,7 +22,6 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import lol.trq.alts.AltsFailure;
@@ -155,7 +154,7 @@ class InteractiveLoginTest {
     @Test
     void closingTheRuntimeEndsTheSignInAndReleasesTheCallbackPort() throws Exception {
         ExecutorService owned =
-                Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory());
+                lol.trq.alts.TestExecutors.perTask(Thread.ofVirtual().factory());
         HttpTransport transport = TestTransports.on(null, owned);
         AltLoginServiceImpl service =
                 new AltLoginServiceImpl(localStore.store(), injected::set, chain.config(), transport);
@@ -182,7 +181,7 @@ class InteractiveLoginTest {
     @Test
     void anExecutorShutDownFirstStillLeavesThePortReleased() throws Exception {
         ExecutorService owned =
-                Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory());
+                lol.trq.alts.TestExecutors.perTask(Thread.ofVirtual().factory());
         HttpTransport transport = TestTransports.on(null, owned);
         AltLoginServiceImpl service =
                 new AltLoginServiceImpl(localStore.store(), injected::set, chain.config(), transport);

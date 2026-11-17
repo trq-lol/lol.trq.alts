@@ -10,7 +10,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import lol.trq.alts.internal.avp.AvpJson;
 import lol.trq.alts.internal.net.HttpTransport;
 import lol.trq.alts.internal.vault.rpc.ProtoJson;
@@ -44,7 +43,8 @@ public final class GrpcGatewayChannel implements VaultRpcChannel, AutoCloseable 
             "avp.Vault/PrepareJoin", new Route("/v1/prepare-join", "avp.PrepareJoinRequest", "avp.Acceptance"));
 
     private final URI base;
-    private final ExecutorService threads = Executors.newVirtualThreadPerTaskExecutor();
+    private final ExecutorService threads =
+            lol.trq.alts.TestExecutors.perTask(Thread.ofVirtual().factory());
     private final HttpTransport http = new HttpTransport(null, threads);
     private final List<Call> calls = new ArrayList<>();
 

@@ -1,0 +1,124 @@
+// jdk8: the library for Java 8 runtimes, built from the same sources as the main jar.
+//
+// The main classes and the Bouncy Castle curve fallback (src/bc/java) are downgraded from Java 25 to Java 8
+// bytecode with JvmDowngrader, the Java 9+ API stubs they use are shaded into the jar, and Bouncy Castle's
+// classes are bundled. The whole test suite is downgraded the same way and run on a Java 8 runtime by the
+// JUnit Platform console launcher of the last JUnit line that supports Java 8, as part of check.
+
+// Applied scripts cannot import plugin classes; take the task types from the plugin's own tasks.
+def DowngradeJar = tasks.named('downgradeJar').get().getClass().superclass
+def ShadeJar = tasks.named('shadeDowngradedApi').get().getClass().superclass
+
+configurations {
+    jdk8Bundled { canBeConsumed = false; canBeResolved = true }
+    jdk8TestLauncher { canBeConsumed = false; canBeResolved = true }
+}
+
+dependencies {
+    jdk8Bundled 'org.bouncycastle:bcprov-jdk18on:1.85.2'
+    jdk8TestLauncher 'org.junit.platform:junit-platform-console-standalone:1.13.4'
+}
+
+def jdk8Input = tasks.register('jdk8InputJar', Jar) {
+    archiveClassifier = 'jdk8-input'
+    from sourceSets.main.output
+    from sourceSets.bc.output
+    exclude 'module-info.class'
+}
+
+def jdk8Downgrade = tasks.register('jdk8Downgrade', DowngradeJar) {
+    inputFile = jdk8Input.flatMap { it.archiveFile }
+    classpath = configurations.runtimeClasspath + configurations.jdk8Bundled
+    downgradeTo = JavaVersion.VERSION_1_8
+    archiveClassifier = 'jdk8-downgraded'
+}
+
+def jdk8Shade = tasks.register('jdk8Shade', ShadeJar) {
+    inputFile = jdk8Downgrade.flatMap { it.archiveFile }
+    downgradeTo = JavaVersion.VERSION_1_8
+    shadePath = 'lol/trq/alts/internal/jvmdg/'
+    archiveClassifier = 'jdk8-shaded'
+}
+
+def bcPackages = ['asn1', 'asn1/x9', 'crypto', 'crypto/digests', 'crypto/params', 'math', 'math/ec', 'math/ec/endo',
+                  'math/ec/rfc7748', 'math/ec/rfc8032', 'math/field', 'math/raw', 'util', 'util/encoders', 'util/io']
+
+def jdk8Jar = tasks.register('jdk8Jar', Jar) {
+    group = 'build'
+    description = 'Assembles the Java 8 jar: downgraded classes, shaded API stubs and bundled Bouncy Castle.'
+    archiveClassifier = 'jdk8'
+    from(zipTree(jdk8Shade.flatMap { it.archiveFile })) { exclude 'META-INF/MANIFEST.MF' }
+    // Only the Bouncy Castle packages the Ed25519/X25519 fallback reaches (jdeps --recursive from src/bc),
+    // plus its licence. Re-derive with jdeps when the bcprov version changes.
+    from({ configurations.jdk8Bundled.collect { zipTree(it) } }) {
+        include bcPackages.collect { "org/bouncycastle/${it}/*.class".toString() }
+        include 'META-INF/LICENSE*'
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest {
+        attributes('Automatic-Module-Name': 'lol.trq.alts', 'Multi-Release': 'false')
+    }
+}
+
+def jdk8TestJar = tasks.register('jdk8TestInputJar', Jar) {
+    archiveClassifier = 'jdk8-tests-input'
+    from sourceSets.test.output
+}
+
+def jdk8TestDowngrade = tasks.register('jdk8TestDowngrade', DowngradeJar) {
+    inputFile = jdk8TestJar.flatMap { it.archiveFile }
+    classpath = files(jdk8Input) + sourceSets.test.runtimeClasspath
+    downgradeTo = JavaVersion.VERSION_1_8
+    archiveClassifier = 'jdk8-tests-downgraded'
+}
+
+def jdk8TestShade = tasks.register('jdk8TestShade', ShadeJar) {
+    inputFile = jdk8TestDowngrade.flatMap { it.archiveFile }
+    downgradeTo = JavaVersion.VERSION_1_8
+    shadePath = 'lol/trq/alts/testjvmdg/'
+    archiveClassifier = 'jdk8-tests'
+}
+
+// Tests that need a Java 9+ runtime by design: the module-path consumer, the Javadoc/compiler-API checks.
+def jdk8Excluded = ['.*ModulePathConsumerTest', '.*SinceTagsTest', '.*ModuleDescriptorTest']
+
+def testJdk8 = tasks.register('testJdk8', JavaExec) {
+    group = 'verification'
+    description = 'Runs the downgraded test suite against the jdk8 jar on a Java 8 runtime.'
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(8) }
+    dependsOn jdk8Jar, jdk8TestShade
+    classpath = configurations.jdk8TestLauncher
+    mainClass = 'org.junit.platform.console.ConsoleLauncher'
+    def libraryJar = jdk8Jar.flatMap { it.archiveFile }
+    def tests = jdk8TestShade.flatMap { it.archiveFile }
+    def report = layout.buildDirectory.dir('test-results/testJdk8')
+    inputs.files(libraryJar, tests).withPropertyName('jars')
+    outputs.dir(report)
+    if (findProperty('curves')) {
+        systemProperty 'lol.trq.alts.curves', findProperty('curves')
+    }
+    def runtimeJars = configurations.runtimeClasspath
+    argumentProviders.add({
+        def gson = runtimeJars.files.find { it.name.startsWith('gson-') }
+        ['execute', '--disable-banner', '--details=summary', '--details-theme=ascii', '--fail-if-no-tests',
+         '--class-path', [libraryJar.get().asFile, tests.get().asFile, gson].join(File.pathSeparator),
+         '--scan-class-path', tests.get().asFile.path,
+         '--reports-dir', report.get().asFile.path,
+         '--config=junit.jupiter.execution.timeout.default=60s',
+         '--config=junit.jupiter.execution.timeout.mode=enabled'] +
+                jdk8Excluded.collectMany { ['--exclude-classname', it] }
+    } as CommandLineArgumentProvider)
+    jvmArgumentProviders.add({
+        def gson = runtimeJars.files.find { it.name.startsWith('gson-') }
+        ["-Dlol.trq.alts.moduleJar=${libraryJar.get().asFile}".toString(), "-Dlol.trq.alts.gsonJar=${gson}".toString(),
+         "-Dlol.trq.alts.version=${project.version}".toString()]
+    } as CommandLineArgumentProvider)
+}
+
+tasks.named('check') {
+    dependsOn testJdk8
+}
+
+tasks.named('assemble') {
+    dependsOn jdk8Jar
+}

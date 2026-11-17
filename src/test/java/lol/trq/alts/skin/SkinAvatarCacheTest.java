@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import lol.trq.alts.spi.AvatarSource;
@@ -23,7 +22,7 @@ import org.junit.jupiter.api.Test;
 class SkinAvatarCacheTest {
 
     private static final Executor IO =
-            Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory());
+            lol.trq.alts.TestExecutors.perTask(Thread.ofVirtual().factory());
 
     private static final byte[] PNG = {1, 2, 3, 4};
 

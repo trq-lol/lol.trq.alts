@@ -11,7 +11,6 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import lol.trq.alts.net.NetworkScope;
 import org.junit.jupiter.api.Test;
 
@@ -29,7 +28,8 @@ class HttpTransportExchangeTest {
             }
         });
         server.start();
-        ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+        ExecutorService executor =
+                lol.trq.alts.TestExecutors.perTask(Thread.ofVirtual().factory());
         try (HttpTransport t = new HttpTransport(null, executor)) {
             String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/";
             NetworkScope scope = NetworkScope.of(NetworkScope.Purpose.VAULT);

@@ -17,6 +17,7 @@ import java.security.spec.X509EncodedKeySpec;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.Objects;
+import lol.trq.alts.internal.crypto.BcCurves;
 
 /**
  * Ed25519 over raw keys, with the strict verification of AVP SPEC 2.
@@ -82,6 +83,10 @@ public final class Ed25519Strict {
         Objects.requireNonNull(signature, "signature");
         if (!strictInputsOk(publicKey, signature)) {
             return false;
+        }
+        if (BcCurves.active()) {
+            // Bouncy Castle verifies with the cofactored equation; SPEC 2 is cofactorless, so compute it here.
+            return Ed25519Cofactorless.verify(publicKey, message, signature);
         }
         try {
             PublicKey key = KeyFactory.getInstance("Ed25519")
@@ -155,6 +160,9 @@ public final class Ed25519Strict {
         if (seed.length != 32) {
             throw AvpFailures.crypto("an Ed25519 seed is 32 bytes", null);
         }
+        if (BcCurves.active()) {
+            return BcCurves.edSign(seed, message);
+        }
         byte[] pkcs8 = AvpBytes.concat(PKCS8_PREFIX, seed);
         try {
             PrivateKey key = KeyFactory.getInstance("Ed25519").generatePrivate(new PKCS8EncodedKeySpec(pkcs8));
@@ -182,6 +190,9 @@ public final class Ed25519Strict {
     public static byte[] publicKey(byte[] seed) {
         if (seed.length != 32) {
             throw AvpFailures.crypto("an Ed25519 seed is 32 bytes", null);
+        }
+        if (BcCurves.active()) {
+            return BcCurves.edPublic(seed);
         }
         try {
             KeyPairGenerator generator = KeyPairGenerator.getInstance("Ed25519");

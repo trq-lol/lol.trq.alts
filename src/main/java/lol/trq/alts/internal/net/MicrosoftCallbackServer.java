@@ -115,7 +115,7 @@ public class MicrosoftCallbackServer {
             }
 
             // The timer is cancelled as soon as the future completes, so nothing outlives the login.
-            codeFuture.orTimeout(TIMEOUT_MINUTES, TimeUnit.MINUTES);
+            Delayer.orTimeout(codeFuture, TIMEOUT_MINUTES, TimeUnit.MINUTES);
             browser.accept(authorizationUrl());
         } catch (Exception e) {
             codeFuture.completeExceptionally(e);

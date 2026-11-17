@@ -421,7 +421,7 @@ class DeviceCodeLoginTest {
     void aLoginInFlightWhenTheRuntimeClosesResolves() throws Exception {
         chain.deviceTokenError("authorization_pending");
         ExecutorService owned =
-                Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory());
+                lol.trq.alts.TestExecutors.perTask(Thread.ofVirtual().factory());
         HttpTransport transport = TestTransports.on(null, owned);
         AltLoginServiceImpl service =
                 new AltLoginServiceImpl(localStore.store(), injected::set, chain.config(), transport);

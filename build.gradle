@@ -2,6 +2,7 @@ plugins {
     id 'java-library'
     id 'maven-publish'
     id 'com.diffplug.spotless' version '8.9.0'
+    id 'xyz.wagyourtail.jvmdowngrader' version '2.0.1'
 }
 
 group = 'lol.trq'
@@ -20,6 +21,28 @@ dependencies {
     testImplementation platform('org.junit:junit-bom:6.1.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// The raw-byte Ed25519/X25519 fallback over Bouncy Castle, for runtimes without the JCA curves. A separate
+// source set so the main sources (which hosts may vendor as source) need no extra library; the Java 8 build
+// bundles it, and the tests put it on the class path so -Pcurves=bc can exercise it on any runtime.
+sourceSets {
+    bc {
+        java.srcDirs = ['src/bc/java']
+        compileClasspath += sourceSets.main.output
+    }
+}
+
+dependencies {
+    bcImplementation 'org.bouncycastle:bcprov-jdk18on:1.85.2'
+    testRuntimeOnly sourceSets.bc.output
+    testRuntimeOnly 'org.bouncycastle:bcprov-jdk18on:1.85.2'
+}
+
+tasks.named('compileBcJava', JavaCompile) {
+    options.release = 8
+    options.compilerArgs += ['-Xlint:-options']
+    options.encoding = 'UTF-8'
 }
 
 // Examples are compiled (but never published) so they cannot drift from the library API.
@@ -108,6 +131,10 @@ tasks.named('check') {
 
 tasks.named('test') {
     useJUnitPlatform()
+    // -Pcurves=bc runs the suite on the Bouncy Castle Ed25519/X25519 path (the one the Java 8 build uses).
+    if (findProperty('curves')) {
+        systemProperty 'lol.trq.alts.curves', findProperty('curves')
+    }
     // ErrorKindMigrationTableTest reads the changelog's error-kind table, so a changed table reruns it.
     inputs.file('CHANGELOG.md').withPathSensitivity(PathSensitivity.RELATIVE)
     // SinceTagsTest reads the main sources' Javadoc and the API dump's version.
@@ -331,10 +358,18 @@ spotless {
     }
 }
 
+apply from: 'gradle/variants.gradle'
+// The Java 8 build (gradle/jdk8.gradle) downgrades with JvmDowngrader.
+jvmdg.downgradeTo = JavaVersion.VERSION_1_8
+apply from: 'gradle/jdk8.gradle'
+
 publishing {
     publications {
         register('mavenJava', MavenPublication) {
             from components.java
+            // The older-JDK variants (gradle/variants.gradle), published as classifiers of the same version.
+            artifact tasks.named('jdk21Jar')
+            artifact tasks.named('jdk8Jar')
             pom {
                 name = 'lol.trq.alts'
                 description = 'Consumer-agnostic Minecraft account-manager core: Microsoft (browser, device-code, ' +
@@ -370,3 +405,5 @@ publishing {
         }
     }
 }
+
+
