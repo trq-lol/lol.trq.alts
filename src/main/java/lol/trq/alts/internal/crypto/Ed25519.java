@@ -85,7 +85,9 @@ public final class Ed25519 {
      */
     public static boolean verify(PublicKey publicKey, byte[] message, byte[] signature) {
         if (publicKey instanceof RawKeys.Public) {
-            return BcCurves.edVerify(((RawKeys.Public) publicKey).raw(), message, signature);
+            // Cofactorless, as the JCA verifier is; Bouncy Castle's own verify is cofactored.
+            return lol.trq.alts.internal.avp.Ed25519Cofactorless.verify(
+                    ((RawKeys.Public) publicKey).raw(), message, signature);
         }
         try {
             Signature sig = Signature.getInstance("Ed25519");

@@ -85,7 +85,8 @@ public final class Ed25519Strict {
             return false;
         }
         if (BcCurves.active()) {
-            return BcCurves.edVerify(publicKey, message, signature);
+            // Bouncy Castle verifies with the cofactored equation; SPEC 2 is cofactorless, so compute it here.
+            return Ed25519Cofactorless.verify(publicKey, message, signature);
         }
         try {
             PublicKey key = KeyFactory.getInstance("Ed25519")
