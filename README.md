@@ -187,4 +187,4 @@ complies with any service's terms or with applicable law, is the consumer's resp
 
 ## Activity
 
-![Repobeats analytics image](https://repobeats.axiom.co/api/embed/160f59cd4e1a963270464593e999684fe379c368.svg "Repobeats analytics image")
+![Repobeats analytics image](https://repobeats.axiom.co/api/embed/f3ac8147459846fd82dd73b490996799adee8500.svg "Repobeats analytics image")
