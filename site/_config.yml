@@ -1,0 +1,39 @@
+title: lol.trq.alts
+description: A Minecraft Java Edition account library for Java 25, covering sign-in, account management, bulk operations, an encrypted local store and a shared vault.
+url: https://alts.trq.lol
+baseurl: ""
+wordmark: alts
+tagline: A Minecraft Java Edition account library for sign-in, account management, an encrypted store and a shared vault.
+license: MIT
+repo: https://github.com/trq-lol/lol.trq.alts
+
+nav:
+  - { title: Install, url: /install.html }
+  - { title: Getting started, url: /docs/GETTING_STARTED.html }
+  - { title: Architecture, url: /docs/ARCHITECTURE.html }
+  - { title: Examples, url: /examples/ }
+  - { title: Security, url: /SECURITY.html }
+  - { title: Changelog, url: /CHANGELOG.html }
+  - { title: API, url: /api/ }
+  - { title: GitHub, url: "https://github.com/trq-lol/lol.trq.alts" }
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+
+kramdown:
+  parse_block_html: true
+
+exclude:
+  - AGENTS.md
+  - CLAUDE.md
+  - README.md
+  - api
+  - build
+  - gradle
+  - src
+  - "*.gradle"
+  - gradlew
+  - jitpack.yml
