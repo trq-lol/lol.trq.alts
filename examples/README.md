@@ -43,7 +43,7 @@ moves. Spotless formats this directory too, so a snippet pasted into the guide i
 
 ## `ExampleNetGameStatsSource`
 
-A minimal [`GameStatsSource`](../src/main/java/lol/trq/alts/spi/GameStatsSource.java) for a fictional
+A minimal [`GameStatsSource`](https://github.com/trq-lol/lol.trq.alts/blob/main/src/main/java/lol/trq/alts/spi/GameStatsSource.java) for a fictional
 `example.net` server. It shows the whole shape of the feature: a source reports a `serverId` and returns
 ready-to-render `GameStats.Stat` chips; the library only caches them.
 
@@ -69,7 +69,7 @@ if (stats != null) {
 ```
 
 For a static, in-memory source (handy for tests and demos), use the shipped
-[`StaticGameStatsSource`](../src/main/java/lol/trq/alts/spi/StaticGameStatsSource.java):
+[`StaticGameStatsSource`](https://github.com/trq-lol/lol.trq.alts/blob/main/src/main/java/lol/trq/alts/spi/StaticGameStatsSource.java):
 
 ```java
 var source = new StaticGameStatsSource(
