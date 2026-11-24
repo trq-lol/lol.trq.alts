@@ -109,6 +109,9 @@ See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for a full walkthrough an
 
 ## For AI agents
 
+Using it from Claude Code? Install the [trq-lol plugin](https://github.com/trq-lol/claude-plugin). The rest of this
+section is for working on this repository.
+
 This repository is structured for you. Start with [`CLAUDE.md`](CLAUDE.md) (the mental model, the
 patterns that matter, and the pitfalls), then [`llms.txt`](llms.txt), a structured index of the docs and
 core source in the [llmstxt.org](https://llmstxt.org) format, then [`examples/`](examples/) for working
