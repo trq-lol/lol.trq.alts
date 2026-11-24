@@ -39,7 +39,7 @@
       })();
     </script>
   </head>
-  <body>
+  <body{% unless page.url == '/' or page.url == '/index.html' %} class="inner"{% endunless %}>
     <a class="skip" href="#main">Skip to content</a>
 
     <header class="site-head">

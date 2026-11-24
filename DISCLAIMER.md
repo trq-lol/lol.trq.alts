@@ -27,8 +27,8 @@ The library does not obtain accounts, and it has no opinion about which ones you
 - **Whether a given use complies** with the Minecraft End User Licence Agreement, the Microsoft Services
   Agreement, any server's rules, or the law where you are, is a question for you — not for this project.
 - **Credentials belong to their owner.** Sharing one through the shared-vault feature hands durable
-  access to whoever you share it with. Read the sharing-policy section of
-  [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) before enabling it.
+  access to whoever you share it with. Read
+  [Share refresh tokens](docs/VAULT.md#share-refresh-tokens) before enabling it.
 
 ## No warranty
 

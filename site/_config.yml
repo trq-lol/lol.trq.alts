@@ -3,7 +3,7 @@ description: A Minecraft Java Edition account library for Java 25, covering sign
 url: https://alts.trq.lol
 baseurl: ""
 wordmark: alts
-tagline: "Minecraft: Java Edition accounts for Java: sign in, manage, store and share them."
+tagline: Sign in, manage, store and share Minecraft accounts from Java.
 license: MIT
 repo: https://github.com/trq-lol/lol.trq.alts
 

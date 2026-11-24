@@ -59,37 +59,23 @@ dependencies {
 ## Quick start
 
 ```java
-// 1. Wire the host seams once at startup. H is your texture-handle type; a host that draws no
-//    avatars can use any type and leave textureUploader unset.
-//    build() also reads whatever store is already on disk, so alts.store().accounts()
-//    is populated the moment it returns. Close the runtime when the host is done with it.
+// MyHandle is your texture type. Any type will do if you draw no avatars.
 AltsRuntime<MyHandle> alts = new AltsRuntime.Builder<MyHandle>()
-        .sessionInjector(new MySessionInjector())   // REQUIRED: install a SessionData as the live session
-        .vaultDirectory(() -> myDataDir)             // REQUIRED: where the two encrypted store files live
-        .mainThread(myExecutor::execute)             // REQUIRED: run a task on the host's main thread
-        .toastSink(new MyToastSink())                // REQUIRED: surface a notification
-        .textureUploader(new MyUploader())           // optional: avatar bytes -> host texture
-        .microsoftAuth(MicrosoftAuthConfig.of(MY_AZURE_CLIENT_ID))  // optional: your own Azure app id
+        .sessionInjector(new MySessionInjector()) // installs the signed-in session
+        .vaultDirectory(() -> myDataDir)          // where the encrypted files go
+        .mainThread(myExecutor::execute)
+        .toastSink(new MyToastSink())             // shows a notification
+        .microsoftAuth(MicrosoftAuthConfig.of(MY_AZURE_CLIENT_ID))
         .build();
 
-// 2. Sign in through the browser.
 alts.loginService().loginMicrosoft(LoginMode.ADD)
-        .thenAccept(result -> { /* result.success(), result.account(), result.failure() */ });
+        .thenAccept(result -> { /* result.account() or result.failure() */ });
 
-// Or with a device code, when there is no browser to open.
-alts.loginService().loginDeviceCode(
-                (userCode, verificationUri, expiresAt) -> show(verificationUri, userCode),
-                LoginMode.ADD)
-        .thenAccept(result -> { /* result.success(), result.failure().map(AltsFailure::kind) */ });
-
-// 3. Operate on a stored account without logging into it. A failure throws AltsException;
-//    switch on e.kind().
+// Work with a stored account without signing in to it.
 AccountServices services = alts.accountServices(account);
 PlayerProfile profile = services.profile().fetch();
-Entitlements owned = services.entitlements().fetch();
 
-// 4. On shutdown: write what is pending and release the store files.
-alts.close();
+alts.close(); // on shutdown
 ```
 
 ## Documentation

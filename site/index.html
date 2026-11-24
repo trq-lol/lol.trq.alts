@@ -4,7 +4,7 @@ title: lol.trq.alts
 {% capture readme %}{% include_relative README.md %}{% endcapture %}
 {% assign features = readme | split: "## Features" | last | split: "## Requirements" | first %}
 {% assign quick = readme | split: "## Quick start" | last | split: "```java" | slice: 1, 1 | first | split: "```" | first %}
-<p class="lede">It is for launchers, tools, bots and account managers. Pure Java, with no Minecraft or rendering types.</p>
+<p class="lede">For launchers, tools, bots and account managers. No Minecraft or rendering types.</p>
 
 <div class="actions">
   <a class="button" href="{{ '/docs/GETTING_STARTED.html' | relative_url }}">Get started</a>
