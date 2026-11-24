@@ -342,7 +342,7 @@ and its RPS ticket prefix.
   records by reflection only in `store`, `internal.auth` and `internal.store` (the record an
   `AltAccount` goes through), which the descriptor opens to Gson alone. Never make Gson fill a final
   field: give the type a record form instead.
-- **Do not edit a docs snippet directly.** Every multi-line Java block in `docs/GETTING_STARTED.md` is
+- **Do not edit a docs snippet directly.** Every multi-line Java block in the `docs/` guides is
   inlined from a method in `examples/`, which `check` compiles with `-Xlint:deprecation -Werror`. Change
   the example first, then the guide, character for character.
 - **Do not skip the `@since`.** New public and protected members carry the version they will first ship

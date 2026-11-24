@@ -156,6 +156,19 @@ body {
   color: var(--ink);
 }
 
+.inner .site-head {
+  padding-top: 2.5rem;
+}
+.inner .wordmark {
+  font-size: 1.75rem;
+}
+.inner .tagline {
+  display: none;
+}
+.inner .nav {
+  margin-top: 1.25rem;
+}
+
 /* ---- Content ---- */
 
 .prose {
@@ -257,6 +270,8 @@ body {
   border-radius: 6px;
   padding: 1rem 1.1rem;
   overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
   font-size: 0.85rem;
   line-height: 1.6;
   margin: 1.5rem 0;
@@ -264,6 +279,13 @@ body {
 .prose pre code {
   background: none;
   padding: 0;
+}
+
+.prose figure.highlight {
+  margin: 0;
+}
+.prose thead:not(:has(th:not(:empty))) {
+  display: none;
 }
 
 /* Tables */

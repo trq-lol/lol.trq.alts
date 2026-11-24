@@ -2,23 +2,33 @@
 title: lol.trq.alts
 ---
 {% capture readme %}{% include_relative README.md %}{% endcapture %}
-{% assign features = readme | split: "## Features" | last | split: "## Installation" | first | split: "- **" %}
+{% assign features = readme | split: "## Features" | last | split: "## Requirements" | first %}
 {% assign quick = readme | split: "## Quick start" | last | split: "```java" | slice: 1, 1 | first | split: "```" | first %}
-<p class="lede">{{ site.description }}</p>
+<p class="lede">For launchers, tools, bots and account managers. No Minecraft or rendering types.</p>
 
 <div class="actions">
-  <a class="button" href="{{ '/install.html' | relative_url }}">Install</a>
-  <a class="button-quiet" href="{{ '/docs/GETTING_STARTED.html' | relative_url }}">Getting started</a>
+  <a class="button" href="{{ '/docs/GETTING_STARTED.html' | relative_url }}">Get started</a>
   <a class="button-quiet" href="{{ '/api/' | relative_url }}">API reference</a>
+  <a class="button-quiet" href="{{ site.repo }}">Source on GitHub</a>
 </div>
 
 <h2>Features</h2>
-<ul class="points">
-{% for f in features offset: 1 %}{% assign item = f | split: "
-
-" | first %}{% assign title = item | split: "**" | first | append: "#" | replace: ".#", "" | remove: "#" %}{% assign rest = item | split: "**" | slice: 1, 99 | join: "**" | strip %}{% assign sentence = rest | split: ". " | first | strip %}{% assign end = sentence | slice: -1, 1 %}  <li><strong>{{ title }}</strong>{{ sentence | markdownify | strip_html | strip }}{% unless end == "." %}.{% endunless %}</li>
-{% endfor %}</ul>
+{{ features | markdownify }}
 
 <h2>Quick start</h2>
 {% highlight java %}{{ quick | strip }}{% endhighlight %}
-<p>The <a href="{{ '/docs/GETTING_STARTED.html' | relative_url }}">getting started guide</a> walks through every step, and the <a href="{{ '/examples/' | relative_url }}">examples</a> compile against the library.</p>
+
+<h2>Documentation</h2>
+<ul>
+  <li><a href="{{ '/docs/GETTING_STARTED.html' | relative_url }}">Getting started</a>: install, sign in, handle failures</li>
+  <li><a href="{{ '/docs/SIGN_IN.html' | relative_url }}">Sign-in</a>: every route and refresh tokens</li>
+  <li><a href="{{ '/docs/ACCOUNTS.html' | relative_url }}">Accounts</a>: check, bulk runs, names, skins, lookup</li>
+  <li><a href="{{ '/docs/STORAGE.html' | relative_url }}">Storage and network</a>: encryption, proxies, threads</li>
+  <li><a href="{{ '/docs/VAULT.html' | relative_url }}">Shared vault</a>: create, invite, sync</li>
+  <li><a href="{{ '/docs/ARCHITECTURE.html' | relative_url }}">Architecture</a>, <a href="{{ '/examples/' | relative_url }}">examples</a>, <a href="{{ '/SECURITY.html' | relative_url }}">security</a> and the <a href="{{ '/CHANGELOG.html' | relative_url }}">changelog</a></li>
+</ul>
+
+<h2>Use with Claude Code</h2>
+<p>The <a href="https://github.com/trq-lol/claude-plugin">trq-lol plugin</a> teaches Claude Code this library.</p>
+<pre><code>/plugin marketplace add trq-lol/claude-plugin
+/plugin install trq-lol@trq-lol</code></pre>

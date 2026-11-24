@@ -126,6 +126,6 @@ The implementation lives under `lol.trq.alts.internal`. On the module path that 
 
 ### Scope of reports
 
-These are described in more detail in [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Reports that a guarantee above does not hold, or that a stated gap is wider than described, are in scope; reports that the stated gaps exist are not, since they are stated here.
+These are described in more detail in the [guides](docs/GETTING_STARTED.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Reports that a guarantee above does not hold, or that a stated gap is wider than described, are in scope; reports that the stated gaps exist are not, since they are stated here.
 
 **Out of scope.** How a consuming application acquires the accounts it feeds this library, and whether that use complies with any service's terms, is that application's responsibility; see [DISCLAIMER.md](DISCLAIMER.md).

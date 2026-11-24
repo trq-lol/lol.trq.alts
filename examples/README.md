@@ -5,8 +5,8 @@ cannot drift from the library API) but are not part of the published jar.
 
 ## `GettingStartedExample`
 
-The compiled companion to [`../docs/GETTING_STARTED.md`](../docs/GETTING_STARTED.md). Every snippet
-that guide shows is a method here, one per section:
+The compiled companion to the guides in [`../docs/`](../docs/GETTING_STARTED.md). The snippets they show
+are methods here:
 
 - `buildRuntime`, `warnIfTheStoreDidNotLoad`, `startOverWithoutTheOldFile`: wiring the seams, reporting a
   store that could not be read, and giving up on it with `discardUnreadable()` once the user says so.
@@ -35,9 +35,9 @@ host secrets), `requestInvite` and `join` on the joiner's side, `invite` on the 
 fingerprints, `resumeOwner` (the owner key and the snapshot back out of the host secrets), and
 `shareAndSync`, which resumes from the snapshot, shares an account, renews another with `update` (which
 never reverts a field another member changed), syncs and acts on the report. Compiled the same way, and
-inlined into the guide's "Shared vault" section.
+inlined into the [vault guide](../docs/VAULT.md).
 
-Both files are the authoritative copy; the guide inlines from them. Change the library API and the
+Both files are the authoritative copy; the guides inline from them. Change the library API and the
 build breaks here, which is the point: markdown alone rots silently. Keep the two in step when either
 moves. Spotless formats this directory too, so a snippet pasted into the guide is already house-styled.
 
