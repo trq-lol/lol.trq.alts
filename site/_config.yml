@@ -3,17 +3,16 @@ description: A Minecraft Java Edition account library for Java 25, covering sign
 url: https://alts.trq.lol
 baseurl: ""
 wordmark: alts
-tagline: A Minecraft Java Edition account library for sign-in, account management, an encrypted store and a shared vault.
+tagline: "Minecraft: Java Edition accounts for Java: sign in, manage, store and share them."
 license: MIT
 repo: https://github.com/trq-lol/lol.trq.alts
 
 nav:
-  - { title: Install, url: /install.html }
-  - { title: Getting started, url: /docs/GETTING_STARTED.html }
-  - { title: Architecture, url: /docs/ARCHITECTURE.html }
-  - { title: Examples, url: /examples/ }
-  - { title: Security, url: /SECURITY.html }
-  - { title: Changelog, url: /CHANGELOG.html }
+  - { title: Start, url: /docs/GETTING_STARTED.html }
+  - { title: Sign-in, url: /docs/SIGN_IN.html }
+  - { title: Accounts, url: /docs/ACCOUNTS.html }
+  - { title: Storage, url: /docs/STORAGE.html }
+  - { title: Vault, url: /docs/VAULT.html }
   - { title: API, url: /api/ }
   - { title: llms.txt, url: /llms.txt }
   - { title: GitHub, url: "https://github.com/trq-lol/lol.trq.alts" }

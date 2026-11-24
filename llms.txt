@@ -27,7 +27,11 @@ Notes for implementers: the library never imports a host type, and it must never
 ## Documentation
 
 - [README](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/README.md): Overview, features, installation, and quick start.
-- [Getting started](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/docs/GETTING_STARTED.md): Wiring the seams, every sign-in route, the error kinds, account management, lookup, bulk runs, proxies, the store key, closing the runtime, and the shared vault end to end.
+- [Getting started](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/docs/GETTING_STARTED.md): Install, seams, building the runtime, first sign-in, the error kinds, closing.
+- [Sign-in](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/docs/SIGN_IN.md): Every route, Azure and legacy applications, refresh tokens, cookie files.
+- [Accounts](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/docs/ACCOUNTS.md): Check and refresh, bulk runs, account services, name claims, lookup, avatars, game stats.
+- [Storage and network](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/docs/STORAGE.md): Store encryption, unreadable files, proxies, threads and shutdown, builder options.
+- [Shared vault](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/docs/VAULT.md): The AVP 0.5 vault end to end and the 0.4 import.
 - [Architecture](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/docs/ARCHITECTURE.md): Layers, the module and internal packages, threading, store persistence, transport rules, the error model, bulk runs, and the AVP 0.5 client.
 - [Agent guide](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/CLAUDE.md): The mental model, the patterns that matter, and the pitfalls, written for coding agents.
 - [Examples](https://raw.githubusercontent.com/trq-lol/lol.trq.alts/main/examples/README.md): The compiled samples the guide inlines from.

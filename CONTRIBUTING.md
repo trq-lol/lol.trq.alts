@@ -59,7 +59,7 @@ Owning the commit means reviewing what was produced as if you had written it —
 
 ## Documentation
 
-Every multi-line Java snippet in [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) is inlined from a method in [`examples/`](examples/), which the `examples` source set compiles on every build with `-Xlint:deprecation -Werror`. Change the example first, then the guide, so that an API change breaks the build and the docs cannot drift. An example may not use deprecated API.
+Every multi-line Java snippet in the [docs](docs/GETTING_STARTED.md) guides is inlined from a method in [`examples/`](examples/), which the `examples` source set compiles on every build with `-Xlint:deprecation -Werror`. Change the example first, then the guide, so that an API change breaks the build and the docs cannot drift. An example may not use deprecated API.
 
 New public and protected members need Javadoc with an `@since` carrying the version they will first ship in, a line in the API dump (`./gradlew apiDump`), and a `CHANGELOG.md` entry under `[Unreleased]`. Within 1.x a host-visible member is never removed or changed; a change a host has to act on (a changed default, a new behaviour) goes in that release's upgrade notes.
 
